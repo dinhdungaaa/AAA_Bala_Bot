@@ -214,6 +214,8 @@ export default function App() {
   const [playgroundInput, setPlaygroundInput] = useState('');
   const [isPlaygroundTyping, setIsPlaygroundTyping] = useState(false);
   const [lastCitation, setLastCitation] = useState<any[]>([]);
+  const [playgroundUserName, setPlaygroundUserName] = useState('Khách Hàng');
+  const [playgroundUserUsername, setPlaygroundUserUsername] = useState('UserTest');
 
   // Telegram Integration States
   const [inputToken, setInputToken] = useState('');
@@ -739,7 +741,7 @@ export default function App() {
     const userMsg: Message = {
       id: 'p-user-' + Date.now(),
       sender: 'user',
-      username: 'UserTest',
+      username: playgroundUserUsername || 'UserTest',
       text: userText,
       timestamp: new Date().toISOString()
     };
@@ -751,7 +753,13 @@ export default function App() {
     const res = await fetch(`/api/bots/${selectedBotId}/playgroundChat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: userText })
+      body: JSON.stringify({ 
+        text: userText,
+        userInfo: {
+          fullName: playgroundUserName,
+          username: playgroundUserUsername
+        }
+      })
     });
 
     if (res.ok) {
@@ -2178,6 +2186,66 @@ export default function App() {
                       <span className="font-bold text-sm text-slate-800 block capitalize mt-1">
                         {activeBot?.tone === 'friendly' ? 'Thân thiện' : 'Chuyên nghiệp'} (Tối ưu hóa phản hồi)
                       </span>
+                    </div>
+
+                    <div className="border-t border-slate-100 pt-4">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-2">Giả Lập Người Dùng (Sandbox)</span>
+                      <div className="space-y-3 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                        <div>
+                          <label className="text-[10px] text-slate-400 font-bold block mb-1">TÊN HIỂN THỊ (GỢI Ý GIỚI TÍNH/TÊN):</label>
+                          <input
+                            type="text"
+                            value={playgroundUserName}
+                            onChange={(e) => setPlaygroundUserName(e.target.value)}
+                            placeholder="Ví dụ: Nguyễn Văn Dũng, Trần Thị Vy..."
+                            className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-400 font-bold block mb-1">USERNAME (TÊN TÀI KHOẢN):</label>
+                          <input
+                            type="text"
+                            value={playgroundUserUsername}
+                            onChange={(e) => setPlaygroundUserUsername(e.target.value)}
+                            placeholder="Ví dụ: dung_nguyen, vy_tran..."
+                            className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-600"
+                          />
+                        </div>
+                        
+                        {/* Presets */}
+                        <div className="pt-1 flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPlaygroundUserName("Nguyễn Văn Dũng");
+                              setPlaygroundUserUsername("dung_nguyen");
+                            }}
+                            className="text-[10px] bg-blue-50 text-blue-700 border border-blue-100 px-2 py-1 rounded font-bold hover:bg-blue-100 transition-colors"
+                          >
+                            Preset: Anh Dũng
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPlaygroundUserName("Nguyễn Thị Vy");
+                              setPlaygroundUserUsername("vy_nhi");
+                            }}
+                            className="text-[10px] bg-rose-50 text-rose-700 border border-rose-100 px-2 py-1 rounded font-bold hover:bg-rose-100 transition-colors"
+                          >
+                            Preset: Chị Vy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPlaygroundUserName("Khách Hàng");
+                              setPlaygroundUserUsername("UserTest");
+                            }}
+                            className="text-[10px] bg-slate-100 text-slate-700 border border-slate-250 px-2 py-1 rounded font-bold hover:bg-slate-200 transition-colors"
+                          >
+                            Preset: Mặc định
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
                     <div className="border-t border-slate-100 pt-4">

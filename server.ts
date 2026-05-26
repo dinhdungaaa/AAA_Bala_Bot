@@ -1452,10 +1452,13 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
       const pr = detected.pronoun;
       const nm = detected.name;
       let customWelcome = bot.welcomeMessage || "Dạ, em kính chào anh chị ạ. Em có thể hỗ trợ gì cho mình hôm nay ạ?";
-      // Replace variations of "anh/chị" naturally
-      customWelcome = customWelcome.replace(/anh\/chị/g, `${pr} ${nm}`);
-      customWelcome = customWelcome.replace(/anh chị/g, `${pr} ${nm}`);
-      customWelcome = customWelcome.replace(/Anh\/Chị/g, `${pr === "chị" ? "Chị" : pr === "anh" ? "Anh" : "Anh/Chị"} ${nm}`);
+      const greetingTarget = (nm === "Khách Hàng" || nm === "Telegram" || nm.includes("Khách Hàng"))
+        ? (pr === "Anh/Chị" ? "quý khách" : pr)
+        : `${pr} ${nm}`;
+      customWelcome = customWelcome.replace(/anh\/chị/gi, greetingTarget);
+      customWelcome = customWelcome.replace(/anh chị/gi, greetingTarget);
+      const capitalizedTarget = greetingTarget.charAt(0).toUpperCase() + greetingTarget.slice(1);
+      customWelcome = customWelcome.replace(/Anh\/Chị/g, capitalizedTarget);
       responseText = customWelcome;
     } else {
       // Fetch dynamic answer using vector tri thức
@@ -1559,10 +1562,13 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
     const pr = detected.pronoun;
     const nm = detected.name;
     let customWelcome = bot.welcomeMessage || "Dạ, em kính chào anh chị ạ. Em có thể hỗ trợ gì cho mình hôm nay ạ?";
-    // Replace variations of "anh/chị" naturally
-    customWelcome = customWelcome.replace(/anh\/chị/g, `${pr} ${nm}`);
-    customWelcome = customWelcome.replace(/anh chị/g, `${pr} ${nm}`);
-    customWelcome = customWelcome.replace(/Anh\/Chị/g, `${pr === "chị" ? "Chị" : pr === "anh" ? "Anh" : "Anh/Chị"} ${nm}`);
+    const greetingTarget = (nm === "Khách Hàng" || nm === "Telegram" || nm.includes("Khách Hàng"))
+      ? (pr === "Anh/Chị" ? "quý khách" : pr)
+      : `${pr} ${nm}`;
+    customWelcome = customWelcome.replace(/anh\/chị/gi, greetingTarget);
+    customWelcome = customWelcome.replace(/anh chị/gi, greetingTarget);
+    const capitalizedTarget = greetingTarget.charAt(0).toUpperCase() + greetingTarget.slice(1);
+    customWelcome = customWelcome.replace(/Anh\/Chị/g, capitalizedTarget);
     aiAnswer = {
       text: customWelcome,
       sources: [],
@@ -1829,6 +1835,18 @@ async function generateRAGAnswer(
 
       const fullGreet = greetName ? `${welcomePronoun} ${greetName}` : welcomePronoun;
 
+      let customXungHoRules = "";
+      if (greetName && greetName !== "Khách Hàng") {
+        customXungHoRules = `- BẮT BUỘC sử dụng xưng hô cá nhân hóa cho khách hàng này:
+  + Gọi người dùng là: "${welcomePronoun} ${greetName}" (Ví dụ: "Dạ em chào ${welcomePronoun} ${greetName} ạ", "Dạ ${welcomePronoun} ${greetName} ơi, bên em...").
+  + Hãy xưng hô thân mật như vậy trong các câu chào hoặc câu hỏi để tạo cảm giác thân thiết.
+  + Tuyệt đối KHÔNG sử dụng cụm từ "Anh/Chị Khách Hàng", "anh/chị Khách Hàng", hoặc từ chung chung như "quý khách", "bạn" (vì đã biết rõ tên của họ).`;
+      } else {
+        customXungHoRules = `- BẮT BUỘC sử dụng xưng hô thân mật, lịch sự cho khách vãng lai (hoặc khi chưa rõ tên riêng):
+  + Dùng từ xưng hô thân mật là "${welcomePronoun}" hoặc "mình" (Ví dụ: "Dạ em chào ${welcomePronoun} ạ", "Dạ vâng mình cần em hỗ trợ gì thêm không ạ?").
+  + Tuyệt đối KHÔNG ghép cứng nhắc và lặp đi lặp lại cụm từ "Anh/Chị Khách Hàng" hay "anh/chị Khách Hàng".`;
+      }
+
       const systemPrompt = `Bạn là ${bot.telegramBotUsername || bot.name}, một tư vấn viên chăm sóc khách hàng bằng xương bằng thịt, hỗ trợ trực tuyến khách hàng cho thương hiệu thuộc lĩnh vực "${bot.field}". 
 
 PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
@@ -1836,9 +1854,8 @@ PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
 - Thể hiện sự nhiệt tình, ấm áp, chu đáo tuyệt đối. 
 - XƯNG HÔ TỰ NHIÊN: 
   + BẮT BUỘC xưng "Em".
-  + Gọi người dùng bằng cách lịch sự: Nếu là khách hàng bình thường (không biết tên rõ ràng), hãy dùng xưng hô thân mật là "${welcomePronoun}" (Ví dụ: "Dạ em chào ${welcomePronoun} ạ", "Dạ vâng ${welcomePronoun}"). Tuyệt đối không ghép cứng nhắc và lặp đi lặp lại cụm từ "Anh/Chị Khách Hàng" hay "anh/chị Khách Hàng".
-  + Nếu biết tên cụ thể (ví dụ: Dũng, Lan), hãy xưng hô: "${pronoun} ${targetName}" (Ví dụ: "${pronoun} ${targetName} cần em hỗ trợ gì ạ?").
-- Luôn sử dụng từ ngữ nói tự nhiên, trôi chảy, có từ kính ngữ cảm thán nhẹ nhàng ở đầu và cuối câu (Ví dụ: "Dạ em chào ${welcomePronoun} ạ", "Dạ vâng ạ", "nhé ạ", "nha", "ạ", v.v.).
+  ${customXungHoRules}
+- Luôn sử dụng từ ngữ nói tự nhiên, trôi chảy, có từ kính ngữ cảm thán nhẹ nhàng ở đầu và cuối câu (Ví dụ: "Dạ em chào ${fullGreet} ạ", "Dạ vâng ạ", "nhé ạ", "nha", "ạ", v.v.).
 - Tránh tuyệt đối lối hành văn rập khuôn, sao chép nguyên văn tài liệu nguồn, hoặc phản hồi cộc lốc như một công cụ tra cứu. Hãy diễn đạt lại thông tin một cách mượt mà, logic và sinh động như một chuyên viên giàu kinh nghiệm.
 - Ở cuối câu trả lời, luôn hỏi thêm một câu mở để giữ tương tác ấm áp (Ví dụ: "Dạ không biết thông tin trên đã giúp ích được cho mình chưa ạ?" hoặc "Mình cần em hỗ trợ giải đáp thêm thông tin gì nữa không cứ bảo em nha!").
 
@@ -1846,7 +1863,7 @@ PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
 - TUYỆT ĐỐI KHÔNG dùng bất kỳ dấu hoa thị nào (* hoặc **) hoặc bất kỳ ký tự định dạng markdown nào để bôi đậm, in nghiêng hoặc đánh dấu trong văn bản trả lời. Hãy viết chữ ở dạng thuần văn bản.
 - Để bôi đậm tiêu đề hoặc từ khóa quan trọng (như giá cả, số điện thoại, tên thương hiệu), BẮT BUỘC dùng thẻ HTML <b>...</b> (Ví dụ: <b>AAA Farm</b>).
 - HẠN CHẾ TỐI ĐA việc sử dụng emoji (biểu tượng cảm xúc). Không dùng quá 1-2 emoji trong toàn bộ câu trả lời để đảm bảo tính chuyên nghiệp.
-- BẮT BUỘC PHẢI CHỦ ĐỘNG XUỐNG DÒNG VÀ TẠO DÒNG TRỐNG (ngắt đoạn bằng việc xuống dòng 2 lần, tức là chèn \\n\\n) để tạo khoảng thở rộng rãi, thông thoáng cho tin nhắn. Mỗi đoạn văn chỉ viết siêu ngắn, gồm khoảng 1 đến 2 câu ngắn.
+- BẮT BUỘC PHẢI CHỦ ĐỘNG XUỐNG DÒNG VÀ TẠO DÒNG TRỐNG (ngắt đoạn bằng việc xuống dòng 2 lần, tức là chèn \n\n) để tạo khoảng thở rộng rãi, thông thoáng cho tin nhắn. Mỗi đoạn văn chỉ viết siêu ngắn, gồm khoảng 1 đến 2 câu ngắn.
 - Khi liệt kê các ý, sử dụng các ký tự gạch đầu dòng nhã nhặn như '-' hoặc emoji chấm tròn nhỏ (ví dụ: '🔹 ', '▪️ ') và BẮT BUỘC phải xuống dòng thực tế cho mỗi ý. Giữa các ý liệt kê, hãy phân cách bằng một dòng trống hẳn hoi để tin nhắn thoáng đãng, dễ đọc.
 
 Ví dụ cấu trúc tin nhắn đạt chuẩn:
@@ -1999,14 +2016,14 @@ ${pronoun === "chị" ? "Chị" : pronoun === "anh" ? "Anh" : "Anh/Chị"} cứ 
 
 // REST Endpoint for Playground test chat
 app.post("/api/bots/:botId/playgroundChat", async (req, res) => {
-  const { text } = req.body;
+  const { text, userInfo } = req.body;
   const botId = req.params.botId;
   const allBots = await dbGetBots(bots);
   const bot = allBots.find(b => b.id === botId);
   if (!bot) return res.status(404).json({ error: "Bot not found" });
 
   try {
-    const response = await generateRAGAnswer(bot, text);
+    const response = await generateRAGAnswer(bot, text, userInfo);
     res.json(response);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
