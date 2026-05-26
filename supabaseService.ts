@@ -122,6 +122,7 @@ export function getSQLSchema(): string {
 -- 1. BẢNG BOTS CẤU HÌNH
 CREATE TABLE IF NOT EXISTS bots (
   id TEXT PRIMARY KEY,
+  "userId" TEXT,
   name TEXT NOT NULL,
   description TEXT,
   field TEXT,
@@ -371,8 +372,32 @@ export async function dbGetBots(localFallback: BotConfig[]): Promise<BotConfig[]
   if (!client) return localFallback;
   try {
     const { data, error } = await client.from('bots').select('*').order('createdAt', { ascending: false });
-    if (error) throw error;
-    return data as BotConfig[];
+    if (error) {
+      console.warn("Supabase dbGetBots select error, using local fallback:", error);
+      return localFallback;
+    }
+    const dbBots = data as BotConfig[];
+    
+    // Merge database bots with local fallback bots.
+    // If a bot exists in local fallback, preserve fields that may be missing in DB schema (like userId)
+    const merged = dbBots.map(dbBot => {
+      const localBot = localFallback.find(b => b.id === dbBot.id);
+      if (localBot) {
+        return {
+          ...localBot,
+          ...dbBot,
+          userId: dbBot.userId || localBot.userId // PRESERVE userId from local fallback if missing in DB!
+        };
+      }
+      return dbBot;
+    });
+
+    for (const localBot of localFallback) {
+      if (!merged.some(b => b.id === localBot.id)) {
+        merged.push(localBot);
+      }
+    }
+    return merged;
   } catch (err: any) {
     console.warn("Supabase dbGetBots failed (using local data fallback):", err.message || err);
     return localFallback;
@@ -424,8 +449,28 @@ export async function dbGetSources(botId: string, localFallback: KnowledgeSource
   if (!client) return localFallback;
   try {
     const { data, error } = await client.from('knowledge_sources').select('*').eq('botId', botId).order('createdAt', { ascending: false });
-    if (error) throw error;
-    return data as KnowledgeSource[];
+    if (error) {
+      console.warn("Supabase dbGetSources select error, using local fallback:", error);
+      return localFallback;
+    }
+    const dbSources = data as KnowledgeSource[];
+    
+    // Merge database sources with local fallback sources to resist temporary sync lags or DB insertion issues
+    const merged = [...dbSources];
+    for (const localSource of localFallback) {
+      if (!merged.some(s => s.id === localSource.id)) {
+        merged.push(localSource);
+      }
+    }
+    
+    // Sort sources by createdAt descending (newest first)
+    merged.sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    return merged;
   } catch (err: any) {
     console.warn("Supabase dbGetSources failed (using local data fallback):", err.message || err);
     return localFallback;
@@ -464,11 +509,23 @@ export async function dbGetChunks(botId: string, localFallback: KnowledgeChunk[]
   if (!client) return localFallback;
   try {
     const { data, error } = await client.from('knowledge_chunks').select('*').eq('botId', botId);
-    if (error) throw error;
-    return (data as any[]).map(c => ({
+    if (error) {
+      console.warn("Supabase dbGetChunks select error, using local fallback:", error);
+      return localFallback;
+    }
+    const dbChunks = (data as any[]).map(c => ({
       ...c,
       tags: Array.isArray(c.tags) ? c.tags : []
     })) as KnowledgeChunk[];
+
+    // Merge database chunks with local fallback chunks
+    const merged = [...dbChunks];
+    for (const localChunk of localFallback) {
+      if (!merged.some(c => c.id === localChunk.id)) {
+        merged.push(localChunk);
+      }
+    }
+    return merged;
   } catch (err: any) {
     console.warn("Supabase dbGetChunks failed (using local data fallback):", err.message || err);
     return localFallback;
