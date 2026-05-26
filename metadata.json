@@ -1,0 +1,6 @@
+{
+  "name": "AAA BalaBot",
+  "description": "Nền tảng SaaS quản lý, huấn luyện và kết nối chatbot AI Telegram bằng nguồn tri thức doanh nghiệp sử dụng Gemini AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
