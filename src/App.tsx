@@ -6,6 +6,7 @@ import {
   Menu, X
 } from 'lucide-react';
 import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSummary, SaasCustomer } from './types';
+import { APP_BASE_PATH } from './main';
 
 // Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
 // Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
@@ -235,10 +236,12 @@ export default function App() {
       if (origin.includes('ais-dev-')) {
         origin = origin.replace('ais-dev-', 'ais-pre-');
       }
+      // Include base path so server registers webhook at the correct proxied URL
+      const fullOrigin = `${origin}${APP_BASE_PATH}`;
       const res = await fetch(`/api/bots/${selectedBotId}/telegram-webhook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ origin })
+        body: JSON.stringify({ origin: fullOrigin })
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -2332,7 +2335,7 @@ export default function App() {
                           <strong className="block text-slate-700 font-mono mt-1 select-all">
                             {window.location.origin.includes('ais-dev-') 
                               ? window.location.origin.replace('ais-dev-', 'ais-pre-') 
-                              : window.location.origin}/api/telegram-webhook/{activeBot.id}
+                              : window.location.origin}{APP_BASE_PATH}/api/telegram-webhook/{activeBot.id}
                           </strong>
                         </div>
 

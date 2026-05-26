@@ -40,6 +40,7 @@ import {
 // Helper for type compatibility (since we'll import types in types.ts but write server)
 const app = express();
 const PORT = 3000;
+const BASE_PATH = process.env.BASE_PATH || "";
 
 app.use(express.json({ limit: "50mb" }));
 
@@ -741,7 +742,7 @@ app.post("/api/bots", async (req, res) => {
   if (newBot.telegramToken) {
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     if (host) {
-      const webhookUrl = `https://${host}/api/telegram-webhook/${newBot.id}`;
+      const webhookUrl = `https://${host}${BASE_PATH}/api/telegram-webhook/${newBot.id}`;
       const tgUrl = `https://api.telegram.org/bot${newBot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
       console.log(`[Telegram Register] Posting webhook url: ${webhookUrl}`);
       try {
@@ -773,7 +774,7 @@ app.put("/api/bots/:id", async (req, res) => {
   if (updatedBot && updatedBot.telegramToken) {
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     if (host) {
-      const webhookUrl = `https://${host}/api/telegram-webhook/${updatedBot.id}`;
+      const webhookUrl = `https://${host}${BASE_PATH}/api/telegram-webhook/${updatedBot.id}`;
       const tgUrl = `https://api.telegram.org/bot${updatedBot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
       console.log(`[Telegram Update] Registering webhook url: ${webhookUrl}`);
       try {
