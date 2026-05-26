@@ -40,8 +40,6 @@ import {
 // Helper for type compatibility (since we'll import types in types.ts but write server)
 const app = express();
 const PORT = 3000;
-// Base path prefix when deployed behind a reverse proxy (e.g. Cloudflare Worker at /balabot)
-const BASE_PATH = process.env.BASE_PATH || "";
 
 app.use(express.json({ limit: "50mb" }));
 
@@ -743,7 +741,7 @@ app.post("/api/bots", async (req, res) => {
   if (newBot.telegramToken) {
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     if (host) {
-      const webhookUrl = `https://${host}${BASE_PATH}/api/telegram-webhook/${newBot.id}`;
+      const webhookUrl = `https://${host}/api/telegram-webhook/${newBot.id}`;
       const tgUrl = `https://api.telegram.org/bot${newBot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
       console.log(`[Telegram Register] Posting webhook url: ${webhookUrl}`);
       try {
@@ -775,7 +773,7 @@ app.put("/api/bots/:id", async (req, res) => {
   if (updatedBot && updatedBot.telegramToken) {
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     if (host) {
-      const webhookUrl = `https://${host}${BASE_PATH}/api/telegram-webhook/${updatedBot.id}`;
+      const webhookUrl = `https://${host}/api/telegram-webhook/${updatedBot.id}`;
       const tgUrl = `https://api.telegram.org/bot${updatedBot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
       console.log(`[Telegram Update] Registering webhook url: ${webhookUrl}`);
       try {
@@ -1106,7 +1104,8 @@ app.post("/api/conversations/:sessId/messages", async (req, res) => {
 // Get Webhook status and information from Telegram
 app.get("/api/bots/:botId/telegram-webhook", async (req, res) => {
   const botId = req.params.botId;
-  const bot = bots.find(b => b.id === botId);
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === botId);
   if (!bot) return res.status(404).json({ error: "Bot not found" });
 
   if (!bot.telegramToken) {
@@ -1133,7 +1132,8 @@ app.get("/api/bots/:botId/telegram-webhook", async (req, res) => {
 app.post("/api/bots/:botId/telegram-webhook", async (req, res) => {
   const botId = req.params.botId;
   const { origin } = req.body;
-  const bot = bots.find(b => b.id === botId);
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === botId);
   if (!bot) return res.status(404).json({ error: "Bot not found" });
 
   if (!bot.telegramToken) {
@@ -1157,6 +1157,14 @@ app.post("/api/bots/:botId/telegram-webhook", async (req, res) => {
       // update status in bot settings
       bot.telegramWebhookActive = true;
       bot.telegramStatus = "connected";
+      
+      // Update local memory if found
+      const memoryBot = bots.find(b => b.id === botId);
+      if (memoryBot) {
+        memoryBot.telegramWebhookActive = true;
+        memoryBot.telegramStatus = "connected";
+      }
+
       await dbUpdateBot(botId, {
         telegramWebhookActive: true,
         telegramStatus: "connected"
@@ -1356,7 +1364,8 @@ app.post("/api/check-token", async (req, res) => {
 app.post("/api/telegram-webhook/:botId", async (req, res) => {
   const update = req.body;
   const botId = req.params.botId;
-  const bot = bots.find(b => b.id === botId);
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === botId);
   
   if (!bot) {
     console.warn(`[REAL Telegram] Warning: Received update for unknown bot ID: ${botId}`);
@@ -1484,7 +1493,8 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
 // Simulated Webhook message from Telegram
 app.post("/api/telegram-webhook/simulate", async (req, res) => {
   const { botId, text, username, fullName, userId } = req.body;
-  const bot = bots.find(b => b.id === botId);
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === botId);
   if (!bot) return res.status(404).json({ error: "Bot not found" });
 
   const tUserId = userId || "u-sim-" + Math.floor(Math.random() * 10000);
@@ -1970,7 +1980,8 @@ ${pronoun === "chị" ? "Chị" : pronoun === "anh" ? "Anh" : "Anh/Chị"} cứ 
 app.post("/api/bots/:botId/playgroundChat", async (req, res) => {
   const { text } = req.body;
   const botId = req.params.botId;
-  const bot = bots.find(b => b.id === botId);
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === botId);
   if (!bot) return res.status(404).json({ error: "Bot not found" });
 
   try {
@@ -1983,15 +1994,24 @@ app.post("/api/bots/:botId/playgroundChat", async (req, res) => {
 
 
 // Start custom in-memory file retrain simulation
-app.post("/api/bots/:botId/retrain", (req, res) => {
+app.post("/api/bots/:botId/retrain", async (req, res) => {
   const botId = req.params.botId;
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === botId);
+  if (!bot) return res.status(404).json({ error: "Bot not found" });
+
+  // Update memory if exists
   const botIdx = bots.findIndex(b => b.id === botId);
-  if (botIdx === -1) return res.status(404).json({ error: "Bot not found" });
+  if (botIdx !== -1) {
+    bots[botIdx].status = "training";
+  }
+  await dbUpdateBot(botId, { status: "training" });
 
-  bots[botIdx].status = "training";
-
-  setTimeout(() => {
-    bots[botIdx].status = "active";
+  setTimeout(async () => {
+    if (botIdx !== -1) {
+      bots[botIdx].status = "active";
+    }
+    await dbUpdateBot(botId, { status: "active" });
   }, 2500);
 
   res.json({ success: true, message: "Bắt đầu huấn luyện lại cơ sở dữ liệu." });

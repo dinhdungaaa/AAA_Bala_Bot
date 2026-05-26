@@ -6,7 +6,6 @@ import {
   Menu, X
 } from 'lucide-react';
 import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSummary, SaasCustomer } from './types';
-import { APP_BASE_PATH } from './main';
 
 // Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
 // Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
@@ -236,12 +235,10 @@ export default function App() {
       if (origin.includes('ais-dev-')) {
         origin = origin.replace('ais-dev-', 'ais-pre-');
       }
-      // Include base path so server registers webhook at the correct proxied URL
-      const fullOrigin = `${origin}${APP_BASE_PATH}`;
       const res = await fetch(`/api/bots/${selectedBotId}/telegram-webhook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ origin: fullOrigin })
+        body: JSON.stringify({ origin })
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -458,7 +455,11 @@ export default function App() {
         setSbAuthPassword('');
         setShowAuthModal(false); // Close auth modal on success
       } else {
-        setSbAuthError(data.error || 'Có lỗi xảy ra trong quá trình xác thực.');
+        let errMsg = data.error || 'Có lỗi xảy ra trong quá trình xác thực.';
+        if (errMsg.toLowerCase().includes('email not confirmed')) {
+          errMsg = '⚠️ Email chưa được xác nhận! Vui lòng kiểm tra hộp thư đến (và mục Spam) của email ledinhdung752589@gmail.com để nhấp vào liên kết xác nhận từ Supabase của bạn. \n\n💡 Mẹo cấu hình: Bạn có thể truy cập vào Supabase Dashboard của dự án -> Authentication -> Providers -> Email, sau đó tắt (uncheck) mục "Confirm email" rồi lưu lại. Khi đó, tài khoản sẽ đăng nhập được ngay lập tức mà không cần xác nhận qua Email!';
+        }
+        setSbAuthError(errMsg);
       }
     } catch (err: any) {
       setSbAuthError(err.message || String(err));
@@ -999,7 +1000,7 @@ export default function App() {
                   {sbAuthError && (
                     <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs rounded-xl flex items-start gap-2.5 animate-shake">
                       <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
-                      <span className="font-medium text-[11px] leading-snug">{sbAuthError}</span>
+                      <span className="font-medium text-[11px] leading-snug whitespace-pre-line">{sbAuthError}</span>
                     </div>
                   )}
 
@@ -1865,7 +1866,7 @@ export default function App() {
                           />
                           <Upload className="w-10 h-10 text-slate-400 mx-auto mb-3" />
                           <span className="font-bold text-sm text-slate-800 block">Kéo thả file tài liệu hoặc Click để tìm</span>
-                          <span className="text-[11px] text-slate-400 block mt-1">Hệ thống tự động liên kết dữ liệu an toàn & tối ưu không tốn dung bộ nhớ máy chủ.</span>
+                          <span className="text-[11px] text-slate-400 block mt-1">Hỗ trợ tốt nhất các tệp văn bản bóc tách như <b>.txt, .md, .csv, .json, .xml</b>. Dung lượng tối ưu không tốn dung lượng máy chủ.</span>
                           
                           <div className="mt-4 inline-flex items-center gap-2 bg-slate-200 text-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-300 pointer-events-none">
                             <FileText className="w-3.5 h-3.5 text-blue-500" />
@@ -2331,7 +2332,7 @@ export default function App() {
                           <strong className="block text-slate-700 font-mono mt-1 select-all">
                             {window.location.origin.includes('ais-dev-') 
                               ? window.location.origin.replace('ais-dev-', 'ais-pre-') 
-                              : window.location.origin}{APP_BASE_PATH}/api/telegram-webhook/{activeBot.id}
+                              : window.location.origin}/api/telegram-webhook/{activeBot.id}
                           </strong>
                         </div>
 
@@ -2757,7 +2758,7 @@ export default function App() {
                           {sbAuthError && (
                             <div className="p-2.5 bg-rose-50 border border-rose-100 text-rose-600 text-xs rounded-lg flex items-start gap-2 animate-shake">
                               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                              <span className="font-medium text-[11px]">{sbAuthError}</span>
+                              <span className="font-medium text-[11px] whitespace-pre-line">{sbAuthError}</span>
                             </div>
                           )}
 
@@ -4626,7 +4627,7 @@ WHERE email = 'customer-email@example.com';`}
               {sbAuthError && (
                 <div className="p-2.5 bg-rose-50 border border-rose-100 text-rose-600 text-[11px] rounded-lg flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span className="font-medium">{sbAuthError}</span>
+                  <span className="font-medium whitespace-pre-line">{sbAuthError}</span>
                 </div>
               )}
 
