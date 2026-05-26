@@ -724,9 +724,17 @@ app.get("/api/bots", async (req, res) => {
   const allBots = await dbGetBots(bots);
   
   if (userId) {
-    // If a user is logged in, hide system demo prefilled bots (with no userId or system bot IDs)
-    // and show only bots they have registered/created.
-    const userBots = allBots.filter(b => b.userId === userId);
+    // Check if the current user is the owner (ox102.crypto@gmail.com)
+    const isAdmin = workspaceUsers.some(u => u.id === userId && u.email === "ox102.crypto@gmail.com");
+    
+    // Only display bots created by the user, except for the admin who can also see the system demo bots.
+    const userBots = allBots.filter(b => {
+      if (b.userId === userId) return true;
+      if (b.id === "bot-aaa-farm" || b.id === "bot-sample-2") {
+        return isAdmin || userId === "u-1";
+      }
+      return false;
+    });
     return res.json(userBots);
   }
   
