@@ -262,8 +262,7 @@ export default function App() {
       if (res.ok && data.success) {
         setWebhookActionMsg({ status: 'success', text: data.message });
         fetchWebhookDetails(); // update local status
-        // Fetch fresh bots state
-        const botUrl = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
+        const botUrl = `/api/bots?userId=${sbUser?.id || ''}`;
         const botRes = await fetch(botUrl);
         if (botRes.ok) {
           const freshBots = await botRes.json();
@@ -330,10 +329,17 @@ export default function App() {
 
   // Fetch initial bots when user session changes
   useEffect(() => {
-    const url = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
+    if (!sbUser?.id) {
+      setBots([]);
+      setSelectedBotId('');
+      return;
+    }
+    const url = `/api/bots?userId=${sbUser.id}`;
+    let active = true;
     fetch(url)
       .then(res => res.json())
       .then(data => {
+        if (!active) return;
         setBots(data);
         if (data.length > 0) {
           setSelectedBotId(data[0].id);
@@ -341,6 +347,9 @@ export default function App() {
           setSelectedBotId('');
         }
       });
+    return () => {
+      active = false;
+    };
   }, [sbUser?.id]);
 
   // Fetch bot-specific resources when dynamic bot or tab changes
@@ -522,8 +531,7 @@ export default function App() {
       setSbSyncResult(data);
       if (data.success) {
         alert('Đồng bộ dữ liệu mẫu lên database Supabase thành công! ✨');
-        // reload bots if synced
-        const botUrl = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
+        const botUrl = `/api/bots?userId=${sbUser?.id || ''}`;
         fetch(botUrl)
           .then(r => r.json())
           .then(d => {
