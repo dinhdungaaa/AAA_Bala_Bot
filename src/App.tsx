@@ -9,16 +9,29 @@ import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSum
 import { APP_BASE_PATH } from './main';
 
 // Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
-// Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
-const renderLineWithTags = (txt: string) => {
+const renderLineWithTags = (txt: string, isUser: boolean = false) => {
   if (!txt) return "";
   const parts = txt.split(/(<b>.*?<\/b>|<i>.*?<\/i>)/g);
   return parts.map((part, i) => {
     if (part.startsWith('<b>') && part.endsWith('</b>')) {
-      return <strong key={i} className="font-extrabold text-slate-900 dark:text-slate-100">{part.slice(3, -4)}</strong>;
+      return (
+        <strong 
+          key={i} 
+          className={`font-black ${isUser ? 'text-white' : 'text-slate-950 dark:text-slate-950'}`}
+        >
+          {part.slice(3, -4)}
+        </strong>
+      );
     }
     if (part.startsWith('<i>') && part.endsWith('</i>')) {
-      return <em key={i} className="italic text-slate-800 dark:text-slate-200">{part.slice(3, -4)}</em>;
+      return (
+        <em 
+          key={i} 
+          className={`italic ${isUser ? 'text-slate-200' : 'text-slate-800'}`}
+        >
+          {part.slice(3, -4)}
+        </em>
+      );
     }
     return part;
   });
@@ -38,7 +51,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
           return (
             <div key={idx} className="flex items-start gap-2 pl-1 my-1 animate-in fade-in duration-100">
               <span className={`shrink-0 mt-2 w-1.5 h-1.5 rounded-full ${isUser ? 'bg-white/85' : 'bg-blue-500'}`} />
-              <span className="flex-1 text-sm leading-relaxed">{renderLineWithTags(cleanText)}</span>
+              <span className="flex-1 text-sm leading-relaxed">{renderLineWithTags(cleanText, isUser)}</span>
             </div>
           );
         }
@@ -51,7 +64,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
           return (
             <div key={idx} className="flex items-start gap-2 pl-1 my-1 animate-in fade-in duration-100">
               <span className={`shrink-0 font-bold text-xs mt-0.5 ${isUser ? 'text-white/95' : 'text-blue-600'}`}>{num}.</span>
-              <span className="flex-1 text-sm leading-relaxed">{renderLineWithTags(cleanText)}</span>
+              <span className="flex-1 text-sm leading-relaxed">{renderLineWithTags(cleanText, isUser)}</span>
             </div>
           );
         }
@@ -64,7 +77,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
         // Regular sentence line
         return (
           <p key={idx} className="text-sm leading-relaxed">
-            {renderLineWithTags(line)}
+            {renderLineWithTags(line, isUser)}
           </p>
         );
       })}
