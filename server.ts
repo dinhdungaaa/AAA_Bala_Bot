@@ -3,6 +3,10 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+// @ts-ignore
+import mammoth from "mammoth";
+// @ts-ignore
+import pdfParse from "pdf-parse";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer } from "./src/types.js";
 import {
   getSupabaseConfig,
@@ -624,6 +628,22 @@ app.post("/api/bots/:botId/upload-source", async (req, res) => {
         lowerName.endsWith(".markdown")
       ) {
         fullText = buffer.toString("utf-8");
+      } else if (lowerName.endsWith(".pdf")) {
+        try {
+          const parsedPdf = await pdfParse(buffer);
+          fullText = parsedPdf.text || "";
+        } catch (pdfErr: any) {
+          console.error("PDF Parsing error:", pdfErr);
+          throw new Error("Không thể trích xuất nội dung từ tệp PDF: " + pdfErr.message);
+        }
+      } else if (lowerName.endsWith(".docx")) {
+        try {
+          const result = await mammoth.extractRawText({ buffer });
+          fullText = result.value || "";
+        } catch (docxErr: any) {
+          console.error("DOCX Parsing error:", docxErr);
+          throw new Error("Không thể trích xuất nội dung từ tệp DOCX: " + docxErr.message);
+        }
       } else {
         const baseName = fileName.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
         fullText = `TÀI LIỆU LƯU TRỮ ĐIỆN TOÁN: ${fileName}
