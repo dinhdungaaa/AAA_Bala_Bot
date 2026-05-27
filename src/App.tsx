@@ -1187,9 +1187,13 @@ export default function App() {
             <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
             <div className="flex-1 overflow-hidden">
               <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 block">Workspace</span>
-              <span className="text-xs text-white font-medium truncate block">AAA Organic Farm</span>
+              <span className="text-xs text-white font-medium truncate block">
+                {sbUser?.email === 'ox102.crypto@gmail.com' ? 'AAA Organic Farm' : `${sbUser?.email?.split('@')[0]}'s Workspace`}
+              </span>
             </div>
-            <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded uppercase font-mono font-bold">Owner</span>
+            <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded uppercase font-mono font-bold">
+              {sbUser?.email === 'ox102.crypto@gmail.com' ? 'Owner' : 'Member'}
+            </span>
           </div>
         </div>
 
