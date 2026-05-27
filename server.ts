@@ -477,10 +477,29 @@ app.get("/api/supabase/config", async (req, res) => {
 });
 
 app.post("/api/supabase/config", async (req, res) => {
-  const { url, key } = req.body;
+  const { url, key, email } = req.body;
   updateDynamicConfig(url, key);
 
-  // Persist configuration to .env file safely, preserving other settings (like GEMINI_API_KEY)
+  // 1. Persist email-specific configuration to user configs JSON file
+  if (email) {
+    const configsPath = path.join(process.cwd(), "supabase-user-configs.json");
+    let configs: Record<string, { url: string; key: string }> = {};
+    if (fs.existsSync(configsPath)) {
+      try {
+        configs = JSON.parse(fs.readFileSync(configsPath, "utf8"));
+      } catch (e) {
+        console.error("Failed to read user configs file:", e);
+      }
+    }
+    configs[email.toLowerCase()] = { url, key };
+    try {
+      fs.writeFileSync(configsPath, JSON.stringify(configs, null, 2), "utf8");
+    } catch (e) {
+      console.error("Failed to write user configs file:", e);
+    }
+  }
+
+  // 2. Persist configuration to .env file safely, preserving other settings (like GEMINI_API_KEY)
   const envPath = path.join(process.cwd(), ".env");
   let content = "";
   if (fs.existsSync(envPath)) {
@@ -529,6 +548,32 @@ app.post("/api/supabase/config", async (req, res) => {
     config: getSupabaseConfig(),
     status
   });
+});
+
+app.get("/api/supabase/config/retrieve", (req, res) => {
+  const email = req.query.email as string;
+  if (!email) {
+    return res.status(400).json({ success: false, error: "Email is required" });
+  }
+
+  const configsPath = path.join(process.cwd(), "supabase-user-configs.json");
+  if (fs.existsSync(configsPath)) {
+    try {
+      const configs = JSON.parse(fs.readFileSync(configsPath, "utf8"));
+      const userConfig = configs[email.toLowerCase()];
+      if (userConfig) {
+        return res.json({
+          success: true,
+          url: userConfig.url,
+          key: userConfig.key
+        });
+      }
+    } catch (e) {
+      console.error("Failed to parse user configs:", e);
+    }
+  }
+
+  res.json({ success: false, error: "No custom configuration found" });
 });
 
 app.post("/api/supabase/sync", async (req, res) => {
