@@ -230,6 +230,9 @@ export default function App() {
       if (origin.includes('ais-dev-')) {
         origin = origin.replace('ais-dev-', 'ais-pre-');
       }
+      if (window.location.pathname.startsWith('/balabot') && !origin.endsWith('/balabot')) {
+        origin = `${origin}/balabot`;
+      }
       const res = await fetch(`/api/bots/${selectedBotId}/telegram-webhook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

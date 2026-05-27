@@ -43,6 +43,14 @@ const app = express();
 const PORT = 3000;
 const ADMIN_EMAIL = "ox102.crypto@gmail.com";
 
+function getPublicBaseUrl(req: express.Request, explicitOrigin?: string) {
+  const host = (req.headers['x-forwarded-host'] || req.headers.host || "").toString();
+  const proto = (req.headers['x-forwarded-proto'] || "https").toString().split(",")[0];
+  const origin = (explicitOrigin || (host ? `${proto}://${host}` : "")).replace(/\/+$/, "");
+  const prefix = (req.originalUrl || req.url).startsWith('/balabot') ? '/balabot' : "";
+  return origin.endsWith('/balabot') ? origin : `${origin}${prefix}`;
+}
+
 // Strip /balabot prefix transparently to support subpath proxying
 app.use((req, res, next) => {
   if (req.url.startsWith('/balabot')) {
@@ -945,9 +953,9 @@ app.post("/api/bots", async (req, res) => {
 
   // Register live Webhook automatically with Telegram
   if (newBot.telegramToken) {
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
-    if (host) {
-      const webhookUrl = `https://${host}/api/telegram-webhook/${newBot.id}`;
+    const baseUrl = getPublicBaseUrl(req);
+    if (baseUrl) {
+      const webhookUrl = `${baseUrl}/api/telegram-webhook/${newBot.id}`;
       const tgUrl = `https://api.telegram.org/bot${newBot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
       console.log(`[Telegram Register] Posting webhook url: ${webhookUrl}`);
       try {
@@ -977,9 +985,9 @@ app.put("/api/bots/:id", async (req, res) => {
   // Register/update live Webhook automatically when token is configured or changed
   const updatedBot = idx !== -1 ? bots[idx] : null;
   if (updatedBot && updatedBot.telegramToken) {
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
-    if (host) {
-      const webhookUrl = `https://${host}/api/telegram-webhook/${updatedBot.id}`;
+    const baseUrl = getPublicBaseUrl(req);
+    if (baseUrl) {
+      const webhookUrl = `${baseUrl}/api/telegram-webhook/${updatedBot.id}`;
       const tgUrl = `https://api.telegram.org/bot${updatedBot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
       console.log(`[Telegram Update] Registering webhook url: ${webhookUrl}`);
       try {
@@ -1356,7 +1364,7 @@ app.post("/api/bots/:botId/telegram-webhook", async (req, res) => {
     return res.status(400).json({ error: "Thiếu tham số origin để đăng ký webhook." });
   }
 
-  const webhookUrl = `${origin}/api/telegram-webhook/${botId}`;
+  const webhookUrl = `${getPublicBaseUrl(req, origin)}/api/telegram-webhook/${botId}`;
   const tgUrl = `https://api.telegram.org/bot${bot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
 
   console.log(`[Telegram Register Manual] URL: ${webhookUrl}`);
