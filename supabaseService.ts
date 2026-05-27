@@ -56,7 +56,7 @@ export async function testConnection(): Promise<{
     return { connected: false, message: "Chưa cấu hình SUPABASE_URL hoặc API Key.", missingTables: [] };
   }
 
-  const tablesToCheck = ['bots', 'knowledge_sources', 'knowledge_chunks', 'chat_sessions', 'faq_items', 'profiles'];
+  const tablesToCheck = ['bots', 'knowledge_sources', 'knowledge_chunks', 'chat_sessions', 'faq_items'];
   const missingTables: string[] = [];
 
   try {
@@ -84,11 +84,6 @@ export async function testConnection(): Promise<{
     const { error: faqError } = await client.from('faq_items').select('id').limit(1);
     if (faqError && (faqError.message.includes('relation') || faqError.code === 'PGRST116' || faqError.code === '42P01')) {
       missingTables.push('faq_items');
-    }
-
-    const { error: profError } = await client.from('profiles').select('id').limit(1);
-    if (profError && (profError.message.includes('relation') || profError.code === 'PGRST116' || profError.code === '42P01')) {
-      missingTables.push('profiles');
     }
 
     if (missingTables.length === tablesToCheck.length) {
@@ -259,29 +254,6 @@ CREATE POLICY "Allow public read faq" ON faq_items FOR SELECT USING (true);
 CREATE POLICY "Allow public insert faq" ON faq_items FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update faq" ON faq_items FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete faq" ON faq_items FOR DELETE USING (true);
-
--- 6. BẢNG HỒ SƠ KHÁCH HÀNG & GÓI CƯỚC (PROFILES)
-CREATE TABLE IF NOT EXISTS profiles (
-  id TEXT PRIMARY KEY,
-  email TEXT,
-  full_name TEXT,
-  phone TEXT,
-  tier TEXT DEFAULT 'free',
-  message_limit INTEGER DEFAULT 1000,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Allow public read profiles" ON profiles;
-DROP POLICY IF EXISTS "Allow public insert profiles" ON profiles;
-DROP POLICY IF EXISTS "Allow public update profiles" ON profiles;
-DROP POLICY IF EXISTS "Allow public delete profiles" ON profiles;
-
-CREATE POLICY "Allow public read profiles" ON profiles FOR SELECT USING (true);
-CREATE POLICY "Allow public insert profiles" ON profiles FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update profiles" ON profiles FOR UPDATE USING (true);
-CREATE POLICY "Allow public delete profiles" ON profiles FOR DELETE USING (true);
 
 -- =========================================================================
 -- 6. HƯỚNG DẪN CẤU HÌNH SUPABASE STORAGE (POLICY CHO PRODUCTION MODE BUCKET)

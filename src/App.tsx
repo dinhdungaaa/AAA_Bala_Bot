@@ -6,37 +6,8 @@ import {
   Menu, X
 } from 'lucide-react';
 import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSummary, SaasCustomer } from './types';
-import { APP_BASE_PATH } from './main';
 
 // Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
-const renderLineWithTags = (txt: string, isUser: boolean = false) => {
-  if (!txt) return "";
-  const parts = txt.split(/(<b>.*?<\/b>|<i>.*?<\/i>)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('<b>') && part.endsWith('</b>')) {
-      return (
-        <strong 
-          key={i} 
-          className={`font-black ${isUser ? 'text-white' : 'text-slate-950 dark:text-slate-950'}`}
-        >
-          {part.slice(3, -4)}
-        </strong>
-      );
-    }
-    if (part.startsWith('<i>') && part.endsWith('</i>')) {
-      return (
-        <em 
-          key={i} 
-          className={`italic ${isUser ? 'text-slate-200' : 'text-slate-800'}`}
-        >
-          {part.slice(3, -4)}
-        </em>
-      );
-    }
-    return part;
-  });
-};
-
 const renderFormattedText = (text: string, isUser: boolean = false) => {
   if (!text) return null;
   const lines = text.split('\n');
@@ -51,7 +22,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
           return (
             <div key={idx} className="flex items-start gap-2 pl-1 my-1 animate-in fade-in duration-100">
               <span className={`shrink-0 mt-2 w-1.5 h-1.5 rounded-full ${isUser ? 'bg-white/85' : 'bg-blue-500'}`} />
-              <span className="flex-1 text-sm leading-relaxed">{renderLineWithTags(cleanText, isUser)}</span>
+              <span className="flex-1 text-sm leading-relaxed">{cleanText}</span>
             </div>
           );
         }
@@ -64,7 +35,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
           return (
             <div key={idx} className="flex items-start gap-2 pl-1 my-1 animate-in fade-in duration-100">
               <span className={`shrink-0 font-bold text-xs mt-0.5 ${isUser ? 'text-white/95' : 'text-blue-600'}`}>{num}.</span>
-              <span className="flex-1 text-sm leading-relaxed">{renderLineWithTags(cleanText, isUser)}</span>
+              <span className="flex-1 text-sm leading-relaxed">{cleanText}</span>
             </div>
           );
         }
@@ -77,7 +48,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
         // Regular sentence line
         return (
           <p key={idx} className="text-sm leading-relaxed">
-            {renderLineWithTags(line, isUser)}
+            {line}
           </p>
         );
       })}
@@ -214,8 +185,6 @@ export default function App() {
   const [playgroundInput, setPlaygroundInput] = useState('');
   const [isPlaygroundTyping, setIsPlaygroundTyping] = useState(false);
   const [lastCitation, setLastCitation] = useState<any[]>([]);
-  const [playgroundUserName, setPlaygroundUserName] = useState('Khách Hàng');
-  const [playgroundUserUsername, setPlaygroundUserUsername] = useState('UserTest');
 
   // Telegram Integration States
   const [inputToken, setInputToken] = useState('');
@@ -251,18 +220,17 @@ export default function App() {
       if (origin.includes('ais-dev-')) {
         origin = origin.replace('ais-dev-', 'ais-pre-');
       }
-      // Include base path so server registers webhook at the correct proxied URL
-      const fullOrigin = `${origin}${APP_BASE_PATH}`;
       const res = await fetch(`/api/bots/${selectedBotId}/telegram-webhook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ origin: fullOrigin })
+        body: JSON.stringify({ origin })
       });
       const data = await res.json();
       if (res.ok && data.success) {
         setWebhookActionMsg({ status: 'success', text: data.message });
         fetchWebhookDetails(); // update local status
-        const botUrl = `/api/bots?userId=${sbUser?.id || ''}`;
+        // Fetch fresh bots state
+        const botUrl = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
         const botRes = await fetch(botUrl);
         if (botRes.ok) {
           const freshBots = await botRes.json();
@@ -329,17 +297,10 @@ export default function App() {
 
   // Fetch initial bots when user session changes
   useEffect(() => {
-    if (!sbUser?.id) {
-      setBots([]);
-      setSelectedBotId('');
-      return;
-    }
-    const url = `/api/bots?userId=${sbUser.id}`;
-    let active = true;
+    const url = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
     fetch(url)
       .then(res => res.json())
       .then(data => {
-        if (!active) return;
         setBots(data);
         if (data.length > 0) {
           setSelectedBotId(data[0].id);
@@ -347,9 +308,6 @@ export default function App() {
           setSelectedBotId('');
         }
       });
-    return () => {
-      active = false;
-    };
   }, [sbUser?.id]);
 
   // Fetch bot-specific resources when dynamic bot or tab changes
@@ -531,7 +489,8 @@ export default function App() {
       setSbSyncResult(data);
       if (data.success) {
         alert('Đồng bộ dữ liệu mẫu lên database Supabase thành công! ✨');
-        const botUrl = `/api/bots?userId=${sbUser?.id || ''}`;
+        // reload bots if synced
+        const botUrl = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
         fetch(botUrl)
           .then(r => r.json())
           .then(d => {
@@ -749,7 +708,7 @@ export default function App() {
     const userMsg: Message = {
       id: 'p-user-' + Date.now(),
       sender: 'user',
-      username: playgroundUserUsername || 'UserTest',
+      username: 'UserTest',
       text: userText,
       timestamp: new Date().toISOString()
     };
@@ -761,13 +720,7 @@ export default function App() {
     const res = await fetch(`/api/bots/${selectedBotId}/playgroundChat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        text: userText,
-        userInfo: {
-          fullName: playgroundUserName,
-          username: playgroundUserUsername
-        }
-      })
+      body: JSON.stringify({ text: userText })
     });
 
     if (res.ok) {
@@ -2197,66 +2150,6 @@ export default function App() {
                     </div>
 
                     <div className="border-t border-slate-100 pt-4">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-2">Giả Lập Người Dùng (Sandbox)</span>
-                      <div className="space-y-3 bg-slate-50 p-4 rounded-lg border border-slate-100">
-                        <div>
-                          <label className="text-[10px] text-slate-400 font-bold block mb-1">TÊN HIỂN THỊ (GỢI Ý GIỚI TÍNH/TÊN):</label>
-                          <input
-                            type="text"
-                            value={playgroundUserName}
-                            onChange={(e) => setPlaygroundUserName(e.target.value)}
-                            placeholder="Ví dụ: Nguyễn Văn Dũng, Trần Thị Vy..."
-                            className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-slate-400 font-bold block mb-1">USERNAME (TÊN TÀI KHOẢN):</label>
-                          <input
-                            type="text"
-                            value={playgroundUserUsername}
-                            onChange={(e) => setPlaygroundUserUsername(e.target.value)}
-                            placeholder="Ví dụ: dung_nguyen, vy_tran..."
-                            className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-600"
-                          />
-                        </div>
-                        
-                        {/* Presets */}
-                        <div className="pt-1 flex flex-wrap gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPlaygroundUserName("Nguyễn Văn Dũng");
-                              setPlaygroundUserUsername("dung_nguyen");
-                            }}
-                            className="text-[10px] bg-blue-50 text-blue-700 border border-blue-100 px-2 py-1 rounded font-bold hover:bg-blue-100 transition-colors"
-                          >
-                            Preset: Anh Dũng
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPlaygroundUserName("Nguyễn Thị Vy");
-                              setPlaygroundUserUsername("vy_nhi");
-                            }}
-                            className="text-[10px] bg-rose-50 text-rose-700 border border-rose-100 px-2 py-1 rounded font-bold hover:bg-rose-100 transition-colors"
-                          >
-                            Preset: Chị Vy
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPlaygroundUserName("Khách Hàng");
-                              setPlaygroundUserUsername("UserTest");
-                            }}
-                            className="text-[10px] bg-slate-100 text-slate-700 border border-slate-250 px-2 py-1 rounded font-bold hover:bg-slate-200 transition-colors"
-                          >
-                            Preset: Mặc định
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-slate-100 pt-4">
                       <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-2">Văn Bản Gốc Được Định Vị</span>
                       {lastCitation.length > 0 ? (
                         <div className="space-y-2">
@@ -2424,7 +2317,7 @@ export default function App() {
                           <strong className="block text-slate-700 font-mono mt-1 select-all">
                             {window.location.origin.includes('ais-dev-') 
                               ? window.location.origin.replace('ais-dev-', 'ais-pre-') 
-                              : window.location.origin}{APP_BASE_PATH}/api/telegram-webhook/{activeBot.id}
+                              : window.location.origin}/api/telegram-webhook/{activeBot.id}
                           </strong>
                         </div>
 
