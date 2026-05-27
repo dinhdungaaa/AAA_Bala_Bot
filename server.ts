@@ -439,45 +439,6 @@ app.get("/api/admin/customers", async (req, res) => {
   res.json(finalCustomers);
 });
 
-app.get("/api/admin/diagnose", async (req, res) => {
-  const client = getSupabaseClient();
-  if (!client) {
-    return res.json({ success: false, error: "Supabase client not initialized" });
-  }
-
-  const result: any = {
-    config: getSupabaseConfig(),
-    profilesTable: null,
-    authUsers: null
-  };
-
-  try {
-    const { data, error } = await client.from("profiles").select("*");
-    result.profilesTable = {
-      success: !error,
-      error: error ? { message: error.message, code: error.code } : null,
-      count: data ? data.length : 0,
-      data
-    };
-  } catch (err: any) {
-    result.profilesTable = { success: false, error: err.message || String(err) };
-  }
-
-  try {
-    const { data, error } = await client.auth.admin.listUsers();
-    result.authUsers = {
-      success: !error,
-      error: error ? { message: error.message, code: error.code } : null,
-      count: data && data.users ? data.users.length : 0,
-      users: data && data.users ? data.users.map(u => ({ id: u.id, email: u.email, created_at: u.created_at })) : []
-    };
-  } catch (err: any) {
-    result.authUsers = { success: false, error: err.message || String(err) };
-  }
-
-  res.json(result);
-});
-
 app.post("/api/admin/customers", async (req, res) => {
   const { name, email, phone, tier, messageLimit, joinedDate } = req.body;
   
