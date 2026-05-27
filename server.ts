@@ -318,39 +318,80 @@ app.get("/api/admin/customers", async (req, res) => {
   const client = getSupabaseClient();
   let dbCustomers: SaasCustomer[] = [];
 
+  let authUsers: any[] = [];
+  let profiles: any[] = [];
+
   if (client) {
+    // 1. Fetch from Supabase Auth (absorb unauthorized error if using Anon Key)
     try {
-      // 1. Try to fetch from the database 'profiles' table if it exists
-      const { data: profiles, error: pError } = await client.from("profiles").select("*");
-      if (!pError && profiles && profiles.length > 0) {
-        dbCustomers = profiles.map(p => ({
-          id: p.id || `db-${p.email}`,
-          name: p.full_name || p.email?.split('@')[0] || "Khách Hàng Thật",
-          email: p.email || "",
-          phone: p.phone || "Không có",
-          tier: (p.tier || "free") as "free" | "pro" | "enterprise",
-          messageLimit: Number(p.message_limit) || 1000,
-          joinedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
-        }));
-      } else {
-        // 2. If table is empty or doesn't have rows, try to pull list of registered Auth users using service role API
-        const { data: authData, error: aError } = await client.auth.admin.listUsers();
-        if (!aError && authData && authData.users && authData.users.length > 0) {
-          dbCustomers = authData.users.map(u => ({
-            id: u.id,
-            name: u.email?.split('@')[0] || "Khách Hàng Thật",
-            email: u.email || "",
-            phone: u.phone || "Chưa cập nhật",
-            tier: (u.email === 'ox102.crypto@gmail.com' ? 'enterprise' : 'free') as "free" | "pro" | "enterprise",
-            messageLimit: u.email === 'ox102.crypto@gmail.com' ? 250000 : 1000,
-            joinedDate: u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
-          }));
-        }
+      const { data, error } = await client.auth.admin.listUsers();
+      if (!error && data && data.users) {
+        authUsers = data.users;
+      } else if (error) {
+        console.warn("Supabase admin.listUsers error:", error.message);
       }
     } catch (err) {
-      console.warn("Dynamic user discovery through Supabase skipped or failed:", err);
+      console.warn("Supabase listUsers failed (likely using Anon Key instead of Service Role Key):", err);
+    }
+
+    // 2. Fetch from profiles table
+    try {
+      const { data, error } = await client.from("profiles").select("*");
+      if (!error && data) {
+        profiles = data;
+      } else if (error) {
+        console.warn("Supabase fetch profiles error:", error.message);
+      }
+    } catch (err) {
+      console.warn("Supabase fetch profiles failed:", err);
     }
   }
+
+  // 3. Merge profiles and auth users by user ID
+  const mergedMap = new Map<string, SaasCustomer>();
+
+  // Add all users from Auth first
+  for (const u of authUsers) {
+    if (!u.email) continue;
+    const isOwner = u.email.toLowerCase() === 'ox102.crypto@gmail.com';
+    mergedMap.set(u.id, {
+      id: u.id,
+      name: u.email.split('@')[0],
+      email: u.email,
+      phone: u.phone || "Chưa cập nhật",
+      tier: isOwner ? 'enterprise' : 'free',
+      messageLimit: isOwner ? 250000 : 1000,
+      joinedDate: u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
+    });
+  }
+
+  // Override/merge with profile fields
+  for (const p of profiles) {
+    const existing = p.id ? mergedMap.get(p.id) : null;
+    if (existing) {
+      existing.name = p.full_name || existing.name;
+      existing.phone = p.phone || existing.phone;
+      existing.tier = (p.tier || existing.tier) as "free" | "pro" | "enterprise";
+      existing.messageLimit = Number(p.message_limit) || existing.messageLimit;
+      if (p.created_at) {
+        existing.joinedDate = new Date(p.created_at).toLocaleDateString('vi-VN');
+      }
+    } else if (p.email) {
+      // If profile exists but user wasn't in Auth list
+      const isOwner = p.email.toLowerCase() === 'ox102.crypto@gmail.com';
+      mergedMap.set(p.id || `db-${p.email}`, {
+        id: p.id || `db-${p.email}`,
+        name: p.full_name || p.email.split('@')[0] || "Khách Hàng Thật",
+        email: p.email,
+        phone: p.phone || "Không có",
+        tier: (p.tier || (isOwner ? "enterprise" : "free")) as "free" | "pro" | "enterprise",
+        messageLimit: Number(p.message_limit) || (isOwner ? 250000 : 1000),
+        joinedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
+      });
+    }
+  }
+
+  dbCustomers = Array.from(mergedMap.values());
 
   // Merge database players with dynamic workspace session registers
   const finalCustomers = [...saasCustomers];
