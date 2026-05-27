@@ -1581,9 +1581,10 @@ app.post("/api/check-token", async (req, res) => {
 });
 
 // Real Webhook handler from Live Telegram API
-app.post("/api/telegram-webhook/:botId", async (req, res) => {
+app.post("/api/telegram-webhook/:botId", async (req, res, next) => {
   const update = req.body;
   const botId = req.params.botId;
+  if (botId === "simulate") return next();
   const allBots = await dbGetBots(bots);
   const bot = allBots.find(b => b.id === botId);
   
