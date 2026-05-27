@@ -316,9 +316,73 @@ app.get("/api/admin/customers", async (req, res) => {
 
   if (client) {
     try {
-      // 1. Try to fetch from the database 'profiles' table if it exists
+      // 1. Fetch all profiles from public.profiles if configured
       const { data: profiles, error: pError } = await client.from("profiles").select("*");
-      if (!pError && profiles && profiles.length > 0) {
+      const profilesMap = new Map<string, any>();
+      if (!pError && profiles) {
+        profiles.forEach(p => {
+          if (p.id) {
+            profilesMap.set(p.id.toLowerCase(), p);
+          }
+          if (p.email) {
+            profilesMap.set(p.email.toLowerCase(), p);
+          }
+        });
+      }
+
+      // 2. Fetch all registered Auth users if service_role key allows
+      let authUsers: any[] = [];
+      try {
+        const { data: authData, error: aError } = await client.auth.admin.listUsers();
+        if (!aError && authData && authData.users) {
+          authUsers = authData.users;
+        }
+      } catch (authErr) {
+        console.warn("Could not list auth users from Supabase:", authErr);
+      }
+
+      // 3. Combine them:
+      // If we have auth users, we map over them and enrich with profiles.
+      // If we don't have auth users (e.g. key doesn't allow), we fall back to using profiles.
+      if (authUsers.length > 0) {
+        dbCustomers = authUsers.map(u => {
+          const emailKey = u.email?.toLowerCase() || "";
+          const idKey = u.id?.toLowerCase() || "";
+          const profile = profilesMap.get(idKey) || profilesMap.get(emailKey);
+          
+          return {
+            id: u.id,
+            name: profile?.full_name || u.user_metadata?.full_name || u.email?.split('@')[0] || "Khách Hàng Thật",
+            email: u.email || "",
+            phone: profile?.phone || u.phone || u.user_metadata?.phone || "Chưa cập nhật",
+            tier: (profile?.tier || (u.email === 'ox102.crypto@gmail.com' ? 'enterprise' : 'free')) as "free" | "pro" | "enterprise",
+            messageLimit: Number(profile?.message_limit) || (u.email === 'ox102.crypto@gmail.com' ? 250000 : 1000),
+            joinedDate: profile?.created_at 
+              ? new Date(profile.created_at).toLocaleDateString('vi-VN') 
+              : u.created_at 
+                ? new Date(u.created_at).toLocaleDateString('vi-VN') 
+                : new Date().toLocaleDateString('vi-VN')
+          };
+        });
+
+        // Also add any profiles that might not have matched an auth user (just in case)
+        if (profiles) {
+          profiles.forEach(p => {
+            const hasMatch = authUsers.some(u => u.id === p.id || (u.email && p.email && u.email.toLowerCase() === p.email.toLowerCase()));
+            if (!hasMatch) {
+              dbCustomers.push({
+                id: p.id || `db-${p.email}`,
+                name: p.full_name || p.email?.split('@')[0] || "Khách Hàng Thật",
+                email: p.email || "",
+                phone: p.phone || "Không có",
+                tier: (p.tier || "free") as "free" | "pro" | "enterprise",
+                messageLimit: Number(p.message_limit) || 1000,
+                joinedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
+              });
+            }
+          });
+        }
+      } else if (profiles && profiles.length > 0) {
         dbCustomers = profiles.map(p => ({
           id: p.id || `db-${p.email}`,
           name: p.full_name || p.email?.split('@')[0] || "Khách Hàng Thật",
@@ -328,20 +392,6 @@ app.get("/api/admin/customers", async (req, res) => {
           messageLimit: Number(p.message_limit) || 1000,
           joinedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
         }));
-      } else {
-        // 2. If table is empty or doesn't have rows, try to pull list of registered Auth users using service role API
-        const { data: authData, error: aError } = await client.auth.admin.listUsers();
-        if (!aError && authData && authData.users && authData.users.length > 0) {
-          dbCustomers = authData.users.map(u => ({
-            id: u.id,
-            name: u.email?.split('@')[0] || "Khách Hàng Thật",
-            email: u.email || "",
-            phone: u.phone || "Chưa cập nhật",
-            tier: (u.email === 'ox102.crypto@gmail.com' ? 'enterprise' : 'free') as "free" | "pro" | "enterprise",
-            messageLimit: u.email === 'ox102.crypto@gmail.com' ? 250000 : 1000,
-            joinedDate: u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
-          }));
-        }
       }
     } catch (err) {
       console.warn("Dynamic user discovery through Supabase skipped or failed:", err);
@@ -389,10 +439,34 @@ app.get("/api/admin/customers", async (req, res) => {
   res.json(finalCustomers);
 });
 
-app.post("/api/admin/customers", (req, res) => {
+app.post("/api/admin/customers", async (req, res) => {
   const { name, email, phone, tier, messageLimit, joinedDate } = req.body;
+  
+  let userId = "cust-" + (saasCustomers.length + 1);
+  const client = getSupabaseClient();
+  
+  if (client && email) {
+    try {
+      // 1. Try to create the auth user
+      const { data: authUser, error: authError } = await client.auth.admin.createUser({
+        email: email,
+        password: "DefaultPassword123@", // Default temp password
+        email_confirm: true,
+        user_metadata: { full_name: name, phone: phone }
+      });
+      
+      if (!authError && authUser && authUser.user) {
+        userId = authUser.user.id;
+      } else {
+        console.warn("Failed to create auth user (might be key permission or duplicate):", authError);
+      }
+    } catch (err) {
+      console.warn("Failed to invoke auth.admin.createUser:", err);
+    }
+  }
+
   const newCust: SaasCustomer = {
-    id: "cust-" + (saasCustomers.length + 1),
+    id: userId,
     name: name || "Khách hàng mới",
     email: email || "",
     phone: phone || "Không có",
@@ -400,27 +474,150 @@ app.post("/api/admin/customers", (req, res) => {
     messageLimit: Number(messageLimit) || 1000,
     joinedDate: joinedDate || new Date().toLocaleDateString('vi-VN')
   };
+
   saasCustomers.push(newCust);
+
+  // Write to profiles table if client is connected
+  if (client) {
+    try {
+      const { error: profileError } = await client.from("profiles").upsert({
+        id: userId,
+        email: email,
+        full_name: name || "Khách hàng mới",
+        phone: phone || "Không có",
+        tier: tier || "free",
+        message_limit: Number(messageLimit) || 1000,
+        created_at: new Date().toISOString()
+      }, { onConflict: 'id' });
+      if (profileError) {
+        console.error("Error upserting created user profile:", profileError);
+      }
+    } catch (err) {
+      console.error("Failed to write manual customer profile to Supabase:", err);
+    }
+  }
+
   res.status(201).json(newCust);
 });
 
-app.put("/api/admin/customers/:id", (req, res) => {
+app.put("/api/admin/customers/:id", async (req, res) => {
   const { id } = req.params;
   const { tier, messageLimit, phone, name } = req.body;
-  const customer = saasCustomers.find(c => c.id === id);
+
+  // 1. Update in local arrays if they exist
+  let customer = saasCustomers.find(c => c.id === id);
+  if (customer) {
+    if (tier !== undefined) customer.tier = tier;
+    if (messageLimit !== undefined) customer.messageLimit = Number(messageLimit);
+    if (phone !== undefined) customer.phone = phone;
+    if (name !== undefined) customer.name = name;
+  }
+
+  const workspaceUser = workspaceUsers.find(u => u.id === id);
+  if (workspaceUser) {
+    if (name !== undefined) workspaceUser.fullName = name;
+    if (tier !== undefined) workspaceUser.role = tier === 'enterprise' ? 'owner' : 'viewer';
+  }
+
+  // 2. Sync to Supabase Profiles if connected
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      let email = "";
+      let fullName = "";
+      let existingPhone = "";
+
+      // Look up current info locally or from Supabase
+      if (customer) {
+        email = customer.email;
+        fullName = customer.name;
+        existingPhone = customer.phone;
+      } else if (workspaceUser) {
+        email = workspaceUser.email;
+        fullName = workspaceUser.fullName;
+        existingPhone = "Chưa cập nhật";
+      }
+
+      if (!email) {
+        const { data: uData } = await client.auth.admin.getUserById(id).catch(() => ({ data: null }));
+        if (uData && uData.user) {
+          email = uData.user.email || "";
+          fullName = uData.user.user_metadata?.full_name || email.split('@')[0] || "";
+          existingPhone = uData.user.phone || "";
+        }
+      }
+
+      const { data: existingProfile } = await client.from("profiles").select("*").eq("id", id).maybeSingle();
+      if (existingProfile) {
+        email = existingProfile.email || email;
+        fullName = existingProfile.full_name || fullName;
+        existingPhone = existingProfile.phone || existingPhone;
+      }
+
+      const upsertData: any = {
+        id,
+        email: email || `user-${id}@example.com`,
+        full_name: name !== undefined ? name : (fullName || email.split('@')[0] || "Khách Hàng Thật"),
+        phone: phone !== undefined ? phone : (existingPhone || "Chưa cập nhật"),
+        tier: tier !== undefined ? tier : (existingProfile?.tier || "free"),
+        message_limit: messageLimit !== undefined ? Number(messageLimit) : (existingProfile?.message_limit || 1000),
+        updated_at: new Date().toISOString()
+      };
+
+      const { error: upsertError } = await client.from("profiles").upsert(upsertData, { onConflict: 'id' });
+      if (upsertError) {
+        console.error("Error upserting public.profiles:", upsertError);
+      }
+
+      // If we don't have it locally but updated successfully, we can create/enrich the returned object
+      if (!customer) {
+        customer = {
+          id,
+          name: upsertData.full_name,
+          email: upsertData.email,
+          phone: upsertData.phone,
+          tier: upsertData.tier,
+          messageLimit: upsertData.message_limit,
+          joinedDate: existingProfile?.created_at 
+            ? new Date(existingProfile.created_at).toLocaleDateString('vi-VN') 
+            : new Date().toLocaleDateString('vi-VN')
+        };
+      }
+    } catch (err) {
+      console.error("Failed to sync customer update to Supabase profiles:", err);
+    }
+  }
+
   if (!customer) {
     return res.status(404).json({ error: "Không tìm thấy khách hàng này!" });
   }
-  if (tier !== undefined) customer.tier = tier;
-  if (messageLimit !== undefined) customer.messageLimit = Number(messageLimit);
-  if (phone !== undefined) customer.phone = phone;
-  if (name !== undefined) customer.name = name;
+
   res.json(customer);
 });
 
-app.delete("/api/admin/customers/:id", (req, res) => {
+app.delete("/api/admin/customers/:id", async (req, res) => {
   const { id } = req.params;
+  
+  // Remove from memory
   saasCustomers = saasCustomers.filter(c => c.id !== id);
+  workspaceUsers = workspaceUsers.filter(u => u.id !== id);
+
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      // 1. Delete from profiles
+      await client.from("profiles").delete().eq("id", id);
+      // 2. Try to delete the auth user
+      try {
+        await client.auth.admin.deleteUser(id);
+      } catch (authErr) {
+        console.warn("Could not delete auth user from Supabase:", authErr);
+      }
+    } catch (dbErr) {
+      console.warn("Failed to delete user profiles on Supabase:", dbErr);
+    }
+  }
+  
   res.json({ success: true, message: `Đã xóa khách hàng ${id} thành công!` });
 });
 
