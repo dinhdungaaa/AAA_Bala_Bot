@@ -703,10 +703,42 @@ app.get("/api/bots", async (req, res) => {
   const allBots = await dbGetBots(bots);
   
   if (userId) {
-    // If a user is logged in, hide system demo prefilled bots (with no userId or system bot IDs)
-    // and show only bots they have registered/created.
-    const userBots = allBots.filter(b => b.userId === userId);
-    return res.json(userBots);
+    // Determine if user is admin (ox102.crypto@gmail.com)
+    let userEmail = "";
+    const foundUser = workspaceUsers.find(u => u.id === userId);
+    if (foundUser) {
+      userEmail = foundUser.email;
+    }
+
+    if (!userEmail) {
+      const client = getSupabaseClient();
+      if (client) {
+        try {
+          const { data: profile } = await client.from("profiles").select("email").eq("id", userId).maybeSingle();
+          if (profile && profile.email) {
+            userEmail = profile.email;
+          } else {
+            const { data: authUser } = await client.auth.admin.getUserById(userId).catch(() => ({ data: null }));
+            if (authUser && authUser.user && authUser.user.email) {
+              userEmail = authUser.user.email;
+            }
+          }
+        } catch (dbErr) {
+          console.warn("Could not lookup user email for admin check:", dbErr);
+        }
+      }
+    }
+
+    const isAdmin = (userEmail && userEmail.toLowerCase() === "ox102.crypto@gmail.com") || userId === "u-1";
+
+    if (isAdmin) {
+      // Admin sees all bots (including system bots and other users' bots)
+      return res.json(allBots);
+    } else {
+      // Regular users only see their own bots
+      const userBots = allBots.filter(b => b.userId === userId);
+      return res.json(userBots);
+    }
   }
   
   res.json(allBots);
