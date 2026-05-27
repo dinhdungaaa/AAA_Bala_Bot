@@ -792,8 +792,14 @@ app.put("/api/bots/:id", async (req, res) => {
 });
 
 app.delete("/api/bots/:id", async (req, res) => {
-  bots = bots.filter(b => b.id !== req.params.id);
-  await dbDeleteBot(req.params.id);
+  const { id } = req.params;
+  bots = bots.filter(b => b.id !== id);
+  knowledgeSources = knowledgeSources.filter(s => s.botId !== id);
+  knowledgeChunks = knowledgeChunks.filter(c => c.botId !== id);
+  chatSessions = chatSessions.filter(s => s.botId !== id);
+  faqList = faqList.filter(f => f.botId !== id);
+
+  await dbDeleteBot(id);
   res.json({ success: true });
 });
 

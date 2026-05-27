@@ -1779,6 +1779,82 @@ export default function App() {
                 </div>
               </div>
 
+              {/* DANGER ZONE: DELETE BOT */}
+              <div className="border-t border-rose-100 pt-6">
+                <div className="bg-rose-50/50 rounded-xl border border-rose-200 p-5 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 bg-rose-100 text-rose-600 rounded-lg">
+                      <Trash2 className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h4 className="font-extrabold text-sm text-slate-800 uppercase tracking-wide">Danger Zone • Vùng Nguy Hiểm</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">Xóa vĩnh viễn bot này khỏi hệ thống. Hành động này không thể hoàn tác.</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 pt-2">
+                    <div className="space-y-1">
+                      <span className="text-xs font-bold text-slate-700 block">Xác nhận bằng cách nhập từ <code className="bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-mono font-bold">delete</code> dưới đây:</span>
+                      <input
+                        type="text"
+                        placeholder="Nhập 'delete' để xác nhận"
+                        id="bot-delete-confirm-input"
+                        className="w-full sm:w-[240px] bg-white border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-1 focus:ring-rose-500 focus:outline-none placeholder:text-slate-400 font-medium"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const inputEl = document.getElementById('bot-delete-confirm-input') as HTMLInputElement;
+                        if (!inputEl || inputEl.value.trim().toLowerCase() !== 'delete') {
+                          alert("Vui lòng nhập chính xác từ 'delete' để xác nhận xóa bot!");
+                          return;
+                        }
+                        if (confirm(`Bạn có chắc chắn 100% muốn xóa vĩnh viễn bot "${activeBot.name}" không? Toàn bộ tri thức và cấu hình sẽ bị mất.`)) {
+                          fetch(`/api/bots/${selectedBotId}`, {
+                            method: 'DELETE'
+                          })
+                          .then(res => {
+                            if (!res.ok) throw new Error("Xóa bot thất bại");
+                            return res.json();
+                          })
+                          .then(data => {
+                            if (data.success) {
+                              alert(`Đã xóa bot "${activeBot.name}" thành công!`);
+                              
+                              // Remove from local bots state
+                              const remaining = bots.filter(b => b.id !== selectedBotId);
+                              setBots(remaining);
+                              
+                              // Reset active bot
+                              if (remaining.length > 0) {
+                                setSelectedBotId(remaining[0].id);
+                              } else {
+                                setSelectedBotId('');
+                              }
+                              
+                              // Clear the input
+                              if (inputEl) inputEl.value = '';
+                              
+                              setActiveTab('dashboard');
+                            } else {
+                              alert("Xóa bot thất bại.");
+                            }
+                          })
+                          .catch(err => {
+                            console.error("Error deleting bot:", err);
+                            alert("Đã có lỗi xảy ra khi xóa bot.");
+                          });
+                        }
+                      }}
+                      className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer self-end shadow-xs shadow-rose-500/10"
+                    >
+                      Xóa Vĩnh Viễn Trợ Lý
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="text-right">
                 <button
                   onClick={() => {
