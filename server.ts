@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer } from "./src/types.js";
@@ -40,6 +41,14 @@ import {
 // Helper for type compatibility (since we'll import types in types.ts but write server)
 const app = express();
 const PORT = 3000;
+
+// Strip /balabot prefix transparently to support subpath proxying
+app.use((req, res, next) => {
+  if (req.url.startsWith('/balabot')) {
+    req.url = req.url.slice('/balabot'.length) || '/';
+  }
+  next();
+});
 
 app.use(express.json({ limit: "50mb" }));
 
@@ -429,6 +438,50 @@ app.get("/api/supabase/config", async (req, res) => {
 app.post("/api/supabase/config", async (req, res) => {
   const { url, key } = req.body;
   updateDynamicConfig(url, key);
+
+  // Persist configuration to .env file safely, preserving other settings (like GEMINI_API_KEY)
+  const envPath = path.join(process.cwd(), ".env");
+  let content = "";
+  if (fs.existsSync(envPath)) {
+    try {
+      content = fs.readFileSync(envPath, "utf8");
+    } catch (e) {
+      console.error("Failed to read .env file:", e);
+    }
+  }
+
+  const lines = content.split(/\r?\n/);
+  const newLines: string[] = [];
+  let hasUrl = false;
+  let hasAnon = false;
+  let hasRole = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("SUPABASE_URL=")) {
+      newLines.push(`SUPABASE_URL="${url}"`);
+      hasUrl = true;
+    } else if (trimmed.startsWith("SUPABASE_ANON_KEY=")) {
+      newLines.push(`SUPABASE_ANON_KEY="${key}"`);
+      hasAnon = true;
+    } else if (trimmed.startsWith("SUPABASE_SERVICE_ROLE_KEY=")) {
+      newLines.push(`SUPABASE_SERVICE_ROLE_KEY="${key}"`);
+      hasRole = true;
+    } else {
+      newLines.push(line);
+    }
+  }
+
+  if (!hasUrl) newLines.push(`SUPABASE_URL="${url}"`);
+  if (!hasAnon) newLines.push(`SUPABASE_ANON_KEY="${key}"`);
+  if (!hasRole) newLines.push(`SUPABASE_SERVICE_ROLE_KEY="${key}"`);
+
+  try {
+    fs.writeFileSync(envPath, newLines.join("\n"), "utf8");
+  } catch (e) {
+    console.error("Failed to write .env file:", e);
+  }
+
   const status = await testConnection();
   res.json({
     success: true,

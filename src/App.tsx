@@ -2393,7 +2393,7 @@ export default function App() {
                           <strong className="block text-slate-700 font-mono mt-1 select-all">
                             {window.location.origin.includes('ais-dev-') 
                               ? window.location.origin.replace('ais-dev-', 'ais-pre-') 
-                              : window.location.origin}/api/telegram-webhook/{activeBot.id}
+                              : window.location.origin}{window.location.pathname.startsWith('/balabot') ? '/balabot' : ''}/api/telegram-webhook/{activeBot.id}
                           </strong>
                         </div>
 
