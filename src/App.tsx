@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSummary, SaasCustomer } from './types';
 
+const ADMIN_EMAIL = 'ox102.crypto@gmail.com';
+
 // Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
 const renderFormattedText = (text: string, isUser: boolean = false) => {
   if (!text) return null;
@@ -86,6 +88,14 @@ export default function App() {
   const [sbAuthLoading, setSbAuthLoading] = useState(false);
   const [sbAuthError, setSbAuthError] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(false);
+
+  const getBotsUrl = (user = sbUser) => {
+    if (!user?.id && !user?.email) return '/api/bots';
+    const params = new URLSearchParams();
+    if (user?.id) params.set('userId', user.id);
+    if (user?.email) params.set('email', user.email);
+    return `/api/bots?${params.toString()}`;
+  };
 
 
   // Pricing & monetization states - default values are highly generous as requested!
@@ -230,7 +240,7 @@ export default function App() {
         setWebhookActionMsg({ status: 'success', text: data.message });
         fetchWebhookDetails(); // update local status
         // Fetch fresh bots state
-        const botUrl = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
+        const botUrl = getBotsUrl();
         const botRes = await fetch(botUrl);
         if (botRes.ok) {
           const freshBots = await botRes.json();
@@ -265,7 +275,7 @@ export default function App() {
       try {
         const parsed = JSON.parse(savedUser);
         setSbUser(parsed);
-        if (parsed.email === 'ox102.crypto@gmail.com') {
+        if (parsed.email === ADMIN_EMAIL) {
           setActiveTab('admin');
         } else {
           setActiveTab('dashboard');
@@ -298,14 +308,14 @@ export default function App() {
 
   // Protect Admin dashboard & automatically redirect non-admin accounts
   useEffect(() => {
-    if (sbUser && sbUser.email !== 'ox102.crypto@gmail.com' && activeTab === 'admin') {
+    if (sbUser && sbUser.email !== ADMIN_EMAIL && activeTab === 'admin') {
       setActiveTab('dashboard');
     }
   }, [sbUser, activeTab]);
 
   // Fetch real SaaS users to enrich the admin directory with active data from backend
   useEffect(() => {
-    if (activeTab === 'admin' && sbUser?.email === 'ox102.crypto@gmail.com') {
+    if (activeTab === 'admin' && sbUser?.email === ADMIN_EMAIL) {
       fetch('/api/admin/customers')
         .then(res => res.json())
         .then(data => {
@@ -315,11 +325,11 @@ export default function App() {
         })
         .catch(err => console.error("Error fetching SaaS customers:", err));
     }
-  }, [activeTab, sbUser]);
+  }, [activeTab, sbUser, sbStatus?.connected]);
 
   // Fetch initial bots when user session changes
   useEffect(() => {
-    const url = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
+    const url = getBotsUrl();
     fetch(url)
       .then(res => res.json())
       .then(data => {
@@ -330,7 +340,7 @@ export default function App() {
           setSelectedBotId('');
         }
       });
-  }, [sbUser?.id]);
+  }, [sbUser?.id, sbUser?.email, sbStatus?.connected]);
 
   // Fetch bot-specific resources when dynamic bot or tab changes
   useEffect(() => {
@@ -449,7 +459,7 @@ export default function App() {
       if (res.ok && data.success) {
         setSbUser(data.user);
         localStorage.setItem("sbUser", JSON.stringify(data.user));
-        if (data.user.email === 'ox102.crypto@gmail.com') {
+        if (data.user.email === ADMIN_EMAIL) {
           setActiveTab('admin');
         } else {
           setActiveTab('dashboard');
@@ -537,7 +547,7 @@ export default function App() {
       if (data.success) {
         alert('Đồng bộ dữ liệu mẫu lên database Supabase thành công! ✨');
         // reload bots if synced
-        const botUrl = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
+        const botUrl = getBotsUrl();
         fetch(botUrl)
           .then(r => r.json())
           .then(d => {
@@ -1235,11 +1245,11 @@ export default function App() {
             <div className="flex-1 overflow-hidden">
               <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 block">Workspace</span>
               <span className="text-xs text-white font-medium truncate block">
-                {sbUser?.email === 'ox102.crypto@gmail.com' ? 'AAA Organic Farm' : `${sbUser?.email?.split('@')[0]}'s Workspace`}
+                {sbUser?.email === ADMIN_EMAIL ? 'AAA Organic Farm' : `${sbUser?.email?.split('@')[0]}'s Workspace`}
               </span>
             </div>
             <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded uppercase font-mono font-bold">
-              {sbUser?.email === 'ox102.crypto@gmail.com' ? 'Owner' : 'Member'}
+              {sbUser?.email === ADMIN_EMAIL ? 'Owner' : 'Member'}
             </span>
           </div>
         </div>
@@ -1331,7 +1341,7 @@ export default function App() {
             Gói Cước & Bảng Giá
           </button>
 
-          {sbUser?.email === 'ox102.crypto@gmail.com' && (
+          {sbUser?.email === ADMIN_EMAIL && (
             <button
               onClick={() => { setActiveTab('admin'); setIsMobileMenuOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'admin' ? 'bg-blue-600/10 text-amber-500 border-l-4 border-amber-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -4228,7 +4238,7 @@ WHERE email = 'customer-email@example.com';`}
             </div>
           )}
 
-          {activeTab === 'admin' && sbUser?.email === 'ox102.crypto@gmail.com' && (
+          {activeTab === 'admin' && sbUser?.email === ADMIN_EMAIL && (
             <div className="space-y-6 animate-fade-in text-left">
               {/* HEADER BANNER */}
               <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 border border-slate-700/50 text-white rounded-2xl p-6 md:p-8 relative overflow-hidden shadow-xl">

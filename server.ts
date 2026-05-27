@@ -41,6 +41,7 @@ import {
 // Helper for type compatibility (since we'll import types in types.ts but write server)
 const app = express();
 const PORT = 3000;
+const ADMIN_EMAIL = "ox102.crypto@gmail.com";
 
 // Strip /balabot prefix transparently to support subpath proxying
 app.use((req, res, next) => {
@@ -316,6 +317,7 @@ app.post("/api/workspace/users", (req, res) => {
 // Real SaaS Customers endpoints
 app.get("/api/admin/customers", async (req, res) => {
   const client = getSupabaseClient();
+  const allBots = await dbGetBots(bots);
   let dbCustomers: SaasCustomer[] = [];
 
   let authUsers: any[] = [];
@@ -353,7 +355,7 @@ app.get("/api/admin/customers", async (req, res) => {
   // Add all users from Auth first
   for (const u of authUsers) {
     if (!u.email) continue;
-    const isOwner = u.email.toLowerCase() === 'ox102.crypto@gmail.com';
+    const isOwner = u.email.toLowerCase() === ADMIN_EMAIL;
     mergedMap.set(u.id, {
       id: u.id,
       name: u.email.split('@')[0],
@@ -378,7 +380,7 @@ app.get("/api/admin/customers", async (req, res) => {
       }
     } else if (p.email) {
       // If profile exists but user wasn't in Auth list
-      const isOwner = p.email.toLowerCase() === 'ox102.crypto@gmail.com';
+      const isOwner = p.email.toLowerCase() === ADMIN_EMAIL;
       mergedMap.set(p.id || `db-${p.email}`, {
         id: p.id || `db-${p.email}`,
         name: p.full_name || p.email.split('@')[0] || "Khách Hàng Thật",
@@ -417,13 +419,27 @@ app.get("/api/admin/customers", async (req, res) => {
     }
   });
 
+  allBots.forEach(bot => {
+    if (bot.userId && !finalCustomers.some(c => c.id === bot.userId)) {
+      finalCustomers.push({
+        id: bot.userId,
+        name: `User ${bot.userId.slice(0, 8)}`,
+        email: `unknown-${bot.userId.slice(0, 8)}@local`,
+        phone: "ChÆ°a cáº­p nháº­t",
+        tier: "free",
+        messageLimit: 1000,
+        joinedDate: bot.createdAt ? new Date(bot.createdAt).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
+      });
+    }
+  });
+
   // Always ensure our master user exists
-  const hasAdmin = finalCustomers.some(c => c.email.toLowerCase() === 'ox102.crypto@gmail.com');
+  const hasAdmin = finalCustomers.some(c => c.email.toLowerCase() === ADMIN_EMAIL);
   if (!hasAdmin) {
     finalCustomers.unshift({
       id: "u-1",
       name: "Founder Doanh Nghiệp AAA",
-      email: "ox102.crypto@gmail.com",
+      email: ADMIN_EMAIL,
       phone: "090.888.9999",
       tier: "enterprise",
       messageLimit: 250000,
@@ -600,7 +616,7 @@ app.post("/api/supabase/auth/signup", async (req, res) => {
   const result = await dbSignUpUser(email, password, redirectTo);
   if (result.success) {
     const freshEmail = email.toLowerCase();
-    const isOwner = freshEmail === 'ox102.crypto@gmail.com';
+    const isOwner = freshEmail === ADMIN_EMAIL;
     const userId = result.user?.id || `user-${Date.now()}`;
 
     // Add to session lists so they instantly reflect in administrative view
@@ -659,7 +675,7 @@ app.post("/api/supabase/auth/signin", async (req, res) => {
   const result = await dbSignInUser(email, password);
   if (result.success) {
     const freshEmail = email.toLowerCase();
-    const isOwner = freshEmail === 'ox102.crypto@gmail.com';
+    const isOwner = freshEmail === ADMIN_EMAIL;
     const userId = result.user?.id || `user-${Date.now()}`;
 
     // Update dynamically tracked session directories
@@ -684,6 +700,23 @@ app.post("/api/supabase/auth/signin", async (req, res) => {
         messageLimit: isOwner ? 250000 : 1000,
         joinedDate: new Date().toLocaleDateString('vi-VN')
       });
+    }
+
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        await client.from("profiles").upsert({
+          id: userId,
+          email: email,
+          full_name: email.split('@')[0],
+          phone: "ChÆ°a cáº­p nháº­t",
+          tier: isOwner ? 'enterprise' : 'free',
+          message_limit: isOwner ? 250000 : 1000,
+          created_at: new Date().toISOString()
+        }, { onConflict: "id" });
+      } catch (dbErr) {
+        console.warn("Automatic public.profiles DB upsert skipped on signin:", dbErr);
+      }
     }
 
     res.json(result);
@@ -839,11 +872,12 @@ Nội dung chính của tài liệu ${baseName}:
 // Bots API
 app.get("/api/bots", async (req, res) => {
   const userId = req.query.userId as string;
+  const requestedEmail = ((req.query.email as string) || "").toLowerCase();
   const allBots = await dbGetBots(bots);
   
-  if (userId) {
+  if (userId || requestedEmail) {
     // Determine if user is admin (ox102.crypto@gmail.com)
-    let userEmail = "";
+    let userEmail = requestedEmail;
     const foundUser = workspaceUsers.find(u => u.id === userId);
     if (foundUser) {
       userEmail = foundUser.email;
@@ -868,13 +902,14 @@ app.get("/api/bots", async (req, res) => {
       }
     }
 
-    const isAdmin = (userEmail && userEmail.toLowerCase() === "ox102.crypto@gmail.com") || userId === "u-1";
+    const isAdmin = (userEmail && userEmail.toLowerCase() === ADMIN_EMAIL) || userId === "u-1";
 
     if (isAdmin) {
       // Admin sees all bots (including system bots and other users' bots)
       return res.json(allBots);
     } else {
       // Regular users only see their own bots
+      if (!userId) return res.json([]);
       const userBots = allBots.filter(b => b.userId === userId);
       return res.json(userBots);
     }
