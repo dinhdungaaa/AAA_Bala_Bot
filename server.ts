@@ -1822,7 +1822,7 @@ function stripEmojiAndDecorations(input: string) {
 function getCleanDisplayName(rawName?: string, username?: string) {
   const source = stripEmojiAndDecorations(rawName || username || "");
   const withoutHandle = source.replace(/^@/, "").replace(/[_-]+/g, " ");
-  const honorificWords = new Set(["anh", "chị", "chi", "cô", "co", "chú", "chu", "bạn", "ban"]);
+  const honorificWords = new Set(["anh", "chị", "chi", "ch", "cô", "co", "chú", "chu", "bạn", "ban"]);
   const parts = withoutHandle
     .split(/\s+/)
     .filter(part => {
