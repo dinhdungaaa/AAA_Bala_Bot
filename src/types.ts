@@ -77,6 +77,7 @@ export interface ChatSession {
   status: 'bot_answered' | 'failed' | 'escalated' | 'resolved' | 'needs_review';
   internalNotes: string;
   messages: Message[];
+  detectedGender?: 'male' | 'female' | null;
 }
 
 export interface FAQItem {

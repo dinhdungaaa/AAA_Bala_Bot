@@ -1451,13 +1451,20 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
     session.lastMessageText = text;
     session.lastMessageTime = userMsg.timestamp;
 
+    // Detect gender from user's message (e.g., "anh muốn...", "chị cần...")
+    const messageGender = detectGenderFromMessage(text);
+    if (messageGender) {
+      session.detectedGender = messageGender;
+    }
+
     let responseText = "";
     let sourcesUsed: any[] = [];
     let fallbackTriggered = false;
 
     if (text.trim().toLowerCase() === "/start") {
       const detected = getGenderAndName(tFullName);
-      const pr = detected.pronoun;
+      // Use session-detected gender if available, otherwise fall back to name-based detection
+      const pr = session.detectedGender === 'male' ? 'anh' : session.detectedGender === 'female' ? 'chị' : detected.pronoun;
       const nm = detected.name;
       let customWelcome = bot.welcomeMessage || "Dạ, em kính chào anh chị ạ. Em có thể hỗ trợ gì cho mình hôm nay ạ?";
       const greetingTarget = (nm === "Khách Hàng" || nm === "Telegram" || nm.includes("Khách Hàng"))
@@ -1470,7 +1477,7 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
       responseText = customWelcome;
     } else {
       // Fetch dynamic answer using vector tri thức
-      const aiAnswer = await generateRAGAnswer(bot, text, { fullName: tFullName, username: tUsername, id: tUserId });
+      const aiAnswer = await generateRAGAnswer(bot, text, { fullName: tFullName, username: tUsername, id: tUserId, detectedGender: session.detectedGender || undefined });
       responseText = aiAnswer.text;
       sourcesUsed = aiAnswer.sources;
       fallbackTriggered = aiAnswer.fallbackTriggered;
@@ -1563,11 +1570,17 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
   session.lastMessageText = text;
   session.lastMessageTime = userMsg.timestamp;
 
+  // Detect gender from user's message (e.g., "anh muốn...", "chị cần...")
+  const messageGender = detectGenderFromMessage(text);
+  if (messageGender) {
+    session.detectedGender = messageGender;
+  }
+
   // Process through AI Answer retrieval or /start detection
   let aiAnswer;
   if (text.trim().toLowerCase() === "/start") {
     const detected = getGenderAndName(tFullName);
-    const pr = detected.pronoun;
+    const pr = session.detectedGender === 'male' ? 'anh' : session.detectedGender === 'female' ? 'chị' : detected.pronoun;
     const nm = detected.name;
     let customWelcome = bot.welcomeMessage || "Dạ, em kính chào anh chị ạ. Em có thể hỗ trợ gì cho mình hôm nay ạ?";
     const greetingTarget = (nm === "Khách Hàng" || nm === "Telegram" || nm.includes("Khách Hàng"))
@@ -1583,7 +1596,7 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
       fallbackTriggered: false
     };
   } else {
-    aiAnswer = await generateRAGAnswer(bot, text, { fullName: tFullName, username: tUsername, id: tUserId });
+    aiAnswer = await generateRAGAnswer(bot, text, { fullName: tFullName, username: tUsername, id: tUserId, detectedGender: session.detectedGender || undefined });
   }
 
   const botMsg: Message = {
@@ -1619,9 +1632,105 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
 
 
 // Helper to detect Vietnamese gender and extract first name
+// Strip emoji characters from a string (for cleaning Telegram display names)
+function stripEmoji(str: string): string {
+  return str
+    .replace(/[\u{1F600}-\u{1F64F}]/gu, '') // Emoticons
+    .replace(/[\u{1F300}-\u{1F5FF}]/gu, '') // Misc Symbols and Pictographs
+    .replace(/[\u{1F680}-\u{1F6FF}]/gu, '') // Transport and Map
+    .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '') // Flags
+    .replace(/[\u{2600}-\u{26FF}]/gu, '')   // Misc symbols
+    .replace(/[\u{2700}-\u{27BF}]/gu, '')   // Dingbats
+    .replace(/[\u{FE00}-\u{FE0F}]/gu, '')   // Variation Selectors
+    .replace(/[\u{1F900}-\u{1F9FF}]/gu, '') // Supplemental Symbols
+    .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '') // Chess Symbols
+    .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '') // Symbols Extended-A
+    .replace(/[\u{200D}]/gu, '')            // Zero Width Joiner
+    .replace(/[\u{20E3}]/gu, '')            // Combining Enclosing Keycap
+    .replace(/[\u{E0020}-\u{E007F}]/gu, '') // Tags
+    .replace(/\s+/g, ' ')                   // Collapse multiple spaces
+    .trim();
+}
+
+// Detect gender from user's message based on Vietnamese self-referencing pronouns
+function detectGenderFromMessage(message: string): 'male' | 'female' | null {
+  const msgLower = message.toLowerCase().trim();
+  
+  // Strong male self-reference patterns: user refers to themselves as "anh"
+  const malePatterns = [
+    /\banh\s+muốn\b/i,
+    /\banh\s+cần\b/i,
+    /\banh\s+hỏi\b/i,
+    /\banh\s+tìm\b/i,
+    /\banh\s+đang\b/i,
+    /\banh\s+có\b/i,
+    /\banh\s+thấy\b/i,
+    /\banh\s+nghĩ\b/i,
+    /\banh\s+biết\b/i,
+    /\banh\s+xem\b/i,
+    /\banh\s+mua\b/i,
+    /\banh\s+đã\b/i,
+    /\banh\s+sẽ\b/i,
+    /\banh\s+chưa\b/i,
+    /\banh\s+không\b/i,
+    /\banh\s+vừa\b/i,
+    /\banh\s+nghe\b/i,
+    /\banh\s+quan\s*tâm\b/i,
+    /\bbên\s+anh\b/i,
+    /\bcủa\s+anh\b/i,
+    /\bcho\s+anh\b/i,
+    /\bgửi\s+anh\b/i,
+    /\bgiúp\s+anh\b/i,
+    /\btư\s+vấn\s+cho\s+anh\b/i,
+    /\btư\s+vấn\s+giúp\s+anh\b/i,
+  ];
+  
+  // Strong female self-reference patterns: user refers to themselves as "chị"
+  const femalePatterns = [
+    /\bchị\s+muốn\b/i,
+    /\bchị\s+cần\b/i,
+    /\bchị\s+hỏi\b/i,
+    /\bchị\s+tìm\b/i,
+    /\bchị\s+đang\b/i,
+    /\bchị\s+có\b/i,
+    /\bchị\s+thấy\b/i,
+    /\bchị\s+nghĩ\b/i,
+    /\bchị\s+biết\b/i,
+    /\bchị\s+xem\b/i,
+    /\bchị\s+mua\b/i,
+    /\bchị\s+đã\b/i,
+    /\bchị\s+sẽ\b/i,
+    /\bchị\s+chưa\b/i,
+    /\bchị\s+không\b/i,
+    /\bchị\s+vừa\b/i,
+    /\bchị\s+nghe\b/i,
+    /\bchị\s+quan\s*tâm\b/i,
+    /\bbên\s+chị\b/i,
+    /\bcủa\s+chị\b/i,
+    /\bcho\s+chị\b/i,
+    /\bgửi\s+chị\b/i,
+    /\bgiúp\s+chị\b/i,
+    /\btư\s+vấn\s+cho\s+chị\b/i,
+    /\btư\s+vấn\s+giúp\s+chị\b/i,
+  ];
+
+  const maleMatch = malePatterns.some(p => p.test(msgLower));
+  const femaleMatch = femalePatterns.some(p => p.test(msgLower));
+  
+  if (maleMatch && !femaleMatch) return 'male';
+  if (femaleMatch && !maleMatch) return 'female';
+  
+  return null;
+}
+
 function getGenderAndName(fullName: string): { pronoun: string; name: string } {
   if (!fullName) return { pronoun: "Anh/Chị", name: "Khách Hàng" };
-  const parts = fullName.trim().split(/\s+/);
+  
+  // Strip emoji from name first
+  const cleanFullName = stripEmoji(fullName);
+  if (!cleanFullName || cleanFullName.length === 0) return { pronoun: "Anh/Chị", name: "Khách Hàng" };
+  
+  const parts = cleanFullName.trim().split(/\s+/);
   const cleanParts = parts.filter(p => p.length > 0);
   if (cleanParts.length === 0) {
     return { pronoun: "Anh/Chị", name: "Khách Hàng" };
@@ -1739,7 +1848,7 @@ function sanitizeTelegramHTML(text: string): string {
 async function generateRAGAnswer(
   bot: BotConfig, 
   query: string,
-  userInfo?: { fullName?: string; username?: string; id?: string }
+  userInfo?: { fullName?: string; username?: string; id?: string; detectedGender?: 'male' | 'female' }
 ): Promise<{ text: string; sources: any[]; fallbackTriggered: boolean }> {
   // Determine gender/pronoun and first name for xưng hô
   let pronoun = "Anh/Chị";
@@ -1750,6 +1859,13 @@ async function generateRAGAnswer(
     const detected = getGenderAndName(defaultName);
     pronoun = detected.pronoun;
     targetName = detected.name;
+    
+    // Override pronoun with session-detected gender from conversation if available
+    if (userInfo.detectedGender === 'male') {
+      pronoun = 'anh';
+    } else if (userInfo.detectedGender === 'female') {
+      pronoun = 'chị';
+    }
   }
 
   // 1. Get knowledge chunks for this bot
