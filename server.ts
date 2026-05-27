@@ -1822,9 +1822,13 @@ function stripEmojiAndDecorations(input: string) {
 function getCleanDisplayName(rawName?: string, username?: string) {
   const source = stripEmojiAndDecorations(rawName || username || "");
   const withoutHandle = source.replace(/^@/, "").replace(/[_-]+/g, " ");
+  const honorificWords = new Set(["anh", "chị", "chi", "cô", "co", "chú", "chu", "bạn", "ban"]);
   const parts = withoutHandle
     .split(/\s+/)
-    .filter(part => part.length > 1 && !part.includes("@") && !/^\d+$/.test(part));
+    .filter(part => {
+      const normalized = removeVietnameseTone(part).toLowerCase();
+      return part.length > 1 && !part.includes("@") && !/^\d+$/.test(part) && !honorificWords.has(normalized);
+    });
 
   if (parts.length === 0) return "khách";
   return parts[parts.length - 1];
