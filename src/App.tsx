@@ -7,8 +7,6 @@ import {
 } from 'lucide-react';
 import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSummary, SaasCustomer } from './types';
 
-const ADMIN_EMAIL = 'ox102.crypto@gmail.com';
-
 // Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
 const renderFormattedText = (text: string, isUser: boolean = false) => {
   if (!text) return null;
@@ -88,14 +86,6 @@ export default function App() {
   const [sbAuthLoading, setSbAuthLoading] = useState(false);
   const [sbAuthError, setSbAuthError] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(false);
-
-  const getBotsUrl = (user = sbUser) => {
-    if (!user?.id && !user?.email) return '/api/bots';
-    const params = new URLSearchParams();
-    if (user?.id) params.set('userId', user.id);
-    if (user?.email) params.set('email', user.email);
-    return `/api/bots?${params.toString()}`;
-  };
 
 
   // Pricing & monetization states - default values are highly generous as requested!
@@ -230,9 +220,6 @@ export default function App() {
       if (origin.includes('ais-dev-')) {
         origin = origin.replace('ais-dev-', 'ais-pre-');
       }
-      if (window.location.pathname.startsWith('/balabot') && !origin.endsWith('/balabot')) {
-        origin = `${origin}/balabot`;
-      }
       const res = await fetch(`/api/bots/${selectedBotId}/telegram-webhook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -243,7 +230,7 @@ export default function App() {
         setWebhookActionMsg({ status: 'success', text: data.message });
         fetchWebhookDetails(); // update local status
         // Fetch fresh bots state
-        const botUrl = getBotsUrl();
+        const botUrl = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
         const botRes = await fetch(botUrl);
         if (botRes.ok) {
           const freshBots = await botRes.json();
@@ -271,39 +258,17 @@ export default function App() {
   // Search Knowledge Filter
   const [kbSearchQuery, setKbSearchQuery] = useState('');
 
-  // Rehydrate Supabase Auth Session & Restore User Config
+  // Rehydrate Supabase Auth Session
   useEffect(() => {
     const savedUser = localStorage.getItem("sbUser");
     if (savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
         setSbUser(parsed);
-        if (parsed.email === ADMIN_EMAIL) {
+        if (parsed.email === 'ox102.crypto@gmail.com') {
           setActiveTab('admin');
         } else {
           setActiveTab('dashboard');
-        }
-        if (parsed.email) {
-          fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(parsed.email)}`)
-            .then(res => res.json())
-            .then(data => {
-              if (data.success && data.url && data.key) {
-                fetch('/api/supabase/config', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url: data.url, key: data.key, email: parsed.email })
-                })
-                .then(r => r.json())
-                .then(actData => {
-                  if (actData.success) {
-                    setSbUrl(data.url);
-                    setSbKey(data.key);
-                    setSbStatus(actData.status);
-                  }
-                });
-              }
-            })
-            .catch(err => console.error("Error restoring user config on mount", err));
         }
       } catch (_) {}
     }
@@ -311,14 +276,14 @@ export default function App() {
 
   // Protect Admin dashboard & automatically redirect non-admin accounts
   useEffect(() => {
-    if (sbUser && sbUser.email !== ADMIN_EMAIL && activeTab === 'admin') {
+    if (sbUser && sbUser.email !== 'ox102.crypto@gmail.com' && activeTab === 'admin') {
       setActiveTab('dashboard');
     }
   }, [sbUser, activeTab]);
 
   // Fetch real SaaS users to enrich the admin directory with active data from backend
   useEffect(() => {
-    if (activeTab === 'admin' && sbUser?.email === ADMIN_EMAIL) {
+    if (activeTab === 'admin' && sbUser?.email === 'ox102.crypto@gmail.com') {
       fetch('/api/admin/customers')
         .then(res => res.json())
         .then(data => {
@@ -328,11 +293,11 @@ export default function App() {
         })
         .catch(err => console.error("Error fetching SaaS customers:", err));
     }
-  }, [activeTab, sbUser, sbStatus?.connected]);
+  }, [activeTab, sbUser]);
 
   // Fetch initial bots when user session changes
   useEffect(() => {
-    const url = getBotsUrl();
+    const url = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
     fetch(url)
       .then(res => res.json())
       .then(data => {
@@ -343,7 +308,7 @@ export default function App() {
           setSelectedBotId('');
         }
       });
-  }, [sbUser?.id, sbUser?.email, sbStatus?.connected]);
+  }, [sbUser?.id]);
 
   // Fetch bot-specific resources when dynamic bot or tab changes
   useEffect(() => {
@@ -462,36 +427,11 @@ export default function App() {
       if (res.ok && data.success) {
         setSbUser(data.user);
         localStorage.setItem("sbUser", JSON.stringify(data.user));
-        if (data.user.email === ADMIN_EMAIL) {
+        if (data.user.email === 'ox102.crypto@gmail.com') {
           setActiveTab('admin');
         } else {
           setActiveTab('dashboard');
         }
-        
-        // Retrieve and restore user's saved Supabase credentials if present
-        if (data.user.email) {
-          fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(data.user.email)}`)
-            .then(r => r.json())
-            .then(configData => {
-              if (configData.success && configData.url && configData.key) {
-                fetch('/api/supabase/config', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url: configData.url, key: configData.key, email: data.user.email })
-                })
-                .then(r => r.json())
-                .then(actData => {
-                  if (actData.success) {
-                    setSbUrl(configData.url);
-                    setSbKey(configData.key);
-                    setSbStatus(actData.status);
-                  }
-                });
-              }
-            })
-            .catch(err => console.error("Error retrieving user config upon signin", err));
-        }
-
         alert(sbAuthMode === 'signup' 
           ? 'Đăng ký tài khoản hệ thống Supabase Auth thành công! Bạn có thể sử dụng tài khoản vừa tạo để đăng nhập. 🎉' 
           : 'Đăng nhập vào hệ thống Supabase Auth thành công! Khóa phiên đã cài đặt. 🔑'
@@ -526,7 +466,7 @@ export default function App() {
       const res = await fetch('/api/supabase/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: sbUrl, key: sbKey, email: sbUser?.email || '' })
+        body: JSON.stringify({ url: sbUrl, key: sbKey })
       });
       const data = await res.json();
       if (data.success) {
@@ -550,7 +490,7 @@ export default function App() {
       if (data.success) {
         alert('Đồng bộ dữ liệu mẫu lên database Supabase thành công! ✨');
         // reload bots if synced
-        const botUrl = getBotsUrl();
+        const botUrl = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
         fetch(botUrl)
           .then(r => r.json())
           .then(d => {
@@ -1247,13 +1187,9 @@ export default function App() {
             <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
             <div className="flex-1 overflow-hidden">
               <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 block">Workspace</span>
-              <span className="text-xs text-white font-medium truncate block">
-                {sbUser?.email === ADMIN_EMAIL ? 'AAA Organic Farm' : `${sbUser?.email?.split('@')[0]}'s Workspace`}
-              </span>
+              <span className="text-xs text-white font-medium truncate block">AAA Organic Farm</span>
             </div>
-            <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded uppercase font-mono font-bold">
-              {sbUser?.email === ADMIN_EMAIL ? 'Owner' : 'Member'}
-            </span>
+            <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded uppercase font-mono font-bold">Owner</span>
           </div>
         </div>
 
@@ -1344,7 +1280,7 @@ export default function App() {
             Gói Cước & Bảng Giá
           </button>
 
-          {sbUser?.email === ADMIN_EMAIL && (
+          {sbUser?.email === 'ox102.crypto@gmail.com' && (
             <button
               onClick={() => { setActiveTab('admin'); setIsMobileMenuOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'admin' ? 'bg-blue-600/10 text-amber-500 border-l-4 border-amber-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -1840,82 +1776,6 @@ export default function App() {
                   >
                     <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out ${activeBot.limitToKnowledge ? 'translate-x-5' : 'translate-x-0'}`}></span>
                   </button>
-                </div>
-              </div>
-
-              {/* DANGER ZONE: DELETE BOT */}
-              <div className="border-t border-rose-100 pt-6">
-                <div className="bg-rose-50/50 rounded-xl border border-rose-200 p-5 space-y-4">
-                  <div className="flex items-center gap-2">
-                    <span className="p-1.5 bg-rose-100 text-rose-600 rounded-lg">
-                      <Trash2 className="w-4 h-4" />
-                    </span>
-                    <div>
-                      <h4 className="font-extrabold text-sm text-slate-800 uppercase tracking-wide">Danger Zone • Vùng Nguy Hiểm</h4>
-                      <p className="text-xs text-slate-500 mt-0.5">Xóa vĩnh viễn bot này khỏi hệ thống. Hành động này không thể hoàn tác.</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 pt-2">
-                    <div className="space-y-1">
-                      <span className="text-xs font-bold text-slate-700 block">Xác nhận bằng cách nhập từ <code className="bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-mono font-bold">delete</code> dưới đây:</span>
-                      <input
-                        type="text"
-                        placeholder="Nhập 'delete' để xác nhận"
-                        id="bot-delete-confirm-input"
-                        className="w-full sm:w-[240px] bg-white border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-1 focus:ring-rose-500 focus:outline-none placeholder:text-slate-400 font-medium"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const inputEl = document.getElementById('bot-delete-confirm-input') as HTMLInputElement;
-                        if (!inputEl || inputEl.value.trim().toLowerCase() !== 'delete') {
-                          alert("Vui lòng nhập chính xác từ 'delete' để xác nhận xóa bot!");
-                          return;
-                        }
-                        if (confirm(`Bạn có chắc chắn 100% muốn xóa vĩnh viễn bot "${activeBot.name}" không? Toàn bộ tri thức và cấu hình sẽ bị mất.`)) {
-                          fetch(`/api/bots/${selectedBotId}`, {
-                            method: 'DELETE'
-                          })
-                          .then(res => {
-                            if (!res.ok) throw new Error("Xóa bot thất bại");
-                            return res.json();
-                          })
-                          .then(data => {
-                            if (data.success) {
-                              alert(`Đã xóa bot "${activeBot.name}" thành công!`);
-                              
-                              // Remove from local bots state
-                              const remaining = bots.filter(b => b.id !== selectedBotId);
-                              setBots(remaining);
-                              
-                              // Reset active bot
-                              if (remaining.length > 0) {
-                                setSelectedBotId(remaining[0].id);
-                              } else {
-                                setSelectedBotId('');
-                              }
-                              
-                              // Clear the input
-                              if (inputEl) inputEl.value = '';
-                              
-                              setActiveTab('dashboard');
-                            } else {
-                              alert("Xóa bot thất bại.");
-                            }
-                          })
-                          .catch(err => {
-                            console.error("Error deleting bot:", err);
-                            alert("Đã có lỗi xảy ra khi xóa bot.");
-                          });
-                        }
-                      }}
-                      className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer self-end shadow-xs shadow-rose-500/10"
-                    >
-                      Xóa Vĩnh Viễn Trợ Lý
-                    </button>
-                  </div>
                 </div>
               </div>
 
@@ -2457,7 +2317,7 @@ export default function App() {
                           <strong className="block text-slate-700 font-mono mt-1 select-all">
                             {window.location.origin.includes('ais-dev-') 
                               ? window.location.origin.replace('ais-dev-', 'ais-pre-') 
-                              : window.location.origin}{window.location.pathname.startsWith('/balabot') ? '/balabot' : ''}/api/telegram-webhook/{activeBot.id}
+                              : window.location.origin}/api/telegram-webhook/{activeBot.id}
                           </strong>
                         </div>
 
@@ -4241,7 +4101,7 @@ WHERE email = 'customer-email@example.com';`}
             </div>
           )}
 
-          {activeTab === 'admin' && sbUser?.email === ADMIN_EMAIL && (
+          {activeTab === 'admin' && sbUser?.email === 'ox102.crypto@gmail.com' && (
             <div className="space-y-6 animate-fade-in text-left">
               {/* HEADER BANNER */}
               <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 border border-slate-700/50 text-white rounded-2xl p-6 md:p-8 relative overflow-hidden shadow-xl">
