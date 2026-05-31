@@ -272,6 +272,22 @@ export default function App() {
   const [schedLoading, setSchedLoading] = useState(false);
   const [schedTab, setSchedTab] = useState<'list' | 'create' | 'upload' | 'logs'>('list');
 
+  // Reusable function to fetch bots from the backend
+  const fetchBots = (userId?: string) => {
+    const url = userId ? `/api/bots?userId=${userId}` : '/api/bots';
+    fetch(url)
+      .then(res => res.json())
+      .then(data => {
+        setBots(data);
+        if (data.length > 0) {
+          setSelectedBotId(prev => prev || data[0].id);
+        } else {
+          setSelectedBotId('');
+        }
+      })
+      .catch(err => console.error("Error fetching bots:", err));
+  };
+
   // Rehydrate Supabase Auth Session & Restore User Config
   useEffect(() => {
     const savedUser = localStorage.getItem("sbUser");
@@ -288,47 +304,45 @@ export default function App() {
         const savedUrl = localStorage.getItem("sbUrl");
         const savedKey = localStorage.getItem("sbKey");
 
+        // Helper: after config is activated on the backend, re-fetch bots from Supabase
+        const onConfigRestored = (url: string, key: string, status: any) => {
+          setSbUrl(url);
+          setSbKey(key);
+          setSbStatus(status);
+          localStorage.setItem("sbUrl", url);
+          localStorage.setItem("sbKey", key);
+          // Re-fetch bots now that the backend Supabase client is configured
+          fetchBots(parsed.id);
+        };
+
+        const activateConfig = (url: string, key: string) => {
+          fetch('/api/supabase/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, key, email: parsed.email })
+          })
+          .then(r => r.json())
+          .then(actData => {
+            if (actData.success) {
+              onConfigRestored(url, key, actData.status);
+            }
+          });
+        };
+
         if (parsed.email) {
           fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(parsed.email)}`)
             .then(res => res.json())
             .then(data => {
               const urlToUse = data.url || savedUrl;
               const keyToUse = data.key || savedKey;
-
               if (urlToUse && keyToUse) {
-                fetch('/api/supabase/config', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url: urlToUse, key: keyToUse, email: parsed.email })
-                })
-                .then(r => r.json())
-                .then(actData => {
-                  if (actData.success) {
-                    setSbUrl(urlToUse);
-                    setSbKey(keyToUse);
-                    setSbStatus(actData.status);
-                    localStorage.setItem("sbUrl", urlToUse);
-                    localStorage.setItem("sbKey", keyToUse);
-                  }
-                });
+                activateConfig(urlToUse, keyToUse);
               }
             })
             .catch(err => {
               console.error("Error restoring user config on mount", err);
               if (savedUrl && savedKey) {
-                fetch('/api/supabase/config', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url: savedUrl, key: savedKey, email: parsed.email })
-                })
-                .then(r => r.json())
-                .then(actData => {
-                  if (actData.success) {
-                    setSbUrl(savedUrl);
-                    setSbKey(savedKey);
-                    setSbStatus(actData.status);
-                  }
-                });
+                activateConfig(savedUrl, savedKey);
               }
             });
         }
@@ -359,17 +373,7 @@ export default function App() {
 
   // Fetch initial bots when user session changes
   useEffect(() => {
-    const url = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
-    fetch(url)
-      .then(res => res.json())
-      .then(data => {
-        setBots(data);
-        if (data.length > 0) {
-          setSelectedBotId(data[0].id);
-        } else {
-          setSelectedBotId('');
-        }
-      });
+    fetchBots(sbUser?.id);
   }, [sbUser?.id]);
 
   // Fetch bot-specific resources when dynamic bot or tab changes
@@ -507,45 +511,44 @@ export default function App() {
         if (data.user.email) {
           const savedUrl = localStorage.getItem("sbUrl");
           const savedKey = localStorage.getItem("sbKey");
+
+          const onSigninConfigRestored = (url: string, key: string, status: any) => {
+            setSbUrl(url);
+            setSbKey(key);
+            setSbStatus(status);
+            localStorage.setItem("sbUrl", url);
+            localStorage.setItem("sbKey", key);
+            // Re-fetch bots now that the backend Supabase client is configured
+            fetchBots(data.user.id);
+          };
+
+          const activateSigninConfig = (url: string, key: string) => {
+            fetch('/api/supabase/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url, key, email: data.user.email })
+            })
+            .then(r => r.json())
+            .then(actData => {
+              if (actData.success) {
+                onSigninConfigRestored(url, key, actData.status);
+              }
+            });
+          };
+
           fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(data.user.email)}`)
             .then(r => r.json())
             .then(configData => {
               const urlToUse = configData.url || savedUrl;
               const keyToUse = configData.key || savedKey;
               if (urlToUse && keyToUse) {
-                fetch('/api/supabase/config', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url: urlToUse, key: keyToUse, email: data.user.email })
-                })
-                .then(r => r.json())
-                .then(actData => {
-                  if (actData.success) {
-                    setSbUrl(urlToUse);
-                    setSbKey(keyToUse);
-                    setSbStatus(actData.status);
-                    localStorage.setItem("sbUrl", urlToUse);
-                    localStorage.setItem("sbKey", keyToUse);
-                  }
-                });
+                activateSigninConfig(urlToUse, keyToUse);
               }
             })
             .catch(err => {
               console.error("Error retrieving user config upon signin", err);
               if (savedUrl && savedKey) {
-                fetch('/api/supabase/config', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url: savedUrl, key: savedKey, email: data.user.email })
-                })
-                .then(r => r.json())
-                .then(actData => {
-                  if (actData.success) {
-                    setSbUrl(savedUrl);
-                    setSbKey(savedKey);
-                    setSbStatus(actData.status);
-                  }
-                });
+                activateSigninConfig(savedUrl, savedKey);
               }
             });
         }
