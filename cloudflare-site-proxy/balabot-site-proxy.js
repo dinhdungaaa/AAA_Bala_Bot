@@ -32,10 +32,11 @@ export default {
       targetUrl = new URL(strippedPath + incomingUrl.search, BACKEND_ORIGIN);
     } else {
       targetUrl = new URL(PAGES_ORIGIN);
-      if (isHtml) {
-        targetUrl.pathname = "/balabot/index.html";
+      const strippedPath = incomingUrl.pathname.slice("/balabot".length) || "/";
+      if (strippedPath === "/") {
+        targetUrl.pathname = "/index.html";
       } else {
-        targetUrl.pathname = incomingUrl.pathname;
+        targetUrl.pathname = strippedPath;
       }
       targetUrl.search = incomingUrl.search;
     }
