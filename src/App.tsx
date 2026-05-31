@@ -284,27 +284,53 @@ export default function App() {
         } else {
           setActiveTab('dashboard');
         }
+
+        const savedUrl = localStorage.getItem("sbUrl");
+        const savedKey = localStorage.getItem("sbKey");
+
         if (parsed.email) {
           fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(parsed.email)}`)
             .then(res => res.json())
             .then(data => {
-              if (data.success && data.url && data.key) {
+              const urlToUse = data.url || savedUrl;
+              const keyToUse = data.key || savedKey;
+
+              if (urlToUse && keyToUse) {
                 fetch('/api/supabase/config', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url: data.url, key: data.key, email: parsed.email })
+                  body: JSON.stringify({ url: urlToUse, key: keyToUse, email: parsed.email })
                 })
                 .then(r => r.json())
                 .then(actData => {
                   if (actData.success) {
-                    setSbUrl(data.url);
-                    setSbKey(data.key);
+                    setSbUrl(urlToUse);
+                    setSbKey(keyToUse);
                     setSbStatus(actData.status);
+                    localStorage.setItem("sbUrl", urlToUse);
+                    localStorage.setItem("sbKey", keyToUse);
                   }
                 });
               }
             })
-            .catch(err => console.error("Error restoring user config on mount", err));
+            .catch(err => {
+              console.error("Error restoring user config on mount", err);
+              if (savedUrl && savedKey) {
+                fetch('/api/supabase/config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ url: savedUrl, key: savedKey, email: parsed.email })
+                })
+                .then(r => r.json())
+                .then(actData => {
+                  if (actData.success) {
+                    setSbUrl(savedUrl);
+                    setSbKey(savedKey);
+                    setSbStatus(actData.status);
+                  }
+                });
+              }
+            });
         }
       } catch (_) {}
     }
@@ -479,26 +505,49 @@ export default function App() {
         
         // Retrieve and restore user's saved Supabase credentials if present
         if (data.user.email) {
+          const savedUrl = localStorage.getItem("sbUrl");
+          const savedKey = localStorage.getItem("sbKey");
           fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(data.user.email)}`)
             .then(r => r.json())
             .then(configData => {
-              if (configData.success && configData.url && configData.key) {
+              const urlToUse = configData.url || savedUrl;
+              const keyToUse = configData.key || savedKey;
+              if (urlToUse && keyToUse) {
                 fetch('/api/supabase/config', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url: configData.url, key: configData.key, email: data.user.email })
+                  body: JSON.stringify({ url: urlToUse, key: keyToUse, email: data.user.email })
                 })
                 .then(r => r.json())
                 .then(actData => {
                   if (actData.success) {
-                    setSbUrl(configData.url);
-                    setSbKey(configData.key);
+                    setSbUrl(urlToUse);
+                    setSbKey(keyToUse);
                     setSbStatus(actData.status);
+                    localStorage.setItem("sbUrl", urlToUse);
+                    localStorage.setItem("sbKey", keyToUse);
                   }
                 });
               }
             })
-            .catch(err => console.error("Error retrieving user config upon signin", err));
+            .catch(err => {
+              console.error("Error retrieving user config upon signin", err);
+              if (savedUrl && savedKey) {
+                fetch('/api/supabase/config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ url: savedUrl, key: savedKey, email: data.user.email })
+                })
+                .then(r => r.json())
+                .then(actData => {
+                  if (actData.success) {
+                    setSbUrl(savedUrl);
+                    setSbKey(savedKey);
+                    setSbStatus(actData.status);
+                  }
+                });
+              }
+            });
         }
 
         alert(sbAuthMode === 'signup' 
@@ -525,7 +574,9 @@ export default function App() {
   const handleSbSignOut = () => {
     setSbUser(null);
     localStorage.removeItem("sbUser");
-    alert('Đã đăng xuất tài khoản Supabase Auth thành công. 👋');
+    localStorage.removeItem("sbUrl");
+    localStorage.removeItem("sbKey");
+    alert('Đăng xuất tài khoản Supabase Auth thành công. 👋');
   };
 
   const handleSaveSupabaseConfig = async (e: React.FormEvent) => {
@@ -540,6 +591,8 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setSbStatus(data.status);
+        localStorage.setItem("sbUrl", sbUrl);
+        localStorage.setItem("sbKey", sbKey);
         alert('Cấu hình kết nối Supabase thành công! Hệ thống đã cập nhật và kiểm tra bảng.');
       }
     } catch (err: any) {
