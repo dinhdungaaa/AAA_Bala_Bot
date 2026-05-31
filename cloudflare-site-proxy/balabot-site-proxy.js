@@ -1,9 +1,13 @@
 const PAGES_ORIGIN = "https://antiantiai-site.pages.dev";
 const BACKEND_ORIGIN = "https://balabot-server.onrender.com";
 
-function withCors(response) {
+function withCors(response, isHtml = false) {
   const headers = new Headers(response.headers);
   headers.set("x-balabot-site-proxy", "antiantiai-pages");
+  if (isHtml) {
+    headers.set("cache-control", "no-store, no-cache, must-revalidate, max-age=0");
+    headers.delete("age");
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -21,13 +25,18 @@ export default {
 
     let targetUrl;
     const isApi = incomingUrl.pathname.startsWith("/balabot/api/");
+    const isHtml = incomingUrl.pathname === "/balabot/" || incomingUrl.pathname === "/balabot/index.html";
 
     if (isApi) {
       const strippedPath = incomingUrl.pathname.slice("/balabot".length) || "/";
       targetUrl = new URL(strippedPath + incomingUrl.search, BACKEND_ORIGIN);
     } else {
       targetUrl = new URL(PAGES_ORIGIN);
-      targetUrl.pathname = incomingUrl.pathname;
+      if (isHtml) {
+        targetUrl.pathname = "/balabot/index.html";
+      } else {
+        targetUrl.pathname = incomingUrl.pathname;
+      }
       targetUrl.search = incomingUrl.search;
     }
 
@@ -45,7 +54,7 @@ export default {
 
     try {
       const response = await fetch(proxyRequest);
-      return isApi ? response : withCors(response);
+      return isApi ? response : withCors(response, isHtml);
     } catch (err) {
       return new Response(
         JSON.stringify({
