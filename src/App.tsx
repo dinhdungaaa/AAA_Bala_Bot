@@ -57,7 +57,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'admin'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin'>('dashboard');
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
@@ -1379,6 +1379,14 @@ export default function App() {
             Lịch Nhắc Tự Động
           </button>
 
+          <button
+            onClick={() => { setActiveTab('train-schedules'); setIsMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'train-schedules' ? 'bg-blue-600/10 text-teal-400 border-l-4 border-teal-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <Sparkles className="w-4 h-4 text-teal-400" />
+            Train Lịch Nhắc (AI)
+          </button>
+
           {sbUser?.email === 'ox102.crypto@gmail.com' && (
             <button
               onClick={() => { setActiveTab('admin'); setIsMobileMenuOpen(false); }}
@@ -1460,12 +1468,13 @@ export default function App() {
                   {activeTab === 'conversations' && 'Lịch sử Hội thoại Real-time'}
                   {activeTab === 'analytics' && 'Báo cáo Đo Lường Hiệu Suất'}
                   {activeTab === 'schedules' && 'Hệ Thống Nhắc Lịch Tự Động & AI Push'}
+                  {activeTab === 'train-schedules' && 'Đào Tạo & Thiết Lập Lịch Nhắc (AI)'}
                   {activeTab === 'supabase' && 'Cơ sở dữ liệu đám mây Supabase'}
                   {activeTab === 'billing' && 'Chính sách Bảng giá & Thiết lập Doanh thu SaaS'}
                   {activeTab === 'admin' && 'Cổng Quản Trị Hệ Thống SaaS & Phân Quyền Khách Hàng'}
                 </h1>
                 <p className="text-xs text-emerald-600 font-medium hidden sm:block truncate max-w-[300px] lg:max-w-none">
-                  {activeTab === 'admin' ? 'Bảng điều khiển tối cao quản trị tài khoản, cấp bù tin nhắn và phân gói thủ công' : 'Trợ lý AI chăm sóc khách hàng 24/7'}
+                  {activeTab === 'admin' ? 'Bảng điều khiển tối cao quản trị tài khoản, cấp bù tin nhắn và phân gói thủ công' : activeTab === 'train-schedules' ? 'Đào tạo AI tự động phân tích quy trình timeline' : 'Trợ lý AI chăm sóc khách hàng 24/7'}
                 </p>
               </div>
             </div>
@@ -4226,7 +4235,7 @@ WHERE email = 'customer-email@example.com';`}
 
               {/* SUB-NAV TABS */}
               <div className="flex bg-white border border-slate-200 rounded-xl p-1 gap-1 shadow-xs">
-                {([['list', 'Danh sách', Calendar], ['create', 'Tạo mới', Plus], ['upload', 'Nạp file / AI', Upload], ['logs', 'Lịch sử gửi', History]] as [string, string, any][]).map(([key, label, Icon]) => (
+                {([['list', 'Danh sách', Calendar], ['create', 'Tạo mới', Plus], ['logs', 'Lịch sử gửi', History]] as [string, string, any][]).map(([key, label, Icon]) => (
                   <button key={key} onClick={() => setSchedTab(key as any)}
                     className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${schedTab === key ? 'bg-teal-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}>
                     <Icon className="w-3.5 h-3.5" />{label}
@@ -4411,59 +4420,6 @@ WHERE email = 'customer-email@example.com';`}
                 </div>
               )}
 
-              {/* UPLOAD TAB */}
-              {schedTab === 'upload' && (
-                <div className="space-y-5">
-                  <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-4">
-                    <h3 className="font-bold text-base text-slate-800 flex items-center gap-2"><Upload className="w-5 h-5 text-teal-500" />Nạp File Quy Trình (TXT, CSV, JSON, Excel)</h3>
-                    <div className="border-2 border-dashed border-slate-300 hover:border-teal-400 rounded-xl p-8 text-center transition-colors cursor-pointer"
-                      onClick={() => document.getElementById('sched-file-input')?.click()}>
-                      <Upload className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                      <p className="text-sm font-bold text-slate-600">{schedUploadFile ? schedUploadFile.name : 'Kéo thả hoặc nhấn để chọn file'}</p>
-                      <p className="text-[10px] text-slate-400 mt-1">Hỗ trợ: .txt, .csv, .json, .xlsx</p>
-                      <input id="sched-file-input" type="file" accept=".txt,.csv,.json,.xlsx,.xls,.md" className="hidden" onChange={e => setSchedUploadFile(e.target.files?.[0] || null)} />
-                    </div>
-                    <button disabled={!schedUploadFile || schedLoading} onClick={async () => {
-                      if (!schedUploadFile || !selectedBotId) return;
-                      setSchedLoading(true);
-                      const reader = new FileReader();
-                      reader.onload = async () => {
-                        try {
-                          const base64 = (reader.result as string).split(',')[1];
-                          const res = await fetch(`/api/bots/${selectedBotId}/schedules/upload`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: schedUploadFile.name, fileData: base64 }) });
-                          const data = await res.json();
-                          if (data.success) { setSchedules(prev => [...data.schedules, ...prev]); alert(`Nạp thành công ${data.totalParsed} lịch nhắc!`); setSchedUploadFile(null); setSchedTab('list'); }
-                          else { alert('Lỗi: ' + (data.errors?.join(', ') || 'Không thể parse')); }
-                        } catch (err) { alert('Lỗi: ' + err); }
-                        setSchedLoading(false);
-                      };
-                      reader.readAsDataURL(schedUploadFile);
-                    }} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer">
-                      {schedLoading ? <><RefreshCw className="w-4 h-4 animate-spin" />Đang xử lý...</> : <><Upload className="w-4 h-4" />Upload & Parse File</>}
-                    </button>
-                  </div>
-                  <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-4">
-                    <h3 className="font-bold text-base text-slate-800 flex items-center gap-2"><Sparkles className="w-5 h-5 text-purple-500" />AI Parse Văn Bản Tự Do</h3>
-                    <p className="text-xs text-slate-500">Nhập mô tả quy trình bằng ngôn ngữ tự nhiên. AI sẽ tự động trích xuất thành danh sách lịch nhắc.</p>
-                    <textarea rows={5} placeholder="VD: Nhắc họp sáng lúc 8h30 mỗi ngày. Báo cáo doanh thu vào 17h chiều thứ 6 hàng tuần." value={schedParseText} onChange={e => setSchedParseText(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm resize-none" />
-                    <button disabled={!schedParseText.trim() || schedLoading} onClick={async () => {
-                      if (!selectedBotId) return;
-                      setSchedLoading(true);
-                      try {
-                        const res = await fetch(`/api/bots/${selectedBotId}/schedules/parse-text`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: schedParseText }) });
-                        const data = await res.json();
-                        if (data.success) { setSchedules(prev => [...data.schedules, ...prev]); alert(`AI trích xuất thành công ${data.totalParsed} lịch nhắc!`); setSchedParseText(''); setSchedTab('list'); }
-                        else { alert('Lỗi: ' + (data.errors?.join(', ') || 'AI không thể phân tích')); }
-                      } catch (err) { alert('Lỗi: ' + err); }
-                      finally { setSchedLoading(false); }
-                    }} className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer">
-                      {schedLoading ? <><RefreshCw className="w-4 h-4 animate-spin" />AI đang phân tích...</> : <><Sparkles className="w-4 h-4" />AI Parse & Tạo Lịch Nhắc</>}
-                    </button>
-                  </div>
-                </div>
-              )}
-
               {/* LOGS TAB */}
               {schedTab === 'logs' && (
                 <div className="space-y-3">
@@ -4500,6 +4456,90 @@ WHERE email = 'customer-email@example.com';`}
                 </div>
               )}
 
+            </div>
+          )}
+
+          {activeTab === 'train-schedules' && (
+            <div className="space-y-6 animate-fade-in text-left">
+              {/* HEADER BANNER */}
+              <div className="bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 border border-slate-800 text-white rounded-2xl p-6 md:p-8 relative overflow-hidden shadow-xl">
+                <div className="absolute right-0 bottom-0 opacity-10 pointer-events-none translate-x-12 translate-y-12">
+                  <Sparkles className="w-80 h-80 text-teal-400 rotate-12" />
+                </div>
+                <div className="relative z-10 max-w-4xl">
+                  <h2 className="text-xl md:text-2xl font-extrabold tracking-tight flex items-center gap-3">
+                    <Sparkles className="w-6 h-6 text-teal-400" />
+                    Đào Tạo Lịch Nhắc Tự Động (AI)
+                  </h2>
+                  <p className="text-slate-400 text-xs md:text-sm mt-2 max-w-2xl">
+                    Nạp file quy trình hoặc viết mô tả quy trình bằng ngôn ngữ tự do. AI sẽ tự động phân tích thời gian và nội dung để sinh ra các lịch nhắc Telegram tương ứng.
+                  </p>
+                </div>
+              </div>
+
+              {/* UPLOAD & PARSE SECTIONS */}
+              <div className="space-y-5">
+                <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-4">
+                  <h3 className="font-bold text-base text-slate-800 flex items-center gap-2"><Upload className="w-5 h-5 text-teal-500" />Nạp File Quy Trình (TXT, CSV, JSON, Excel)</h3>
+                  <div className="border-2 border-dashed border-slate-300 hover:border-teal-400 rounded-xl p-8 text-center transition-colors cursor-pointer"
+                    onClick={() => document.getElementById('sched-file-input')?.click()}>
+                    <Upload className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                    <p className="text-sm font-bold text-slate-600">{schedUploadFile ? schedUploadFile.name : 'Kéo thả hoặc nhấn để chọn file'}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Hỗ trợ: .txt, .csv, .json, .xlsx</p>
+                    <input id="sched-file-input" type="file" accept=".txt,.csv,.json,.xlsx,.xls,.md" className="hidden" onChange={e => setSchedUploadFile(e.target.files?.[0] || null)} />
+                  </div>
+                  <button disabled={!schedUploadFile || schedLoading} onClick={async () => {
+                    if (!schedUploadFile || !selectedBotId) return;
+                    setSchedLoading(true);
+                    const reader = new FileReader();
+                    reader.onload = async () => {
+                      try {
+                        const base64 = (reader.result as string).split(',')[1];
+                        const res = await fetch(`/api/bots/${selectedBotId}/schedules/upload`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: schedUploadFile.name, fileData: base64 }) });
+                        const data = await res.json();
+                        if (data.success) {
+                          setSchedules(prev => [...data.schedules, ...prev]);
+                          alert(`Nạp thành công ${data.totalParsed} lịch nhắc!`);
+                          setSchedUploadFile(null);
+                          setActiveTab('schedules');
+                          setSchedTab('list');
+                        }
+                        else { alert('Lỗi: ' + (data.errors?.join(', ') || 'Không thể parse')); }
+                      } catch (err) { alert('Lỗi: ' + err); }
+                      setSchedLoading(false);
+                    };
+                    reader.readAsDataURL(schedUploadFile);
+                  }} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer font-bold">
+                    {schedLoading ? <><RefreshCw className="w-4 h-4 animate-spin" />Đang xử lý...</> : <><Upload className="w-4 h-4" />Upload & Parse File</>}
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-4">
+                  <h3 className="font-bold text-base text-slate-800 flex items-center gap-2"><Sparkles className="w-5 h-5 text-purple-500" />AI Parse Văn Bản Tự Do</h3>
+                  <p className="text-xs text-slate-500">Nhập mô tả quy trình bằng ngôn ngữ tự nhiên. AI sẽ tự động trích xuất thành danh sách lịch nhắc.</p>
+                  <textarea rows={5} placeholder="VD: Nhắc họp sáng lúc 8h30 mỗi ngày. Báo cáo doanh thu vào 17h chiều thứ 6 hàng tuần." value={schedParseText} onChange={e => setSchedParseText(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm resize-none" />
+                  <button disabled={!schedParseText.trim() || schedLoading} onClick={async () => {
+                    if (!selectedBotId) return;
+                    setSchedLoading(true);
+                    try {
+                      const res = await fetch(`/api/bots/${selectedBotId}/schedules/parse-text`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: schedParseText }) });
+                      const data = await res.json();
+                      if (data.success) {
+                        setSchedules(prev => [...data.schedules, ...prev]);
+                        alert(`AI trích xuất thành công ${data.totalParsed} lịch nhắc!`);
+                        setSchedParseText('');
+                        setActiveTab('schedules');
+                        setSchedTab('list');
+                      }
+                      else { alert('Lỗi: ' + (data.errors?.join(', ') || 'AI không thể phân tích')); }
+                    } catch (err) { alert('Lỗi: ' + err); }
+                    finally { setSchedLoading(false); }
+                  }} className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer font-bold">
+                    {schedLoading ? <><RefreshCw className="w-4 h-4 animate-spin" />AI đang phân tích...</> : <><Sparkles className="w-4 h-4" />AI Parse & Tạo Lịch Nhắc</>}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
