@@ -220,6 +220,12 @@ export default function App() {
       if (origin.includes('ais-dev-')) {
         origin = origin.replace('ais-dev-', 'ais-pre-');
       }
+      const isLocal = window.location.hostname === 'localhost' || 
+                      window.location.hostname === '127.0.0.1' || 
+                      window.location.hostname.startsWith('192.168.');
+      if (!isLocal && window.location.pathname.includes('/balabot/')) {
+        origin = `${origin}/balabot`;
+      }
       const res = await fetch(`/api/bots/${selectedBotId}/telegram-webhook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -490,7 +496,14 @@ export default function App() {
       const endpoint = sbAuthMode === 'signup' ? '/api/supabase/auth/signup' : '/api/supabase/auth/signin';
       const payload: any = { email: sbAuthEmail, password: sbAuthPassword };
       if (sbAuthMode === 'signup') {
-        payload.redirectTo = window.location.origin;
+        const isLocal = window.location.hostname === 'localhost' || 
+                        window.location.hostname === '127.0.0.1' || 
+                        window.location.hostname.startsWith('192.168.');
+        if (!isLocal && window.location.pathname.includes('/balabot/')) {
+          payload.redirectTo = `${window.location.origin}/balabot/`;
+        } else {
+          payload.redirectTo = window.location.origin;
+        }
       }
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -2527,9 +2540,19 @@ export default function App() {
                           <p className="font-bold text-blue-900 mb-1 font-sans">💡 Hướng dẫn vận hành:</p>
                           Telegram yêu cầu đường dẫn Webhook phải <strong>công khai (Public URL)</strong>. Do domain dev hiện tại (<code className="text-rose-600 font-mono">ais-dev-...</code>) được bảo mật bằng chế dộ xác thực của Google AI Studio gửi lỗi <code className="text-rose-600 font-bold">302 Found</code>, hệ thống đã <strong>tự động tối ưu hóa và chuyển đổi sang domain preview công khai (<code className="text-green-600 font-mono">ais-pre-...</code>)</strong> để nhận tin trực tiếp từ Telegram:
                           <strong className="block text-slate-700 font-mono mt-1 select-all">
-                            {window.location.origin.includes('ais-dev-') 
-                              ? window.location.origin.replace('ais-dev-', 'ais-pre-') 
-                              : window.location.origin}/api/telegram-webhook/{activeBot.id}
+                            {(() => {
+                              let origin = window.location.origin;
+                              if (origin.includes('ais-dev-')) {
+                                origin = origin.replace('ais-dev-', 'ais-pre-');
+                              }
+                              const isLocal = window.location.hostname === 'localhost' || 
+                                              window.location.hostname === '127.0.0.1' || 
+                                              window.location.hostname.startsWith('192.168.');
+                              if (!isLocal && window.location.pathname.includes('/balabot/')) {
+                                origin = `${origin}/balabot`;
+                              }
+                              return `${origin}/api/telegram-webhook/${activeBot.id}`;
+                            })()}
                           </strong>
                         </div>
 
