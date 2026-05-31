@@ -424,98 +424,6 @@ export async function syncLocalToSupabase(data: {
 
 // SAFE WRAPPING CRUD OPERATIONS (falls back to local arrays if Supabase error/missing tables)
 
-// Database Case-Insensitivity Mapping Helpers
-function mapDbBot(dbBot: any): BotConfig {
-  if (!dbBot) return dbBot;
-  return {
-    id: dbBot.id,
-    userId: dbBot.userId || dbBot.userid || dbBot.userId,
-    name: dbBot.name,
-    description: dbBot.description,
-    field: dbBot.field,
-    language: dbBot.language,
-    tone: dbBot.tone,
-    allowPricing: dbBot.allowPricing !== undefined ? dbBot.allowPricing : dbBot.allowpricing,
-    allowProductConsulting: dbBot.allowProductConsulting !== undefined ? dbBot.allowProductConsulting : dbBot.allowproductconsulting,
-    escalationTrigger: dbBot.escalationTrigger || dbBot.escalationtrigger,
-    telegramToken: dbBot.telegramToken || dbBot.telegramtoken,
-    telegramStatus: dbBot.telegramStatus || dbBot.telegramstatus,
-    telegramBotUsername: dbBot.telegramBotUsername || dbBot.telegrambotusername,
-    telegramWebhookActive: dbBot.telegramWebhookActive !== undefined ? dbBot.telegramWebhookActive : dbBot.telegramwebhookactive,
-    welcomeMessage: dbBot.welcomeMessage || dbBot.welcomemessage,
-    fallbackMessage: dbBot.fallbackMessage || dbBot.fallbackmessage,
-    fallbackEmail: dbBot.fallbackEmail || dbBot.fallbackemail,
-    fallbackPhone: dbBot.fallbackPhone || dbBot.fallbackphone,
-    fallbackZalo: dbBot.fallbackZalo || dbBot.fallbackzalo,
-    fallbackWebsite: dbBot.fallbackWebsite || dbBot.fallbackwebsite,
-    limitToKnowledge: dbBot.limitToKnowledge !== undefined ? dbBot.limitToKnowledge : dbBot.limittoknowledge,
-    restrictedTopics: dbBot.restrictedTopics || dbBot.restrictedtopics,
-    workingHours: dbBot.workingHours || dbBot.workinghours,
-    status: dbBot.status,
-    createdAt: dbBot.createdAt || dbBot.createdat || dbBot.created_at
-  };
-}
-
-function mapDbSource(dbSource: any): KnowledgeSource {
-  if (!dbSource) return dbSource;
-  return {
-    id: dbSource.id,
-    botId: dbSource.botId || dbSource.botid,
-    name: dbSource.name,
-    type: dbSource.type,
-    contentSummary: dbSource.contentSummary || dbSource.contentsummary,
-    fullText: dbSource.fullText || dbSource.fulltext,
-    category: dbSource.category,
-    status: dbSource.status,
-    errorMessage: dbSource.errorMessage || dbSource.errormessage,
-    fileSize: dbSource.fileSize || dbSource.filesize,
-    urlCount: dbSource.urlCount !== undefined ? dbSource.urlCount : dbSource.urlcount,
-    createdAt: dbSource.createdAt || dbSource.createdat || dbSource.created_at
-  };
-}
-
-function mapDbChunk(dbChunk: any): KnowledgeChunk {
-  if (!dbChunk) return dbChunk;
-  return {
-    id: dbChunk.id,
-    botId: dbChunk.botId || dbChunk.botid,
-    sourceId: dbChunk.sourceId || dbChunk.sourceid,
-    title: dbChunk.title,
-    content: dbChunk.content,
-    category: dbChunk.category,
-    tags: dbChunk.tags,
-    isActive: dbChunk.isActive !== undefined ? dbChunk.isActive : dbChunk.isactive
-  };
-}
-
-function mapDbSession(dbSess: any): ChatSession {
-  if (!dbSess) return dbSess;
-  return {
-    id: dbSess.id,
-    botId: dbSess.botId || dbSess.botid,
-    telegramUserId: dbSess.telegramUserId || dbSess.telegramuserid,
-    telegramUsername: dbSess.telegramUsername || dbSess.telegramusername,
-    telegramFullName: dbSess.telegramFullName || dbSess.telegramfullname,
-    lastMessageText: dbSess.lastMessageText || dbSess.lastmessagetext,
-    lastMessageTime: dbSess.lastMessageTime || dbSess.lastmessagetime || dbSess.last_message_time,
-    status: dbSess.status,
-    internalNotes: dbSess.internalNotes || dbSess.internalnotes,
-    messages: dbSess.messages || []
-  };
-}
-
-function mapDbFAQ(dbFaq: any): FAQItem {
-  if (!dbFaq) return dbFaq;
-  return {
-    id: dbFaq.id,
-    botId: dbFaq.botId || dbFaq.botid,
-    question: dbFaq.question,
-    answer: dbFaq.answer,
-    category: dbFaq.category,
-    useCount: dbFaq.useCount !== undefined ? dbFaq.useCount : dbFaq.usecount
-  };
-}
-
 // Bots CRUD
 export async function dbGetBots(localFallback: BotConfig[]): Promise<BotConfig[]> {
   const client = getSupabaseClient();
@@ -526,7 +434,7 @@ export async function dbGetBots(localFallback: BotConfig[]): Promise<BotConfig[]
       console.warn("Supabase dbGetBots select error, using local fallback:", error);
       return localFallback;
     }
-    const dbBots = (data as any[]).map(mapDbBot);
+    const dbBots = data as BotConfig[];
     
     // Merge database bots with local fallback bots.
     // If a bot exists in local fallback, preserve fields that may be missing in DB schema (like userId)
@@ -603,7 +511,7 @@ export async function dbGetSources(botId: string, localFallback: KnowledgeSource
       console.warn("Supabase dbGetSources select error, using local fallback:", error);
       return localFallback;
     }
-    const dbSources = (data as any[]).map(mapDbSource);
+    const dbSources = data as KnowledgeSource[];
     
     // Merge database sources with local fallback sources to resist temporary sync lags or DB insertion issues
     const merged = [...dbSources];
@@ -663,13 +571,10 @@ export async function dbGetChunks(botId: string, localFallback: KnowledgeChunk[]
       console.warn("Supabase dbGetChunks select error, using local fallback:", error);
       return localFallback;
     }
-    const dbChunks = (data as any[]).map(c => {
-      const mapped = mapDbChunk(c);
-      return {
-        ...mapped,
-        tags: Array.isArray(mapped.tags) ? mapped.tags : []
-      };
-    });
+    const dbChunks = (data as any[]).map(c => ({
+      ...c,
+      tags: Array.isArray(c.tags) ? c.tags : []
+    })) as KnowledgeChunk[];
 
     // Merge database chunks with local fallback chunks
     const merged = [...dbChunks];
@@ -741,7 +646,7 @@ export async function dbGetConversations(botId: string, localFallback: ChatSessi
   try {
     const { data, error } = await client.from('chat_sessions').select('*').eq('botId', botId).order('lastMessageTime', { ascending: false });
     if (error) throw error;
-    return (data as any[]).map(mapDbSession);
+    return data as ChatSession[];
   } catch (err: any) {
     console.warn("Supabase dbGetConversations failed (using local data fallback):", err.message || err);
     return localFallback;
@@ -792,7 +697,7 @@ export async function dbGetFAQs(botId: string, localFallback: FAQItem[]): Promis
   try {
     const { data, error } = await client.from('faq_items').select('*').eq('botId', botId).order('useCount', { ascending: false });
     if (error) throw error;
-    return (data as any[]).map(mapDbFAQ);
+    return data as FAQItem[];
   } catch (err: any) {
     console.warn("Supabase dbGetFAQs failed (using local data fallback):", err.message || err);
     return localFallback;

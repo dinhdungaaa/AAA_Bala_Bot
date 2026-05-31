@@ -1,7 +1,6 @@
 import "dotenv/config";
 import express from "express";
 import path from "path";
-import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult } from "./src/types.js";
@@ -48,23 +47,6 @@ import {
 // Helper for type compatibility (since we'll import types in types.ts but write server)
 const app = express();
 const PORT = 3000;
-const ADMIN_EMAIL = "ox102.crypto@gmail.com";
-
-function getPublicBaseUrl(req: express.Request, explicitOrigin?: string) {
-  const host = (req.headers['x-forwarded-host'] || req.headers.host || "").toString();
-  const proto = (req.headers['x-forwarded-proto'] || "https").toString().split(",")[0];
-  const origin = (explicitOrigin || (host ? `${proto}://${host}` : "")).replace(/\/+$/, "");
-  const prefix = (req.originalUrl || req.url).startsWith('/balabot') ? '/balabot' : "";
-  return origin.endsWith('/balabot') ? origin : `${origin}${prefix}`;
-}
-
-// Strip /balabot prefix transparently to support subpath proxying
-app.use((req, res, next) => {
-  if (req.url.startsWith('/balabot')) {
-    req.url = req.url.slice('/balabot'.length) || '/';
-  }
-  next();
-});
 
 app.use(express.json({ limit: "50mb" }));
 
@@ -332,83 +314,41 @@ app.post("/api/workspace/users", (req, res) => {
 // Real SaaS Customers endpoints
 app.get("/api/admin/customers", async (req, res) => {
   const client = getSupabaseClient();
-  const allBots = await dbGetBots(bots);
   let dbCustomers: SaasCustomer[] = [];
 
-  let authUsers: any[] = [];
-  let profiles: any[] = [];
-
   if (client) {
-    // 1. Fetch from Supabase Auth (absorb unauthorized error if using Anon Key)
     try {
-      const { data, error } = await client.auth.admin.listUsers();
-      if (!error && data && data.users) {
-        authUsers = data.users;
-      } else if (error) {
-        console.warn("Supabase admin.listUsers error:", error.message);
+      // 1. Try to fetch from the database 'profiles' table if it exists
+      const { data: profiles, error: pError } = await client.from("profiles").select("*");
+      if (!pError && profiles && profiles.length > 0) {
+        dbCustomers = profiles.map(p => ({
+          id: p.id || `db-${p.email}`,
+          name: p.full_name || p.email?.split('@')[0] || "Khách Hàng Thật",
+          email: p.email || "",
+          phone: p.phone || "Không có",
+          tier: (p.tier || "free") as "free" | "pro" | "enterprise",
+          messageLimit: Number(p.message_limit) || 1000,
+          joinedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
+        }));
+      } else {
+        // 2. If table is empty or doesn't have rows, try to pull list of registered Auth users using service role API
+        const { data: authData, error: aError } = await client.auth.admin.listUsers();
+        if (!aError && authData && authData.users && authData.users.length > 0) {
+          dbCustomers = authData.users.map(u => ({
+            id: u.id,
+            name: u.email?.split('@')[0] || "Khách Hàng Thật",
+            email: u.email || "",
+            phone: u.phone || "Chưa cập nhật",
+            tier: (u.email === 'ox102.crypto@gmail.com' ? 'enterprise' : 'free') as "free" | "pro" | "enterprise",
+            messageLimit: u.email === 'ox102.crypto@gmail.com' ? 250000 : 1000,
+            joinedDate: u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
+          }));
+        }
       }
     } catch (err) {
-      console.warn("Supabase listUsers failed (likely using Anon Key instead of Service Role Key):", err);
-    }
-
-    // 2. Fetch from profiles table
-    try {
-      const { data, error } = await client.from("profiles").select("*");
-      if (!error && data) {
-        profiles = data;
-      } else if (error) {
-        console.warn("Supabase fetch profiles error:", error.message);
-      }
-    } catch (err) {
-      console.warn("Supabase fetch profiles failed:", err);
+      console.warn("Dynamic user discovery through Supabase skipped or failed:", err);
     }
   }
-
-  // 3. Merge profiles and auth users by user ID
-  const mergedMap = new Map<string, SaasCustomer>();
-
-  // Add all users from Auth first
-  for (const u of authUsers) {
-    if (!u.email) continue;
-    const isOwner = u.email.toLowerCase() === ADMIN_EMAIL;
-    mergedMap.set(u.id, {
-      id: u.id,
-      name: u.email.split('@')[0],
-      email: u.email,
-      phone: u.phone || "Chưa cập nhật",
-      tier: isOwner ? 'enterprise' : 'free',
-      messageLimit: isOwner ? 250000 : 1000,
-      joinedDate: u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
-    });
-  }
-
-  // Override/merge with profile fields
-  for (const p of profiles) {
-    const existing = p.id ? mergedMap.get(p.id) : null;
-    if (existing) {
-      existing.name = p.full_name || existing.name;
-      existing.phone = p.phone || existing.phone;
-      existing.tier = (p.tier || existing.tier) as "free" | "pro" | "enterprise";
-      existing.messageLimit = Number(p.message_limit) || existing.messageLimit;
-      if (p.created_at) {
-        existing.joinedDate = new Date(p.created_at).toLocaleDateString('vi-VN');
-      }
-    } else if (p.email) {
-      // If profile exists but user wasn't in Auth list
-      const isOwner = p.email.toLowerCase() === ADMIN_EMAIL;
-      mergedMap.set(p.id || `db-${p.email}`, {
-        id: p.id || `db-${p.email}`,
-        name: p.full_name || p.email.split('@')[0] || "Khách Hàng Thật",
-        email: p.email,
-        phone: p.phone || "Không có",
-        tier: (p.tier || (isOwner ? "enterprise" : "free")) as "free" | "pro" | "enterprise",
-        messageLimit: Number(p.message_limit) || (isOwner ? 250000 : 1000),
-        joinedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
-      });
-    }
-  }
-
-  dbCustomers = Array.from(mergedMap.values());
 
   // Merge database players with dynamic workspace session registers
   const finalCustomers = [...saasCustomers];
@@ -434,27 +374,13 @@ app.get("/api/admin/customers", async (req, res) => {
     }
   });
 
-  allBots.forEach(bot => {
-    if (bot.userId && !finalCustomers.some(c => c.id === bot.userId)) {
-      finalCustomers.push({
-        id: bot.userId,
-        name: `User ${bot.userId.slice(0, 8)}`,
-        email: `unknown-${bot.userId.slice(0, 8)}@local`,
-        phone: "ChÆ°a cáº­p nháº­t",
-        tier: "free",
-        messageLimit: 1000,
-        joinedDate: bot.createdAt ? new Date(bot.createdAt).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
-      });
-    }
-  });
-
   // Always ensure our master user exists
-  const hasAdmin = finalCustomers.some(c => c.email.toLowerCase() === ADMIN_EMAIL);
+  const hasAdmin = finalCustomers.some(c => c.email.toLowerCase() === 'ox102.crypto@gmail.com');
   if (!hasAdmin) {
     finalCustomers.unshift({
       id: "u-1",
       name: "Founder Doanh Nghiệp AAA",
-      email: ADMIN_EMAIL,
+      email: "ox102.crypto@gmail.com",
       phone: "090.888.9999",
       tier: "enterprise",
       messageLimit: 250000,
@@ -508,103 +434,14 @@ app.get("/api/supabase/config", async (req, res) => {
 });
 
 app.post("/api/supabase/config", async (req, res) => {
-  const { url, key, email } = req.body;
+  const { url, key } = req.body;
   updateDynamicConfig(url, key);
-
-  // 1. Persist email-specific configuration to user configs JSON file
-  if (email) {
-    const configsPath = path.join(process.cwd(), "supabase-user-configs.json");
-    let configs: Record<string, { url: string; key: string }> = {};
-    if (fs.existsSync(configsPath)) {
-      try {
-        configs = JSON.parse(fs.readFileSync(configsPath, "utf8"));
-      } catch (e) {
-        console.error("Failed to read user configs file:", e);
-      }
-    }
-    configs[email.toLowerCase()] = { url, key };
-    try {
-      fs.writeFileSync(configsPath, JSON.stringify(configs, null, 2), "utf8");
-    } catch (e) {
-      console.error("Failed to write user configs file:", e);
-    }
-  }
-
-  // 2. Persist configuration to .env file safely, preserving other settings (like GEMINI_API_KEY)
-  const envPath = path.join(process.cwd(), ".env");
-  let content = "";
-  if (fs.existsSync(envPath)) {
-    try {
-      content = fs.readFileSync(envPath, "utf8");
-    } catch (e) {
-      console.error("Failed to read .env file:", e);
-    }
-  }
-
-  const lines = content.split(/\r?\n/);
-  const newLines: string[] = [];
-  let hasUrl = false;
-  let hasAnon = false;
-  let hasRole = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("SUPABASE_URL=")) {
-      newLines.push(`SUPABASE_URL="${url}"`);
-      hasUrl = true;
-    } else if (trimmed.startsWith("SUPABASE_ANON_KEY=")) {
-      newLines.push(`SUPABASE_ANON_KEY="${key}"`);
-      hasAnon = true;
-    } else if (trimmed.startsWith("SUPABASE_SERVICE_ROLE_KEY=")) {
-      newLines.push(`SUPABASE_SERVICE_ROLE_KEY="${key}"`);
-      hasRole = true;
-    } else {
-      newLines.push(line);
-    }
-  }
-
-  if (!hasUrl) newLines.push(`SUPABASE_URL="${url}"`);
-  if (!hasAnon) newLines.push(`SUPABASE_ANON_KEY="${key}"`);
-  if (!hasRole) newLines.push(`SUPABASE_SERVICE_ROLE_KEY="${key}"`);
-
-  try {
-    fs.writeFileSync(envPath, newLines.join("\n"), "utf8");
-  } catch (e) {
-    console.error("Failed to write .env file:", e);
-  }
-
   const status = await testConnection();
   res.json({
     success: true,
     config: getSupabaseConfig(),
     status
   });
-});
-
-app.get("/api/supabase/config/retrieve", (req, res) => {
-  const email = req.query.email as string;
-  if (!email) {
-    return res.status(400).json({ success: false, error: "Email is required" });
-  }
-
-  const configsPath = path.join(process.cwd(), "supabase-user-configs.json");
-  if (fs.existsSync(configsPath)) {
-    try {
-      const configs = JSON.parse(fs.readFileSync(configsPath, "utf8"));
-      const userConfig = configs[email.toLowerCase()];
-      if (userConfig) {
-        return res.json({
-          success: true,
-          url: userConfig.url,
-          key: userConfig.key
-        });
-      }
-    } catch (e) {
-      console.error("Failed to parse user configs:", e);
-    }
-  }
-
-  res.json({ success: false, error: "No custom configuration found" });
 });
 
 app.post("/api/supabase/sync", async (req, res) => {
@@ -631,7 +468,7 @@ app.post("/api/supabase/auth/signup", async (req, res) => {
   const result = await dbSignUpUser(email, password, redirectTo);
   if (result.success) {
     const freshEmail = email.toLowerCase();
-    const isOwner = freshEmail === ADMIN_EMAIL;
+    const isOwner = freshEmail === 'ox102.crypto@gmail.com';
     const userId = result.user?.id || `user-${Date.now()}`;
 
     // Add to session lists so they instantly reflect in administrative view
@@ -690,7 +527,7 @@ app.post("/api/supabase/auth/signin", async (req, res) => {
   const result = await dbSignInUser(email, password);
   if (result.success) {
     const freshEmail = email.toLowerCase();
-    const isOwner = freshEmail === ADMIN_EMAIL;
+    const isOwner = freshEmail === 'ox102.crypto@gmail.com';
     const userId = result.user?.id || `user-${Date.now()}`;
 
     // Update dynamically tracked session directories
@@ -715,23 +552,6 @@ app.post("/api/supabase/auth/signin", async (req, res) => {
         messageLimit: isOwner ? 250000 : 1000,
         joinedDate: new Date().toLocaleDateString('vi-VN')
       });
-    }
-
-    const client = getSupabaseClient();
-    if (client) {
-      try {
-        await client.from("profiles").upsert({
-          id: userId,
-          email: email,
-          full_name: email.split('@')[0],
-          phone: "ChÆ°a cáº­p nháº­t",
-          tier: isOwner ? 'enterprise' : 'free',
-          message_limit: isOwner ? 250000 : 1000,
-          created_at: new Date().toISOString()
-        }, { onConflict: "id" });
-      } catch (dbErr) {
-        console.warn("Automatic public.profiles DB upsert skipped on signin:", dbErr);
-      }
     }
 
     res.json(result);
@@ -887,47 +707,13 @@ Nội dung chính của tài liệu ${baseName}:
 // Bots API
 app.get("/api/bots", async (req, res) => {
   const userId = req.query.userId as string;
-  const requestedEmail = ((req.query.email as string) || "").toLowerCase();
   const allBots = await dbGetBots(bots);
   
-  if (userId || requestedEmail) {
-    // Determine if user is admin (ox102.crypto@gmail.com)
-    let userEmail = requestedEmail;
-    const foundUser = workspaceUsers.find(u => u.id === userId);
-    if (foundUser) {
-      userEmail = foundUser.email;
-    }
-
-    if (!userEmail) {
-      const client = getSupabaseClient();
-      if (client) {
-        try {
-          const { data: profile } = await client.from("profiles").select("email").eq("id", userId).maybeSingle();
-          if (profile && profile.email) {
-            userEmail = profile.email;
-          } else {
-            const { data: authUser } = await client.auth.admin.getUserById(userId).catch(() => ({ data: null }));
-            if (authUser && authUser.user && authUser.user.email) {
-              userEmail = authUser.user.email;
-            }
-          }
-        } catch (dbErr) {
-          console.warn("Could not lookup user email for admin check:", dbErr);
-        }
-      }
-    }
-
-    const isAdmin = (userEmail && userEmail.toLowerCase() === ADMIN_EMAIL) || userId === "u-1";
-
-    if (isAdmin) {
-      // Admin sees all bots (including system bots and other users' bots)
-      return res.json(allBots);
-    } else {
-      // Regular users only see their own bots
-      if (!userId) return res.json([]);
-      const userBots = allBots.filter(b => b.userId === userId);
-      return res.json(userBots);
-    }
+  if (userId) {
+    // If a user is logged in, hide system demo prefilled bots (with no userId or system bot IDs)
+    // and show only bots they have registered/created.
+    const userBots = allBots.filter(b => b.userId === userId);
+    return res.json(userBots);
   }
   
   // Never expose every customer's bots to anonymous/identity-less requests.
@@ -965,9 +751,9 @@ app.post("/api/bots", async (req, res) => {
 
   // Register live Webhook automatically with Telegram
   if (newBot.telegramToken) {
-    const baseUrl = getPublicBaseUrl(req);
-    if (baseUrl) {
-      const webhookUrl = `${baseUrl}/api/telegram-webhook/${newBot.id}`;
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    if (host) {
+      const webhookUrl = `https://${host}/api/telegram-webhook/${newBot.id}`;
       const tgUrl = `https://api.telegram.org/bot${newBot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
       console.log(`[Telegram Register] Posting webhook url: ${webhookUrl}`);
       try {
@@ -997,9 +783,9 @@ app.put("/api/bots/:id", async (req, res) => {
   // Register/update live Webhook automatically when token is configured or changed
   const updatedBot = idx !== -1 ? bots[idx] : null;
   if (updatedBot && updatedBot.telegramToken) {
-    const baseUrl = getPublicBaseUrl(req);
-    if (baseUrl) {
-      const webhookUrl = `${baseUrl}/api/telegram-webhook/${updatedBot.id}`;
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    if (host) {
+      const webhookUrl = `https://${host}/api/telegram-webhook/${updatedBot.id}`;
       const tgUrl = `https://api.telegram.org/bot${updatedBot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
       console.log(`[Telegram Update] Registering webhook url: ${webhookUrl}`);
       try {
@@ -1018,14 +804,8 @@ app.put("/api/bots/:id", async (req, res) => {
 });
 
 app.delete("/api/bots/:id", async (req, res) => {
-  const { id } = req.params;
-  bots = bots.filter(b => b.id !== id);
-  knowledgeSources = knowledgeSources.filter(s => s.botId !== id);
-  knowledgeChunks = knowledgeChunks.filter(c => c.botId !== id);
-  chatSessions = chatSessions.filter(s => s.botId !== id);
-  faqList = faqList.filter(f => f.botId !== id);
-
-  await dbDeleteBot(id);
+  bots = bots.filter(b => b.id !== req.params.id);
+  await dbDeleteBot(req.params.id);
   res.json({ success: true });
 });
 
@@ -1376,7 +1156,7 @@ app.post("/api/bots/:botId/telegram-webhook", async (req, res) => {
     return res.status(400).json({ error: "Thiếu tham số origin để đăng ký webhook." });
   }
 
-  const webhookUrl = `${getPublicBaseUrl(req, origin)}/api/telegram-webhook/${botId}`;
+  const webhookUrl = `${origin}/api/telegram-webhook/${botId}`;
   const tgUrl = `https://api.telegram.org/bot${bot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
 
   console.log(`[Telegram Register Manual] URL: ${webhookUrl}`);
@@ -1593,10 +1373,9 @@ app.post("/api/check-token", async (req, res) => {
 });
 
 // Real Webhook handler from Live Telegram API
-app.post("/api/telegram-webhook/:botId", async (req, res, next) => {
+app.post("/api/telegram-webhook/:botId", async (req, res) => {
   const update = req.body;
   const botId = req.params.botId;
-  if (botId === "simulate") return next();
   const allBots = await dbGetBots(bots);
   const bot = allBots.find(b => b.id === botId);
   
@@ -1642,8 +1421,6 @@ app.post("/api/telegram-webhook/:botId", async (req, res, next) => {
       chatSessions.unshift(session);
     }
 
-    const hasPriorBotReply = session.messages.some(msg => msg.sender === "bot");
-
     // Save actual user message
     const userMsg: Message = {
       id: "m-tg-" + Math.random().toString(36).substr(2, 9),
@@ -1662,7 +1439,7 @@ app.post("/api/telegram-webhook/:botId", async (req, res, next) => {
     let fallbackTriggered = false;
 
     if (text.trim().toLowerCase() === "/start") {
-      const detected = getGenderAndName(tFullName, tUsername, text);
+      const detected = getGenderAndName(tFullName);
       const pr = detected.pronoun;
       const nm = detected.name;
       let customWelcome = bot.welcomeMessage || "Dạ, em kính chào anh chị ạ. Em có thể hỗ trợ gì cho mình hôm nay ạ?";
@@ -1670,15 +1447,10 @@ app.post("/api/telegram-webhook/:botId", async (req, res, next) => {
       customWelcome = customWelcome.replace(/anh\/chị/g, `${pr} ${nm}`);
       customWelcome = customWelcome.replace(/anh chị/g, `${pr} ${nm}`);
       customWelcome = customWelcome.replace(/Anh\/Chị/g, `${pr === "chị" ? "Chị" : pr === "anh" ? "Anh" : "Anh/Chị"} ${nm}`);
-      responseText = postProcessBotReply(customWelcome, { shouldGreet: true });
+      responseText = customWelcome;
     } else {
       // Fetch dynamic answer using vector tri thức
-      const aiAnswer = await generateRAGAnswer(
-        bot,
-        text,
-        { fullName: tFullName, username: tUsername, id: tUserId },
-        { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8, -1) }
-      );
+      const aiAnswer = await generateRAGAnswer(bot, text, { fullName: tFullName, username: tUsername, id: tUserId });
       responseText = aiAnswer.text;
       sourcesUsed = aiAnswer.sources;
       fallbackTriggered = aiAnswer.fallbackTriggered;
@@ -1758,8 +1530,6 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
     chatSessions.unshift(session); // Insert at beginning
   }
 
-  const hasPriorBotReply = session.messages.some(msg => msg.sender === "bot");
-
   const userMsg: Message = {
     id: "m-tg-" + Math.random().toString(36).substr(2, 9),
     sender: "user",
@@ -1775,7 +1545,7 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
   // Process through AI Answer retrieval or /start detection
   let aiAnswer;
   if (text.trim().toLowerCase() === "/start") {
-    const detected = getGenderAndName(tFullName, tUsername, text);
+    const detected = getGenderAndName(tFullName);
     const pr = detected.pronoun;
     const nm = detected.name;
     let customWelcome = bot.welcomeMessage || "Dạ, em kính chào anh chị ạ. Em có thể hỗ trợ gì cho mình hôm nay ạ?";
@@ -1784,17 +1554,12 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
     customWelcome = customWelcome.replace(/anh chị/g, `${pr} ${nm}`);
     customWelcome = customWelcome.replace(/Anh\/Chị/g, `${pr === "chị" ? "Chị" : pr === "anh" ? "Anh" : "Anh/Chị"} ${nm}`);
     aiAnswer = {
-      text: postProcessBotReply(customWelcome, { shouldGreet: true }),
+      text: customWelcome,
       sources: [],
       fallbackTriggered: false
     };
   } else {
-    aiAnswer = await generateRAGAnswer(
-      bot,
-      text,
-      { fullName: tFullName, username: tUsername, id: tUserId },
-      { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8, -1) }
-    );
+    aiAnswer = await generateRAGAnswer(bot, text, { fullName: tFullName, username: tUsername, id: tUserId });
   }
 
   const botMsg: Message = {
@@ -2049,237 +1814,93 @@ app.post("/api/facebook-webhook/:botId", async (req, res) => {
 });
 
 
-function removeVietnameseTone(input: string) {
-  return input
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "D");
-}
-
-function stripEmojiAndDecorations(input: string) {
-  return input
-    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "")
-    .replace(/[^\p{L}\p{N}\s@._-]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function getCleanDisplayName(rawName?: string, username?: string) {
-  const source = stripEmojiAndDecorations(rawName || username || "");
-  const withoutHandle = source.replace(/^@/, "").replace(/[_-]+/g, " ");
-  const honorificWords = new Set(["anh", "chị", "chi", "ch", "cô", "co", "chú", "chu", "bạn", "ban"]);
-  const parts = withoutHandle
-    .split(/\s+/)
-    .filter(part => {
-      const normalized = removeVietnameseTone(part).toLowerCase();
-      return part.length > 1 && !part.includes("@") && !/^\d+$/.test(part) && !honorificWords.has(normalized);
-    });
-
-  if (parts.length === 0) return "khách";
-  return parts[parts.length - 1];
-}
-
-// Infer Vietnamese gender and extract a safe display name.
-// Priority: explicit self-reference in the message, then profile/name cues, then neutral.
-function getGenderAndName(fullName?: string, username?: string, messageText?: string): { pronoun: string; name: string; confidence: "high" | "medium" | "low" } {
-  const name = getCleanDisplayName(fullName, username);
-  const combinedText = removeVietnameseTone(`${messageText || ""} ${fullName || ""} ${username || ""}`).toLowerCase();
-
-  const femaleSpeechPatterns = [
-    /\bchi\s+(muon|can|hoi|dang|thich|la|co)\b/,
-    /\bminh\s+la\s+chi\b/,
-    /\bem\s+gai\b/,
-    /\bco\s+(muon|can|hoi|dang|la)\b/
-  ];
-  const maleSpeechPatterns = [
-    /\banh\s+(muon|can|hoi|dang|thich|la|co)\b/,
-    /\bminh\s+la\s+anh\b/,
-    /\bem\s+trai\b/,
-    /\bchu\s+(muon|can|hoi|dang|la)\b/
+// Helper to detect Vietnamese gender and extract first name
+function getGenderAndName(fullName: string): { pronoun: string; name: string } {
+  if (!fullName) return { pronoun: "Anh/Chị", name: "Khách Hàng" };
+  const parts = fullName.trim().split(/\s+/);
+  const cleanParts = parts.filter(p => p.length > 0);
+  if (cleanParts.length === 0) {
+    return { pronoun: "Anh/Chị", name: "Khách Hàng" };
+  }
+  
+  // Last word is generally the user's first/given name in Vietnamese
+  const name = cleanParts[cleanParts.length - 1];
+  
+  // Explicit female cues (middle names/common names)
+  const femaleKeywords = [
+    "thị", "my", "vy", "nhi", "hằng", "thu", "mai", "trang", "lan", "hương", "linh", "yến", "kiều", 
+    "oanh", "như", "phương", "nga", "ngọc", "mơ", "dung", "hoa", "thảo", "hồng", "huệ", "cúc", 
+    "tuyết", "quỳnh", "thư", "trúc", "kim", "trinh", "nguyệt", "lệ", "thắm", "hiền", "đào", 
+    "loan", "phượng", "xuân", "hà", "ân", "giang", "trâm", "chi", "diệp", "khánh", "vân", "thuý", 
+    "thủy", "tâm", "diệu", "liên", "bích", "giao", "nương", "tú", "uyên", "thêu", "an", "hà"
   ];
 
-  if (femaleSpeechPatterns.some(pattern => pattern.test(combinedText))) {
-    return { pronoun: "chị", name, confidence: "high" };
+  // Explicit male cues (middle names/common names)
+  const maleKeywords = [
+    "văn", "đức", "duy", "hải", "sơn", "hùng", "minh", "tuấn", "hoàng", "phong", "phúc", "quang", 
+    "long", "nam", "việt", "toàn", "quốc", "khánh", "thắng", "tú", "bách", "nghĩa", "khải", "tùng", 
+    "cường", "trọng", "vương", "tấn", "thành", "kiên", "huy", "đạt", "trung", "dũng", "quân", 
+    "khoa", "thịnh", "bảo", "khang", "khôi", "hưng", "lâm", "vũ", "phi", "thái", "bình", "tân", 
+    "nhân", "triết", "kiệt"
+  ];
+
+  // Scan middle parts as extremely strong signals: Thị (Female) vs Văn (Male)
+  let middleGender = "";
+  if (cleanParts.length > 2) {
+    const middleParts = cleanParts.slice(1, cleanParts.length - 1).map(p => p.toLowerCase());
+    if (middleParts.includes("thị")) {
+      middleGender = "female";
+    } else if (middleParts.includes("văn")) {
+      middleGender = "male";
+    }
   }
-  if (maleSpeechPatterns.some(pattern => pattern.test(combinedText))) {
-    return { pronoun: "anh", name, confidence: "high" };
+
+  if (middleGender === "female") {
+    return { pronoun: "chị", name };
+  }
+  if (middleGender === "male") {
+    return { pronoun: "anh", name };
   }
 
-  const normalizedParts = stripEmojiAndDecorations(`${fullName || ""} ${username || ""}`)
-    .split(/\s+/)
-    .map(part => removeVietnameseTone(part).toLowerCase())
-    .filter(Boolean);
-
-  const femaleKeywords = new Set([
-    "thi", "my", "vy", "nhi", "hang", "thu", "mai", "trang", "lan", "huong", "linh", "yen", "kieu",
-    "oanh", "nhu", "phuong", "nga", "ngoc", "mo", "dung", "hoa", "thao", "hong", "hue", "cuc",
-    "tuyet", "quynh", "truc", "kim", "trinh", "nguyet", "le", "tham", "hien", "dao",
-    "loan", "xuan", "ha", "an", "giang", "tram", "chi", "diep", "van", "thuy",
-    "tam", "dieu", "lien", "bich", "giao", "uyen"
-  ]);
-  const maleKeywords = new Set([
-    "van", "duc", "duy", "hai", "son", "hung", "minh", "tuan", "hoang", "phong", "phuc", "quang",
-    "long", "nam", "viet", "toan", "quoc", "thang", "bach", "nghia", "khai", "tung",
-    "cuong", "trong", "vuong", "tan", "thanh", "kien", "huy", "dat", "trung", "dung", "quan",
-    "khoa", "thinh", "bao", "khang", "khoi", "lam", "vu", "phi", "thai", "binh",
-    "nhan", "triet", "kiet"
-  ]);
-
-  const middleParts = normalizedParts.slice(1, -1);
-  if (middleParts.includes("thi")) return { pronoun: "chị", name, confidence: "high" };
-  if (middleParts.includes("van")) return { pronoun: "anh", name, confidence: "high" };
-
+  // Fallback to keyword matching scores
   let femaleScore = 0;
   let maleScore = 0;
-  normalizedParts.forEach((part, idx) => {
-    const weight = idx === normalizedParts.length - 1 ? 3 : 1;
-    if (femaleKeywords.has(part)) femaleScore += weight;
-    if (maleKeywords.has(part)) maleScore += weight;
+
+  cleanParts.forEach((part, idx) => {
+    const partLower = part.toLowerCase();
+    const isGivenName = (idx === cleanParts.length - 1);
+    const weight = isGivenName ? 3 : 1;
+
+    if (femaleKeywords.includes(partLower)) {
+      femaleScore += weight;
+    }
+    if (maleKeywords.includes(partLower)) {
+      maleScore += weight;
+    }
   });
 
-  if (femaleScore > maleScore) return { pronoun: "chị", name, confidence: "medium" };
-  if (maleScore > femaleScore) return { pronoun: "anh", name, confidence: "medium" };
-  return { pronoun: "anh/chị", name, confidence: "low" };
-}
-
-function postProcessBotReply(text: string, options?: { shouldGreet?: boolean }) {
-  let cleaned = text
-    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "")
-    .replace(/\s+([,.!?;:])/g, "$1")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
-
-  if (options?.shouldGreet === false) {
-    const paragraphs = cleaned.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-    if (paragraphs.length > 1 && /^(dạ\s+)?(em\s+)?(xin\s+)?(chào|kính chào)\b/i.test(paragraphs[0])) {
-      cleaned = paragraphs.slice(1).join("\n\n").trim();
-    }
-    cleaned = cleaned
-      .replace(/^(dạ\s+)?em\s+chào\s+[^.!?\n]+[.!?]\s*/i, "")
-      .replace(/^rất vui được (hỗ trợ|đồng hành|trò chuyện)[^.!?\n]+[.!?]\s*/i, "")
-      .trim();
+  if (femaleScore > maleScore) {
+    return { pronoun: "chị", name };
+  } else if (maleScore > femaleScore) {
+    return { pronoun: "anh", name };
   }
 
-  return cleaned;
-}
-
-type QueryIntent = "small_talk" | "irrelevant" | "relevant_unknown" | "restricted";
-
-function normalizeForIntent(text: string) {
-  return removeVietnameseTone(stripEmojiAndDecorations(text)).toLowerCase();
-}
-
-function hasAnyPattern(text: string, patterns: RegExp[]) {
-  return patterns.some(pattern => pattern.test(text));
-}
-
-function classifyCustomerIntent(query: string, bot: BotConfig, hasGoodMatch: boolean): QueryIntent {
-  const q = normalizeForIntent(query);
-  const compact = q.replace(/\s+/g, " ").trim();
-  const botField = normalizeForIntent(`${bot.field || ""} ${bot.description || ""} ${bot.name || ""}`);
-  const restricted = normalizeForIntent(bot.restrictedTopics || "");
-
-  if (restricted.split(/[,;|]/).some(topic => topic.trim().length > 3 && compact.includes(topic.trim()))) {
-    return "restricted";
-  }
-
-  const smallTalkPatterns = [
-    /^(hi|hello|alo|alooo|hey|chao|xin chao|bot oi|em oi|co ai khong)[\s!.?]*$/,
-    /\b(bot oi|em oi|test bot|thu bot|goi.*vui|tag.*vui|cho vui|noi chuyen|dang ranh khong)\b/,
-    /\b(cam on|thanks|thank you|ok|oke|uh|ua|haha|hihi|hehe|vui qua|de thu xem)\b/,
-    /\b(bot la ai|em la ai|bot.*vui|bot.*thong minh|biet noi khong|ngu chua|an com chua|co nguoi yeu chua)\b/
-  ];
-  if (hasAnyPattern(compact, smallTalkPatterns) || compact.length <= 8) {
-    return "small_talk";
-  }
-
-  const domainSignals = [
-    "hoc", "khoa", "lop", "lich", "lo trinh", "dang ky", "tu van", "gia", "phi", "hoc phi", "bao nhieu",
-    "mua", "ban", "ship", "giao", "san pham", "don hang", "bao hanh", "doi tra", "token", "telegram",
-    "bot", "ai", "rag", "supabase", "thanh toan", "goi", "nang cap"
-  ];
-  if (hasGoodMatch || domainSignals.some(signal => compact.includes(signal)) || botField.split(/\s+/).some(word => word.length > 4 && compact.includes(word))) {
-    return "relevant_unknown";
-  }
-
-  const irrelevantPatterns = [
-    /\b(bong da|bong|xem phim|thoi tiet|xo so|lo de|co bac|crypto pump|gia vang|tin tuc|chinh tri)\b/,
-    /\b(ke chuyen cuoi|hat bai|lam tho|viet rap|choi game)\b/
-  ];
-  if (hasAnyPattern(compact, irrelevantPatterns)) {
-    return "irrelevant";
-  }
-
-  return compact.includes("?") || compact.includes("khong") || compact.includes("ko") || compact.includes("k") ? "relevant_unknown" : "small_talk";
-}
-
-function recordUnansweredQuestion(query: string) {
-  const cleanQuery = query.trim();
-  if (!cleanQuery || cleanQuery.length <= 2) return;
-
-  const existingQuestion = analytics.unansweredQuestions.find(q => q.question.toLowerCase() === cleanQuery.toLowerCase());
-  if (existingQuestion) {
-    existingQuestion.count += 1;
-    existingQuestion.timestamp = new Date().toISOString();
-  } else {
-    analytics.unansweredQuestions.unshift({
-      question: cleanQuery,
-      count: 1,
-      timestamp: new Date().toISOString()
-    });
-  }
-}
-
-function buildNoKnowledgeReply(
-  intent: QueryIntent,
-  query: string,
-  bot: BotConfig,
-  pronoun: string,
-  targetName: string,
-  shouldGreet: boolean
-) {
-  const greeting = shouldGreet ? `Dạ em chào ${pronoun} ${targetName} ạ. ` : "";
-  const domain = bot.field || "mảng bên em đang hỗ trợ";
-
-  if (intent === "small_talk") {
-    return `${greeting}Em đây ạ. Nếu ${pronoun} ${targetName} gọi em cho vui thì em xin phép có mặt rất nghiêm túc nhưng không quá căng thẳng nha.
-
-${pronoun === "anh" ? "Anh" : pronoun === "chị" ? "Chị" : "Anh/chị"} cứ hỏi em về ${domain}, em sẽ cố gắng trả lời gọn, rõ và đúng phần em được huấn luyện nhất ạ.`;
-  }
-
-  if (intent === "irrelevant") {
-    return `${greeting}Câu này hơi lệch khỏi phần em đang được giao hỗ trợ rồi ạ.
-
-Em xin phép không trả lời lan man để tránh làm mất thời gian của ${pronoun} ${targetName}. Nếu mình cần tư vấn về ${domain}, em sẵn sàng quay lại đúng việc ngay nha.`;
-  }
-
-  if (intent === "restricted") {
-    return `${greeting}Nội dung này nằm ngoài phạm vi em có thể hỗ trợ an toàn và phù hợp ạ.
-
-Mình quay lại các câu hỏi liên quan đến ${domain} nhé. ${pronoun === "anh" ? "Anh" : pronoun === "chị" ? "Chị" : "Anh/chị"} gửi em nhu cầu cụ thể, em sẽ hỗ trợ tiếp ngay.`;
-  }
-
-  return `${greeting}Về câu hỏi "${query}", hiện em chưa thấy dữ liệu chính thức đủ rõ trong phần tri thức đã được huấn luyện.
-
-Theo cách xử lý hợp lý nhất lúc này, em có thể ghi nhận nhu cầu của ${pronoun} ${targetName}, tóm tắt lại để đội ngũ cập nhật thêm dữ liệu, và gợi ý mình liên hệ trực tiếp nếu cần câu trả lời chắc chắn ngay.
-
-${pronoun === "anh" ? "Anh" : pronoun === "chị" ? "Chị" : "Anh/chị"} có thể nói rõ thêm mục tiêu hoặc trường hợp cụ thể của mình không ạ? Em sẽ dựa vào đó để định hướng câu trả lời sát hơn.`;
+  return { pronoun: "Anh/Chị", name };
 }
 
 // Core RAG matching & AI generation call
 async function generateRAGAnswer(
   bot: BotConfig, 
   query: string,
-  userInfo?: { fullName?: string; username?: string; id?: string },
-  conversation?: { shouldGreet?: boolean; recentMessages?: Message[] }
+  userInfo?: { fullName?: string; username?: string; id?: string }
 ): Promise<{ text: string; sources: any[]; fallbackTriggered: boolean }> {
   // Determine gender/pronoun and first name for xưng hô
-  let pronoun = "anh/chị";
-  let targetName = "khách";
+  let pronoun = "Anh/Chị";
+  let targetName = "Khách Hàng";
   
   if (userInfo) {
-    const detected = getGenderAndName(userInfo.fullName, userInfo.username, query);
+    const defaultName = userInfo.fullName || userInfo.username || "Khách Hàng";
+    const detected = getGenderAndName(defaultName);
     pronoun = detected.pronoun;
     targetName = detected.name;
   }
@@ -2317,22 +1938,6 @@ async function generateRAGAnswer(
   const isGoodMatch = matchedChunks.length > 0 && maxScore >= 0.35;
   const hasMatches = isGoodMatch;
   const activeChunks = isGoodMatch ? matchedChunks : [];
-  const shouldGreet = conversation?.shouldGreet !== false;
-  const recentConversation = (conversation?.recentMessages || [])
-    .slice(-8)
-    .map(msg => `${msg.sender === "user" ? "Khách" : "Bot"}: ${msg.text}`)
-    .join("\n");
-  const openingRule = shouldGreet
-    ? `Đây là lần đầu trong phiên trò chuyện hiện tại. Có thể chào ngắn gọn một lần duy nhất, rồi đi thẳng vào câu trả lời.`
-    : `Đây KHÔNG phải lần đầu trong phiên trò chuyện. TUYỆT ĐỐI KHÔNG chào lại, không viết "Dạ em chào", không tự giới thiệu lại, không nói "rất vui được hỗ trợ". Hãy trả lời nối tiếp tự nhiên, tập trung trực tiếp vào câu hỏi mới.`;
-  const intent = classifyCustomerIntent(query, bot, isGoodMatch);
-  const intentGuide = intent === "small_talk"
-    ? `Khách đang chào, nói chuyện vui, test bot hoặc tag bot cho vui. Hãy đáp vui vẻ, hóm hỉnh nhẹ, lịch sự, ngắn gọn; không nói "chưa có dữ liệu". Sau đó khéo léo mời khách hỏi về lĩnh vực "${bot.field}".`
-    : intent === "irrelevant"
-      ? `Câu hỏi đang lệch khỏi phạm vi "${bot.field}". Hãy trả lời duyên dáng, không sa đà, không phán xét, rồi kéo cuộc trò chuyện về đúng sản phẩm/dịch vụ.`
-      : intent === "restricted"
-        ? `Câu hỏi nằm trong hoặc gần chủ đề bị hạn chế. Hãy từ chối ngắn gọn, lịch sự và lái về phạm vi hỗ trợ chính.`
-        : `Câu hỏi có vẻ liên quan đến "${bot.field}" nhưng chưa có dữ liệu nguồn đủ chắc. Hãy trả lời theo hướng hợp lý, nói rõ đây chưa phải thông tin chính thức từ tài liệu huấn luyện, không bịa con số/chính sách/cam kết; hỏi thêm chi tiết hoặc hướng khách đến hotline/Zalo nếu cần câu trả lời chắc chắn ngay.`;
 
   // Try to use Gemini API if available
   const ai = getAIClient();
@@ -2348,8 +1953,6 @@ async function generateRAGAnswer(
 PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
 - Tone giọng chủ đạo: ${bot.tone} (Dựa vào tone này để điều chỉnh cách nói thích hợp).
 - Thể hiện sự nhiệt tình, ấm áp, chu đáo tuyệt đối. 
-- ${openingRule}
-- Phân loại tình huống hiện tại: ${intentGuide}
 - BẮT BUỘC xưng hô "Em" (hoặc từ phù hợp với thương hiệu) và gọi người dùng bằng đại từ xưng hô tương ứng giới tính đã được xác định của họ là "${pronoun}" kèm theo tên của họ là "${targetName}" (Ví dụ gọi: "${pronoun} ${targetName}"). Không sử dụng chung chung "Quý khách" hay "anh/chị" bừa bãi khi đã biết pronoun chính xác của họ là "${pronoun}" và tên của họ là "${targetName}".
 - Luôn sử dụng từ ngữ nói tự nhiên, trôi chảy, có từ kính ngữ cảm thán nhẹ nhàng ở đầu và cuối câu (Ví dụ: "Dạ em chào ${pronoun} ${targetName} ạ", "Dạ vâng ạ", "nhe ${pronoun} ${targetName}", "nhé ạ", "nha ${pronoun} ${targetName}", "ạ", v.v.).
 - Tránh tuyệt đối lối hành văn rập khuôn, copy nguyên văn tài liệu nguồn, hoặc phản hồi cộc lốc như một công cụ tra cứu. Hãy diễn đạt lại thông tin một cách mượt mà, logic và sinh động như một chuyên viên giàu kinh nghiệm.
@@ -2357,8 +1960,7 @@ PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
 
 ĐỊNH DẠNG VĂN BẢN & BIỂU TƯỢNG (BẮT BUỘC):
 - TUYỆT ĐỐI KHÔNG dùng bất kỳ dấu hoa thị nào (* hoặc **) hoặc bất kỳ ký tự định dạng markdown nào để bôi đậm, in nghiêng hoặc đánh dấu trong văn bản trả lời. Hãy viết chữ ở dạng thuần văn bản, tự nhiên, không chứa các ký tự * hoặc **.
-- TUYỆT ĐỐI KHÔNG dùng emoji, sticker, ký tự trang trí, biểu tượng cảm xúc hoặc icon trong toàn bộ câu trả lời. Không đặt emoji sau tên khách, sau đại từ xưng hô, sau câu chào hoặc ở cuối câu.
-- Nếu chưa chắc giới tính, chỉ dùng "anh/chị ${targetName}" một cách lịch sự; không tự đoán quá đà và không hỏi giới tính trừ khi thật cần thiết cho tư vấn.
+- HẠN CHẾ TỐI ĐA việc sử dụng emoji (biểu tượng cảm xúc). Không dùng quá 1 emoji trong toàn bộ câu trả lời, hoặc tốt nhất là không dùng emoji nào để đảm bảo tính chuyên nghiệp và sạch sẽ cho văn bản.
 - BẮT BUỘC PHẢI CHỦ ĐỘNG XUỐNG DÒNG VÀ TẠO DÒNG TRỐNG (ngắt đoạn bằng việc xuống dòng 2 lần, tức là chèn \n\n) để tạo khoảng thờ rộng rãi, thông thoáng cho tin nhắn. Mỗi đoạn văn chỉ viết siêu ngắn, gồm khoảng 1 đến 2 câu ngắn.
 - Khi liệt kê các ý (dùng gạch đầu dòng - hoặc số thứ tự 1, 2, 3), BẮT BUỘC phải xuống dòng thực tế cho mỗi ý, tuyệt đối không viết dính liền tiếp nối nhau. Giữa các gạch đầu dòng liệt kê, hãy phân cách bằng một dòng trống hẳn hoi để nhìn giao diện tin nhắn thông thoáng, gọn gàng, không bị rối mắt.
 
@@ -2376,18 +1978,15 @@ Dạ không biết thông tin trên đã rõ ràng chưa hay ${pronoun} ${target
 Ngôn ngữ trả lời bắt buộc: ${bot.language === 'vi' ? 'Tiếng Việt' : 'English'}.
 
 Nguyên tắc bắt buộc:
-1. Với câu hỏi có dữ liệu nguồn phù hợp, hãy ưu tiên tư vấn dựa trên thông tin thực tế từ "TÀI LIỆU NGUỒN" dưới đây.
-2. Với câu hỏi liên quan nhưng chưa có dữ liệu nguồn đủ chắc, được phép trả lời theo nguyên tắc chung và hướng xử lý hợp lý, nhưng phải nói rõ chưa có dữ liệu chính thức trong tài liệu huấn luyện. Tuyệt đối không bịa con số, chính sách, thời hạn, giá, cam kết, hoặc nội dung quan trọng.
-3. Với câu hỏi ngoài phạm vi hoặc khách nói chuyện vui, hãy trả lời như một người tư vấn lịch sự: vui vẻ, duyên dáng, ngắn gọn, rồi kéo khách về đúng phạm vi hỗ trợ. Không dùng mẫu "chưa có dữ liệu" cho những câu nói chuyện vui.
-4. Bán hàng & Báo giá: ${bot.allowPricing ? 'CHO PHÉP cung cấp đơn giá, chính sách khuyến mãi khuyến nghị có ghi trong tài liệu.' : 'Tuyệt đối KHÔNG ĐƯỢC báo giá lẻ, khéo léo nói rằng giá sản phẩm có thể thay đổi tùy chương trình và hướng dẫn khách liên hệ hotline/Zalo để được báo giá chính xác nhất.'}
-5. Tư vấn kỹ thuật sản phẩm: ${bot.allowProductConsulting ? 'CHO PHÉP giải thích chi tiết, cặn kẽ về sản phẩm của thương hiệu.' : 'Chỉ giới thiệu tổng quan, không đi quá sâu vào các thông số kỹ thuật phức tạp.'}
-6. Các chủ đề bị cấm trả lời tuyệt đối: "${bot.restrictedTopics}". Nếu khách vi phạm hoặc hỏi lạc đề này, hãy khéo léo hướng họ về sản phẩm và dịch vụ cốt lõi của thương hiệu một cách tế nhị.
+1. Bạn CHỈ được phép tư vấn dựa trên thông tin thực tế từ "TÀI LIỆU NGUỒN" dưới đây. 
+2. Nếu câu hỏi không có thông tin rõ ràng hoặc không được đề cập trong TÀI LIỆU NGUỒN, hoặc tài liệu nguồn không chứa câu trả lời trực tiếp cho câu hỏi, bạn TUYỆT ĐỐI không được tự suy diễn, bịa ra thông tin, hay bám víu trích xuất mù quáng thông tin tài liệu không liên quan. 
+Thay vào đó, bạn phải đưa ra phản hồi không biết thông minh: xin lỗi lịch sự, nêu rõ thông tin này tạm thời chưa được cập nhật đầy đủ trong tài liệu tri thức đào tạo của em, tuy nhiên em đã tự động lưu lại và ghi nhận câu hỏi này để báo cáo ban quản trị tiến hành cập nhật thêm vào tri thức hệ thống cho em sớm nhất. Sau đó khuyên họ liên hệ hotline/Zalo của bên em để được tư vấn kĩ hơn.
+3. Bán hàng & Báo giá: ${bot.allowPricing ? 'CHO PHÉP cung cấp đơn giá, chính sách khuyến mãi khuyến nghị có ghi trong tài liệu.' : 'Tuyệt đối KHÔNG ĐƯỢC báo giá lẻ, khéo léo nói rằng giá sản phẩm có thể thay đổi tùy chương trình và hướng dẫn khách liên hệ hotline/Zalo để được báo giá chính xác nhất.'}
+4. Tư vấn kỹ thuật sản phẩm: ${bot.allowProductConsulting ? 'CHO PHÉP giải thích chi tiết, cặn kẽ về sản phẩm của thương hiệu.' : 'Chỉ giới thiệu tổng quan, không đi quá sâu vào các thông số kỹ thuật phức tạp.'}
+5. Các chủ đề bị cấm trả lời tuyệt đối: "${bot.restrictedTopics}". Nếu khách vi phạm hoặc hỏi lạc đề này, hãy khéo léo hướng họ về sản phẩm và dịch vụ cốt lõi của thương hiệu một cách tế nhị.
 
 TÀI LIỆU NGUỒN CHI TIẾT:
 ${contextString}
-
-NGỮ CẢNH HỘI THOẠI GẦN ĐÂY:
-${recentConversation || "Chưa có tin nhắn trước đó."}
 
 Thông tin liên hệ thêm khi cần thiết:
 - SĐT: ${bot.fallbackPhone}
@@ -2398,7 +1997,7 @@ Hãy trình bày bố cục thông tin đẹp mắt, rõ ràng, dễ đọc, ng�
 
       const response = await ai.models.generateContent({
         model: "gemini-3.5-flash",
-        contents: `Câu hỏi mới của khách: ${query}\n\nNgữ cảnh gần đây:\n${recentConversation || "Không có."}`,
+        contents: query,
         config: {
           systemInstruction: systemPrompt,
           temperature: 0.3, // Low temperature for high precision referencing
@@ -2406,20 +2005,33 @@ Hãy trình bày bố cục thông tin đẹp mắt, rõ ràng, dễ đọc, ng�
       });
 
       const responseText = response.text || "";
-      const looksLikeFallback =
-        responseText.includes(bot.fallbackMessage.substring(0, 15)) ||
-        responseText.toLowerCase().includes("em chưa có thông tin") ||
-        responseText.toLowerCase().includes("chưa có sẵn trong dữ liệu") ||
-        responseText.toLowerCase().includes("không tìm thấy tài liệu") ||
-        responseText.toLowerCase().includes("ghi nhận");
-      const isFallback = intent === "relevant_unknown" && (!isGoodMatch || looksLikeFallback);
+      const isFallback = !isGoodMatch || 
+                         responseText.includes(bot.fallbackMessage.substring(0, 15)) || 
+                         responseText.toLowerCase().includes("em chưa có thông tin") || 
+                         responseText.toLowerCase().includes("chưa có sẵn trong dữ liệu") ||
+                         responseText.toLowerCase().includes("không tìm thấy tài liệu") ||
+                         responseText.toLowerCase().includes("ghi nhận");
 
       if (isFallback) {
-        recordUnansweredQuestion(query);
+        // Report unanswered question to update knowledge base
+        const cleanQuery = query.trim();
+        if (cleanQuery && cleanQuery.length > 2) {
+          const existingQuestion = analytics.unansweredQuestions.find(q => q.question.toLowerCase() === cleanQuery.toLowerCase());
+          if (existingQuestion) {
+            existingQuestion.count += 1;
+            existingQuestion.timestamp = new Date().toISOString();
+          } else {
+            analytics.unansweredQuestions.unshift({
+              question: cleanQuery,
+              count: 1,
+              timestamp: new Date().toISOString()
+            });
+          }
+        }
       }
 
       return {
-        text: postProcessBotReply(responseText, { shouldGreet }),
+        text: responseText,
         sources: isGoodMatch ? activeChunks.map(m => ({ id: m.chunk.id, name: m.chunk.title, score: Math.min(0.99, 0.4 + m.score) })) : [],
         fallbackTriggered: isFallback
       };
@@ -2433,16 +2045,37 @@ Hãy trình bày bố cục thông tin đẹp mắt, rõ ràng, dễ đọc, ng�
   console.log("Using Local Simulation Engine for Query: ", query);
   
   if (!isGoodMatch) {
-    if (intent === "relevant_unknown") {
-      recordUnansweredQuestion(query);
+    // Report unanswered question to update knowledge base
+    const cleanQuery = query.trim();
+    if (cleanQuery && cleanQuery.length > 2) {
+      const existingQuestion = analytics.unansweredQuestions.find(q => q.question.toLowerCase() === cleanQuery.toLowerCase());
+      if (existingQuestion) {
+        existingQuestion.count += 1;
+        existingQuestion.timestamp = new Date().toISOString();
+      } else {
+        analytics.unansweredQuestions.unshift({
+          question: cleanQuery,
+          count: 1,
+          timestamp: new Date().toISOString()
+        });
+      }
     }
 
-    const smartFallbackText = buildNoKnowledgeReply(intent, query, bot, pronoun, targetName, shouldGreet);
+    let smartFallbackText = "";
+    if (bot.tone === "friendly") {
+      smartFallbackText = `Dạ em chào ${pronoun} ${targetName} ạ! Hiện tại thông tin chi tiết về câu hỏi "${query}" chưa có sẵn hoàn chỉnh trong dữ liệu tri thức của em rồi nha. Em đã ghi nhận câu hỏi này để gửi cho ban quản trị tiến hành cập nhật thêm vào tri thức hệ thống cho em sớm nhất ạ.
+
+${pronoun === "chị" ? "Chị" : pronoun === "anh" ? "Anh" : "Anh/Chị"} cứ yên tâm nhé! Lúc này, nếu cần phản hồi hỗ trợ khẩn cấp ngay, ${pronoun} ${targetName} liên lạc trực tiếp hotline SĐT ${bot.fallbackPhone} hoặc qua Zalo ${bot.fallbackZalo} giúp em nha! ❤️`;
+    } else {
+      smartFallbackText = `Kính gửi ${pronoun} ${targetName}, hiện tại thông tin về câu hỏi "${query}" chưa có sẵn đầy đủ trong danh mục đào tạo của hệ thống. Chúng tôi đã ghi nhận nội dung câu hỏi để báo cáo ban quản trị tiến hành cập nhật thêm thông tin vào tri thức hệ thống sớm nhất.
+
+Để nhận thông tin hỗ trợ chính xác lập tiếp, kính mời ${pronoun} ${targetName} liên hệ trực tiếp qua Hotline ${bot.fallbackPhone} hoặc kết nối tài khoản Zalo ${bot.fallbackZalo} để chuyên viên chăm sóc ngay ạ.`;
+    }
 
     return {
-      text: postProcessBotReply(smartFallbackText, { shouldGreet }),
+      text: smartFallbackText,
       sources: [],
-      fallbackTriggered: intent === "relevant_unknown"
+      fallbackTriggered: true
     };
   }
 
@@ -2450,19 +2083,13 @@ Hãy trình bày bố cục thông tin đẹp mắt, rõ ràng, dễ đọc, ng�
   const primeChunk = activeChunks[0].chunk;
   let replyText = "";
   if (bot.tone === "friendly") {
-    const intro = shouldGreet
-      ? `Dạ ${pronoun} ${targetName} ơi, về vấn đề "${query}" em xin gửi ${pronoun} ${targetName} thông tin từ tri thức của hệ thống nha:`
-      : `Về câu hỏi "${query}", thông tin trong tri thức hệ thống hiện có như sau:`;
-    replyText = `${intro}\n\n${primeChunk.title}: ${primeChunk.content}\n\nHi vọng thông tin này giúp ích được cho mình ạ.`;
+    replyText = `Dạ ${pronoun} ${targetName} ơi, về vấn đề "${query}" em xin gửi ${pronoun} ${targetName} thông tin từ tri thức của AAA Farm nha:\n\n👉 *${primeChunk.title}*: ${primeChunk.content}\n\nHi vọng sẽ giúp ích được cho mình ạ! 💚`;
   } else {
-    const intro = shouldGreet
-      ? `Kính gửi ${pronoun} ${targetName}, liên quan đến thông tin tìm kiếm: "${query}". Hệ thống xin phản hồi chính xác dựa trên danh mục huấn luyện:`
-      : `Liên quan đến thông tin tìm kiếm: "${query}", hệ thống xin phản hồi dựa trên danh mục huấn luyện:`;
-    replyText = `${intro}\n\n${primeChunk.title}: ${primeChunk.content}\n\nĐể biết thêm chi tiết, vui lòng liên hệ tổng đài ${bot.fallbackPhone}.`;
+    replyText = `Kính gửi ${pronoun} ${targetName}, liên quan đến thông tin tìm kiếm: "${query}". AAA Farm xin phản hồi chính xác dựa trên danh mục huấn luyện:\n\n📖 *${primeChunk.title}*: ${primeChunk.content}\n\nĐể biết thêm chi tiết, vui lòng liên kết tổng đài ${bot.fallbackPhone}.`;
   }
 
   return {
-    text: postProcessBotReply(replyText, { shouldGreet }),
+    text: replyText,
     sources: activeChunks.map(m => ({ id: m.chunk.id, name: m.chunk.title, score: Math.min(0.98, 0.5 + m.score) })),
     fallbackTriggered: false
   };
