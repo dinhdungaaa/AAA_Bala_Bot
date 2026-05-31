@@ -272,7 +272,7 @@ export default function App() {
   const [schedLoading, setSchedLoading] = useState(false);
   const [schedTab, setSchedTab] = useState<'list' | 'create' | 'upload' | 'logs'>('list');
 
-  // Rehydrate Supabase Auth Session
+  // Rehydrate Supabase Auth Session & Restore User Config
   useEffect(() => {
     const savedUser = localStorage.getItem("sbUser");
     if (savedUser) {
@@ -283,6 +283,28 @@ export default function App() {
           setActiveTab('admin');
         } else {
           setActiveTab('dashboard');
+        }
+        if (parsed.email) {
+          fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(parsed.email)}`)
+            .then(res => res.json())
+            .then(data => {
+              if (data.success && data.url && data.key) {
+                fetch('/api/supabase/config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ url: data.url, key: data.key, email: parsed.email })
+                })
+                .then(r => r.json())
+                .then(actData => {
+                  if (actData.success) {
+                    setSbUrl(data.url);
+                    setSbKey(data.key);
+                    setSbStatus(actData.status);
+                  }
+                });
+              }
+            })
+            .catch(err => console.error("Error restoring user config on mount", err));
         }
       } catch (_) {}
     }
@@ -454,6 +476,31 @@ export default function App() {
         } else {
           setActiveTab('dashboard');
         }
+        
+        // Retrieve and restore user's saved Supabase credentials if present
+        if (data.user.email) {
+          fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(data.user.email)}`)
+            .then(r => r.json())
+            .then(configData => {
+              if (configData.success && configData.url && configData.key) {
+                fetch('/api/supabase/config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ url: configData.url, key: configData.key, email: data.user.email })
+                })
+                .then(r => r.json())
+                .then(actData => {
+                  if (actData.success) {
+                    setSbUrl(configData.url);
+                    setSbKey(configData.key);
+                    setSbStatus(actData.status);
+                  }
+                });
+              }
+            })
+            .catch(err => console.error("Error retrieving user config upon signin", err));
+        }
+
         alert(sbAuthMode === 'signup' 
           ? 'Đăng ký tài khoản hệ thống Supabase Auth thành công! Bạn có thể sử dụng tài khoản vừa tạo để đăng nhập. 🎉' 
           : 'Đăng nhập vào hệ thống Supabase Auth thành công! Khóa phiên đã cài đặt. 🔑'
@@ -488,7 +535,7 @@ export default function App() {
       const res = await fetch('/api/supabase/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: sbUrl, key: sbKey })
+        body: JSON.stringify({ url: sbUrl, key: sbKey, email: sbUser?.email || '' })
       });
       const data = await res.json();
       if (data.success) {
