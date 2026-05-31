@@ -21,7 +21,7 @@ window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<
                     window.location.hostname.startsWith('192.168.');
     const isProd = !isLocal;
     
-    if (isProd && window.location.pathname.includes('/balabot/')) {
+    if (isProd && window.location.pathname.includes('/balabot')) {
       const newUrl = `/balabot${url}`;
       if (typeof input === 'string') {
         input = newUrl;

@@ -223,7 +223,7 @@ export default function App() {
       const isLocal = window.location.hostname === 'localhost' || 
                       window.location.hostname === '127.0.0.1' || 
                       window.location.hostname.startsWith('192.168.');
-      if (!isLocal && window.location.pathname.includes('/balabot/')) {
+      if (!isLocal && window.location.pathname.includes('/balabot')) {
         origin = `${origin}/balabot`;
       }
       const res = await fetch(`/api/bots/${selectedBotId}/telegram-webhook`, {
@@ -499,7 +499,7 @@ export default function App() {
         const isLocal = window.location.hostname === 'localhost' || 
                         window.location.hostname === '127.0.0.1' || 
                         window.location.hostname.startsWith('192.168.');
-        if (!isLocal && window.location.pathname.includes('/balabot/')) {
+        if (!isLocal && window.location.pathname.includes('/balabot')) {
           payload.redirectTo = `${window.location.origin}/balabot/`;
         } else {
           payload.redirectTo = window.location.origin;
@@ -2548,7 +2548,7 @@ export default function App() {
                               const isLocal = window.location.hostname === 'localhost' || 
                                               window.location.hostname === '127.0.0.1' || 
                                               window.location.hostname.startsWith('192.168.');
-                              if (!isLocal && window.location.pathname.includes('/balabot/')) {
+                              if (!isLocal && window.location.pathname.includes('/balabot')) {
                                 origin = `${origin}/balabot`;
                               }
                               return `${origin}/api/telegram-webhook/${activeBot.id}`;
