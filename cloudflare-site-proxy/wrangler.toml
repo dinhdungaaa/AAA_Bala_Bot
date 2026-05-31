@@ -1,0 +1,7 @@
+name = "aaa-balabot-site-proxy"
+main = "balabot-site-proxy.js"
+compatibility_date = "2026-05-29"
+
+routes = [
+  { pattern = "antiantiai.xyz/balabot*", zone_name = "antiantiai.xyz" }
+]

@@ -120,3 +120,56 @@ export interface SaasCustomer {
   joinedDate: string;
 }
 
+// === REMINDER / SCHEDULE SYSTEM ===
+
+export type ReminderFrequency = 'once' | 'daily' | 'weekly' | 'monthly' | 'weekdays' | 'custom';
+
+export type ReminderStatus = 'active' | 'paused' | 'completed' | 'error';
+
+export interface ScheduleItem {
+  id: string;
+  botId: string;
+  // Thời gian
+  time: string;              // HH:mm format (e.g. "08:30")
+  daysOfWeek?: number[];     // 0=CN, 1=T2... 6=T7 (for weekly/custom)
+  dayOfMonth?: number;       // 1-31 (for monthly)
+  startDate?: string;        // ISO date - khi nào bắt đầu
+  endDate?: string;          // ISO date - khi nào kết thúc (optional)
+  // Nội dung
+  content: string;           // Nội dung gốc người dùng nhập
+  aiEnhanced: boolean;       // Có dùng AI để viết lại mỗi lần gửi không
+  aiTone?: 'motivational' | 'strict' | 'friendly' | 'urgent'; // Giọng AI push
+  // Đối tượng nhận
+  targetType: 'group' | 'individual' | 'all';
+  targetChatIds: string[];   // Telegram group_id(s) hoặc chat_id(s)
+  targetNames?: string[];    // Tên hiển thị để quản lý
+  // Metadata
+  frequency: ReminderFrequency;
+  status: ReminderStatus;
+  label: string;             // Tên/nhãn cho schedule (e.g. "Nhắc họp sáng")
+  category?: string;         // Phân loại: 'meeting', 'task', 'report', 'custom'
+  createdAt: string;
+  lastTriggeredAt?: string;
+  lastContent?: string;      // Nội dung lần cuối đã gửi (để AI không lặp lại)
+  triggerCount: number;       // Số lần đã nhắc
+  maxTriggers?: number;       // Giới hạn số lần nhắc (null = vô hạn)
+}
+
+export interface ReminderLog {
+  id: string;
+  scheduleId: string;
+  botId: string;
+  triggeredAt: string;
+  content: string;            // Nội dung thực tế đã gửi (có thể đã qua AI)
+  targetChatIds: string[];
+  status: 'sent' | 'failed' | 'skipped';
+  errorMessage?: string;
+}
+
+export interface ScheduleUploadResult {
+  success: boolean;
+  totalParsed: number;
+  schedules: ScheduleItem[];
+  errors?: string[];
+}
+

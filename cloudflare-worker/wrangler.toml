@@ -1,0 +1,7 @@
+name = "aaa-balabot-api"
+main = "balabot-api-worker.js"
+compatibility_date = "2026-05-29"
+
+[vars]
+BOTPRESS_API_SECRET = "balabot-botpress-dev-secret"
+BALABOT_BACKEND_BASE_URL = "https://antiantiai.xyz/balabot"

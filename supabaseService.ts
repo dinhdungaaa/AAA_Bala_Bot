@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { BotConfig, KnowledgeSource, KnowledgeChunk, ChatSession, FAQItem, WorkspaceUser } from './src/types';
+import { BotConfig, KnowledgeSource, KnowledgeChunk, ChatSession, FAQItem, WorkspaceUser, ScheduleItem, ReminderLog } from './src/types';
 
 let _supabaseClient: SupabaseClient | null = null;
 
@@ -274,6 +274,64 @@ WITH CHECK (bucket_id = 'knowledge-sources');
 CREATE POLICY "Cho phép xóa files" 
 ON storage.objects FOR DELETE TO public 
 USING (bucket_id = 'knowledge-sources');
+
+-- =========================================================================
+-- 7. BẢNG LỊCH NHẮC TỰ ĐỘNG (SCHEDULES)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS schedules (
+  id TEXT PRIMARY KEY,
+  "botId" TEXT REFERENCES bots(id) ON DELETE CASCADE,
+  time TEXT NOT NULL,
+  "daysOfWeek" INTEGER[],
+  "dayOfMonth" INTEGER,
+  "startDate" TIMESTAMPTZ,
+  "endDate" TIMESTAMPTZ,
+  content TEXT NOT NULL,
+  "aiEnhanced" BOOLEAN DEFAULT FALSE,
+  "aiTone" TEXT DEFAULT 'friendly',
+  "targetType" TEXT DEFAULT 'group',
+  "targetChatIds" TEXT[],
+  "targetNames" TEXT[],
+  frequency TEXT DEFAULT 'daily',
+  status TEXT DEFAULT 'active',
+  label TEXT NOT NULL,
+  category TEXT,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "lastTriggeredAt" TIMESTAMPTZ,
+  "lastContent" TEXT,
+  "triggerCount" INTEGER DEFAULT 0,
+  "maxTriggers" INTEGER
+);
+
+ALTER TABLE schedules ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read schedules" ON schedules;
+DROP POLICY IF EXISTS "Allow public insert schedules" ON schedules;
+DROP POLICY IF EXISTS "Allow public update schedules" ON schedules;
+DROP POLICY IF EXISTS "Allow public delete schedules" ON schedules;
+CREATE POLICY "Allow public read schedules" ON schedules FOR SELECT USING (true);
+CREATE POLICY "Allow public insert schedules" ON schedules FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update schedules" ON schedules FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete schedules" ON schedules FOR DELETE USING (true);
+
+-- =========================================================================
+-- 8. BẢNG LOG NHẮC NHỞ (REMINDER LOGS)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS reminder_logs (
+  id TEXT PRIMARY KEY,
+  "scheduleId" TEXT REFERENCES schedules(id) ON DELETE CASCADE,
+  "botId" TEXT,
+  "triggeredAt" TIMESTAMPTZ DEFAULT NOW(),
+  content TEXT,
+  "targetChatIds" TEXT[],
+  status TEXT DEFAULT 'sent',
+  "errorMessage" TEXT
+);
+
+ALTER TABLE reminder_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read rlogs" ON reminder_logs;
+DROP POLICY IF EXISTS "Allow public insert rlogs" ON reminder_logs;
+CREATE POLICY "Allow public read rlogs" ON reminder_logs FOR SELECT USING (true);
+CREATE POLICY "Allow public insert rlogs" ON reminder_logs FOR INSERT WITH CHECK (true);
 `;
 }
 
@@ -915,4 +973,168 @@ export async function dbSignInUser(email: string, password: string): Promise<{ s
   }
 }
 
+// ================= SCHEDULE / REMINDER CRUD =================
+
+function mapDbSchedule(row: any): ScheduleItem {
+  if (!row) return row;
+  return {
+    id: row.id,
+    botId: row.botId || row.botid,
+    time: row.time,
+    daysOfWeek: row.daysOfWeek || row.daysofweek,
+    dayOfMonth: row.dayOfMonth !== undefined ? row.dayOfMonth : row.dayofmonth,
+    startDate: row.startDate || row.startdate || row.start_date,
+    endDate: row.endDate || row.enddate || row.end_date,
+    content: row.content,
+    aiEnhanced: row.aiEnhanced !== undefined ? row.aiEnhanced : row.aienhanced,
+    aiTone: row.aiTone || row.aitone,
+    targetType: row.targetType || row.targettype || 'group',
+    targetChatIds: Array.isArray(row.targetChatIds || row.targetchatids) ? (row.targetChatIds || row.targetchatids) : [],
+    targetNames: Array.isArray(row.targetNames || row.targetnames) ? (row.targetNames || row.targetnames) : [],
+    frequency: row.frequency || 'daily',
+    status: row.status || 'active',
+    label: row.label || '',
+    category: row.category,
+    createdAt: row.createdAt || row.createdat || row.created_at,
+    lastTriggeredAt: row.lastTriggeredAt || row.lasttriggeredat || row.last_triggered_at,
+    lastContent: row.lastContent || row.lastcontent || row.last_content,
+    triggerCount: Number(row.triggerCount !== undefined ? row.triggerCount : (row.triggercount !== undefined ? row.triggercount : 0)),
+    maxTriggers: row.maxTriggers !== undefined ? Number(row.maxTriggers) : (row.maxtriggers !== undefined ? Number(row.maxtriggers) : undefined)
+  };
+}
+
+function mapDbReminderLog(row: any): ReminderLog {
+  if (!row) return row;
+  return {
+    id: row.id,
+    scheduleId: row.scheduleId || row.scheduleid,
+    botId: row.botId || row.botid,
+    triggeredAt: row.triggeredAt || row.triggeredat || row.triggered_at,
+    content: row.content,
+    targetChatIds: Array.isArray(row.targetChatIds || row.targetchatids) ? (row.targetChatIds || row.targetchatids) : [],
+    status: row.status || 'sent',
+    errorMessage: row.errorMessage || row.errormessage || row.error_message
+  };
+}
+
+export async function dbGetSchedules(botId: string, localFallback: ScheduleItem[]): Promise<ScheduleItem[]> {
+  const client = getSupabaseClient();
+  if (!client) return localFallback;
+  try {
+    const { data, error } = await client.from('schedules').select('*').eq('botId', botId).order('createdAt', { ascending: false });
+    if (error) {
+      console.warn("Supabase dbGetSchedules select error, using local fallback:", error);
+      return localFallback;
+    }
+    const dbSchedules = (data as any[]).map(mapDbSchedule);
+    const merged = [...dbSchedules];
+    for (const local of localFallback) {
+      if (!merged.some(s => s.id === local.id)) {
+        merged.push(local);
+      }
+    }
+    return merged;
+  } catch (err: any) {
+    console.warn("Supabase dbGetSchedules failed (using local data fallback):", err.message || err);
+    return localFallback;
+  }
+}
+
+export async function dbGetAllActiveSchedules(localFallback: ScheduleItem[]): Promise<ScheduleItem[]> {
+  const client = getSupabaseClient();
+  if (!client) return localFallback.filter(s => s.status === 'active');
+  try {
+    const { data, error } = await client.from('schedules').select('*').eq('status', 'active');
+    if (error) {
+      console.warn("Supabase dbGetAllActiveSchedules error, using local fallback:", error);
+      return localFallback.filter(s => s.status === 'active');
+    }
+    const dbSchedules = (data as any[]).map(mapDbSchedule);
+    const merged = [...dbSchedules];
+    for (const local of localFallback.filter(s => s.status === 'active')) {
+      if (!merged.some(s => s.id === local.id)) {
+        merged.push(local);
+      }
+    }
+    return merged;
+  } catch (err: any) {
+    console.warn("Supabase dbGetAllActiveSchedules failed:", err.message || err);
+    return localFallback.filter(s => s.status === 'active');
+  }
+}
+
+export async function dbSaveSchedule(schedule: ScheduleItem): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('schedules').upsert(schedule);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error("Supabase dbSaveSchedule failed:", err);
+    return false;
+  }
+}
+
+export async function dbUpdateSchedule(id: string, updates: Partial<ScheduleItem>): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('schedules').update(updates).eq('id', id);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error("Supabase dbUpdateSchedule failed:", err);
+    return false;
+  }
+}
+
+export async function dbDeleteSchedule(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('schedules').delete().eq('id', id);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error("Supabase dbDeleteSchedule failed:", err);
+    return false;
+  }
+}
+
+export async function dbSaveReminderLog(log: ReminderLog): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('reminder_logs').insert(log);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error("Supabase dbSaveReminderLog failed:", err);
+    return false;
+  }
+}
+
+export async function dbGetReminderLogs(botId: string, localFallback: ReminderLog[], limit: number = 50): Promise<ReminderLog[]> {
+  const client = getSupabaseClient();
+  if (!client) return localFallback.slice(0, limit);
+  try {
+    const { data, error } = await client.from('reminder_logs').select('*').eq('botId', botId).order('triggeredAt', { ascending: false }).limit(limit);
+    if (error) {
+      console.warn("Supabase dbGetReminderLogs error, using local fallback:", error);
+      return localFallback.slice(0, limit);
+    }
+    const dbLogs = (data as any[]).map(mapDbReminderLog);
+    const merged = [...dbLogs];
+    for (const local of localFallback) {
+      if (!merged.some(l => l.id === local.id)) {
+        merged.push(local);
+      }
+    }
+    return merged.slice(0, limit);
+  } catch (err: any) {
+    console.warn("Supabase dbGetReminderLogs failed:", err.message || err);
+    return localFallback.slice(0, limit);
+  }
+}
 
