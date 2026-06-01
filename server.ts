@@ -2037,12 +2037,17 @@ function inferChunkMetadata(text: string, title = "", sourceName = ""): ChunkMet
   const dayNumber = dayMatch ? Number(dayMatch[1]) : undefined;
 
   let topic = "general";
-  if (/(bao lau|bao nhieu ngay|thoi luong|do dai|keo dai|duration|hoc bao nhieu)/i.test(normalized)) topic = "duration";
-  else if (dayNumber || /(lo trinh|lich hoc|tung ngay|ngay hoc|module|bai hoc)/i.test(normalized)) topic = "timeline";
-  else if (/(gia|hoc phi|chi phi|phi|bao nhieu tien|price|cost)/i.test(normalized)) topic = "pricing";
-  else if (/(phu hop|doi tuong|ai nen hoc|danh cho ai|customer avatar)/i.test(normalized)) topic = "audience";
-  else if (/(ket qua|dau ra|nhan duoc|dat duoc|ung dung|thuc chien)/i.test(normalized)) topic = "outcome";
-  else if (/(bao hanh|doi tra|chinh sach|cam ket|policy)/i.test(normalized)) topic = "policy";
+  if (/(gia|hoc phi|chi phi|phi|bao nhieu tien|bao gia|bang gia|price|cost|khuyen mai|uu dai|combo|goi)/i.test(normalized)) topic = "pricing";
+  else if (/(ship|giao hang|van chuyen|noi thanh|ngoai tinh|delivery|shipping|thoi gian giao|phi ship)/i.test(normalized)) topic = "shipping";
+  else if (/(bao hanh|doi tra|hoan tien|chinh sach|cam ket|policy|warranty|refund|return)/i.test(normalized)) topic = "policy";
+  else if (/(huong dan|cach dung|su dung|bao quan|lap dat|kich hoat|ket noi|setup|how to)/i.test(normalized)) topic = "howto";
+  else if (/(con hang|het hang|ton kho|lich trong|available|availability|stock)/i.test(normalized)) topic = "availability";
+  else if (/(bao lau|bao nhieu ngay|thoi luong|do dai|keo dai|duration|hoc bao nhieu|mat bao lau|thoi gian xu ly)/i.test(normalized)) topic = "duration";
+  else if (dayNumber || /(lo trinh|lich hoc|lich hen|lich trinh|tung ngay|ngay hoc|module|bai hoc|timeline|schedule)/i.test(normalized)) topic = "timeline";
+  else if (/(phu hop|doi tuong|ai nen|danh cho ai|customer avatar|khach hang nao|nen chon)/i.test(normalized)) topic = "audience";
+  else if (/(ket qua|dau ra|nhan duoc|dat duoc|loi ich|ung dung|thuc chien|benefit|result)/i.test(normalized)) topic = "outcome";
+  else if (/(so sanh|khac gi|khac nhau|nen chon|compare|option)/i.test(normalized)) topic = "comparison";
+  else if (/(san pham|dich vu|goi|tinh nang|co gi|noi dung|product|service|feature)/i.test(normalized)) topic = "offering";
   else if (/(faq|hoi dap|cau hoi)/i.test(normalized)) topic = "faq";
 
   let coursePhase: ChunkMetadata["coursePhase"] = "unknown";
@@ -2089,7 +2094,7 @@ function buildKnowledgeChunksForSource(source: KnowledgeSource, baseTags: string
     .split(/\n+/)
     .map(line => line.trim())
     .filter(Boolean);
-  const shouldKeepLines = lines.some(line => /^(ngày|day)\s*\d{1,2}\b|^\d{1,2}[\).\-\s]+|^[-•]\s+|lộ trình|khóa học|học phí|giá|faq/i.test(line));
+  const shouldKeepLines = lines.some(line => /^(ngày|day)\s*\d{1,2}\b|^\d{1,2}[\).\-\s]+|^[-•]\s+|lộ trình|khóa học|học phí|giá|faq|chính sách|bảo hành|đổi trả|ship|giao hàng|sản phẩm|dịch vụ|tính năng/i.test(line));
   const units = shouldKeepLines ? lines : text.split(/(?<=[.!?。])\s+/).map(part => part.trim()).filter(Boolean);
   const chunkContents: string[] = [];
   let currentChunk = "";
@@ -2263,6 +2268,102 @@ function pickNaturalCoursePoints(sourceText: string, maxPoints = 3): string[] {
     .slice(0, maxPoints);
 }
 
+function isEducationContext(bot: BotConfig, query: string, sourceText = ""): boolean {
+  const normalized = normalizeSearchText(`${bot.field} ${bot.description} ${bot.name} ${query} ${sourceText.slice(0, 800)}`);
+  return /(khoa hoc|dao tao|hoc vien|bai hoc|lo trinh hoc|giang vien|hoc phi|train|training|course|education|academy)/i.test(normalized);
+}
+
+function getOfferingLabel(bot: BotConfig): string {
+  const normalized = normalizeSearchText(`${bot.field} ${bot.description}`);
+  if (/(khoa hoc|dao tao|hoc vien|academy|education|training|course)/i.test(normalized)) return "khóa học";
+  if (/(dich vu|service|agency|spa|clinic|tu van|consulting)/i.test(normalized)) return "dịch vụ";
+  if (/(phan mem|saas|app|tool|nen tang|software|platform)/i.test(normalized)) return "giải pháp";
+  if (/(nha hang|cafe|quan an|food|restaurant|f&b)/i.test(normalized)) return "sản phẩm/dịch vụ";
+  return "sản phẩm/dịch vụ";
+}
+
+function pickGroundedBusinessPoints(sourceText: string, queryTopic = "general", maxPoints = 3): string[] {
+  const sentences = sourceText
+    .split(/(?<=[.!?。])\s+|\n+/)
+    .map(sentence => humanizeKnowledgePoint(sentence))
+    .filter(sentence => sentence.length > 18)
+    .filter(sentence => !isInstructionLikeSentence(sentence));
+
+  const scored = sentences.map(sentence => {
+    const normalized = normalizeSearchText(sentence);
+    let score = 0;
+    if (queryTopic === "pricing" && /(gia|phi|vnd|vnđ|dong|uu dai|khuyen mai|combo|goi|thanh toan|\d)/i.test(normalized)) score += 6;
+    if (queryTopic === "shipping" && /(giao|ship|van chuyen|noi thanh|ngoai tinh|phi ship|nhan hang)/i.test(normalized)) score += 6;
+    if (queryTopic === "policy" && /(bao hanh|doi tra|hoan tien|chinh sach|cam ket|quy dinh)/i.test(normalized)) score += 6;
+    if (queryTopic === "howto" && /(huong dan|cach|su dung|bao quan|lap dat|kich hoat|ket noi|buoc)/i.test(normalized)) score += 6;
+    if (queryTopic === "availability" && /(con hang|het hang|ton kho|san co|dat truoc|lich)/i.test(normalized)) score += 6;
+    if (queryTopic === "comparison" && /(khac|so sanh|uu diem|nhuoc diem|phu hop|nen chon)/i.test(normalized)) score += 6;
+    if (queryTopic === "audience" && /(phu hop|danh cho|doi tuong|khach hang|nhu cau)/i.test(normalized)) score += 6;
+    if (queryTopic === "outcome" && /(loi ich|ket qua|giup|nhan duoc|dat duoc|toi uu|hieu qua)/i.test(normalized)) score += 5;
+    if (/(san pham|dich vu|goi|tinh nang|loi ich|uu diem|ho tro|giup|phu hop)/i.test(normalized)) score += 2;
+    if (/\d/.test(sentence)) score += 1;
+    return { sentence, score };
+  });
+
+  const selected = scored
+    .sort((a, b) => b.score - a.score || a.sentence.length - b.sentence.length)
+    .filter(item => item.score > 0)
+    .map(item => item.sentence)
+    .slice(0, maxPoints);
+
+  return selected.length ? selected : sentences.slice(0, maxPoints);
+}
+
+function buildGenericGroundedAnswer(
+  bot: BotConfig,
+  query: string,
+  sourceText: string,
+  lead: string,
+  queryProfile: QueryProfile
+): string {
+  const offeringLabel = getOfferingLabel(bot);
+  const brandName = bot.name || "bên em";
+  const points = pickGroundedBusinessPoints(sourceText, queryProfile.topic, 3);
+  const pointBlock = points
+    .map((point, index) => `${index + 1}. ${point}`)
+    .join("\n\n");
+
+  const leadCap = lead.charAt(0).toUpperCase() + lead.slice(1);
+  let opening = `Dạ ${lead} ơi, thông tin hiện tại của ${brandName} về phần này như sau ạ.`;
+  let nextStep = `${leadCap} muốn em nói kỹ hơn phần nào trước ạ?`;
+
+  if (queryProfile.topic === "pricing") {
+    opening = `Dạ ${lead} ơi, em gửi mình phần giá/chi phí đang có trong dữ liệu của ${brandName} nhé.`;
+    nextStep = `${leadCap} cho em biết nhu cầu hoặc gói mình đang quan tâm để em đối chiếu đúng phần giá hơn ạ?`;
+  } else if (queryProfile.topic === "shipping") {
+    opening = `Dạ ${lead} ơi, phần giao hàng/vận chuyển hiện đang được hiểu như sau ạ.`;
+    nextStep = `${leadCap} cho em biết khu vực nhận hàng để em kiểm tra hướng phù hợp hơn nhé?`;
+  } else if (queryProfile.topic === "policy") {
+    opening = `Dạ ${lead} ơi, chính sách hiện tại có các điểm chính sau ạ.`;
+    nextStep = `${leadCap} đang cần kiểm tra chính sách cho trường hợp cụ thể nào để em hỗ trợ sát hơn ạ?`;
+  } else if (queryProfile.topic === "howto") {
+    opening = `Dạ ${lead} ơi, cách thực hiện có thể đi theo các ý chính này ạ.`;
+    nextStep = `${leadCap} đang vướng ở bước nào để em hướng dẫn tiếp cho đúng nhé?`;
+  } else if (queryProfile.topic === "comparison") {
+    opening = `Dạ ${lead} ơi, nếu so sánh để chọn phương án phù hợp thì mình có thể nhìn theo các điểm này ạ.`;
+    nextStep = `${leadCap} ưu tiên giá, tính năng hay mức phù hợp với nhu cầu để em gợi ý sát hơn ạ?`;
+  } else if (queryProfile.intent === "complaint") {
+    opening = `Dạ ${lead} ơi, em hiểu vấn đề này cần xử lý rõ ràng. Trước mắt mình có thể kiểm tra theo các điểm sau ạ.`;
+    nextStep = `${leadCap} gửi thêm giúp em tình huống cụ thể hoặc mã đơn/thông tin liên quan để em hỗ trợ tiếp nhé?`;
+  } else if (queryProfile.intent === "sales" || queryProfile.topic === "offering") {
+    opening = `Dạ ${lead} ơi, ${offeringLabel} của ${brandName} có thể hiểu ngắn gọn theo các điểm chính sau ạ.`;
+    nextStep = `${leadCap} đang cần ${offeringLabel} cho nhu cầu nào để em tư vấn đúng lựa chọn hơn ạ?`;
+  }
+
+  const bodyBlock = pointBlock || `1. ${brandName} hiện có thông tin liên quan đến ${offeringLabel}, nhưng em cần thêm dữ liệu cụ thể hơn để tư vấn thật chính xác.\n\n2. ${leadCap} có thể nói rõ nhu cầu hoặc trường hợp đang gặp để em kiểm tra tiếp cho đúng ạ.`;
+
+  return `${opening}
+
+${bodyBlock}
+
+${nextStep}`;
+}
+
 const VI_UPPERCASE_TO_LOWERCASE: Record<string, string> = {
   "Á": "á", "À": "à", "Ả": "ả", "Ã": "ã", "Ạ": "ạ",
   "Ắ": "ắ", "Ằ": "ằ", "Ẳ": "ẳ", "Ẵ": "ẵ", "Ặ": "ặ", "Ă": "ă",
@@ -2373,10 +2474,16 @@ function buildQueryProfile(query: string): QueryProfile {
   const durationQuestion = isDurationQuestion(query);
   let topic = "general";
   if (durationQuestion) topic = "duration";
-  else if (requestedCourseDay || /(lo trinh|lich hoc|ngay hoc|hoc gi|noi dung ngay|tung ngay)/i.test(normalized)) topic = "timeline";
-  else if (/(gia|hoc phi|chi phi|bao nhieu tien|price|cost)/i.test(normalized)) topic = "pricing";
-  else if (/(phu hop|ai nen hoc|danh cho ai|doi tuong|avatar)/i.test(normalized)) topic = "audience";
-  else if (/(ket qua|dau ra|nhan duoc|ung dung|thuc chien|co gi|noi dung)/i.test(normalized)) topic = "outcome";
+  else if (requestedCourseDay || /(lo trinh|lich hoc|lich hen|lich trinh|ngay hoc|hoc gi|noi dung ngay|tung ngay|schedule|timeline)/i.test(normalized)) topic = "timeline";
+  else if (/(gia|hoc phi|chi phi|bao nhieu tien|bao gia|bang gia|price|cost|khuyen mai|uu dai|combo|goi)/i.test(normalized)) topic = "pricing";
+  else if (/(ship|giao hang|van chuyen|noi thanh|ngoai tinh|delivery|shipping|thoi gian giao|phi ship)/i.test(normalized)) topic = "shipping";
+  else if (/(bao hanh|doi tra|hoan tien|chinh sach|cam ket|policy|warranty|refund|return)/i.test(normalized)) topic = "policy";
+  else if (/(huong dan|cach dung|su dung|bao quan|lap dat|kich hoat|ket noi|setup|how to)/i.test(normalized)) topic = "howto";
+  else if (/(con hang|het hang|ton kho|available|availability|stock)/i.test(normalized)) topic = "availability";
+  else if (/(phu hop|ai nen|danh cho ai|doi tuong|avatar|khach hang nao|nen chon)/i.test(normalized)) topic = "audience";
+  else if (/(ket qua|dau ra|nhan duoc|ung dung|thuc chien|loi ich|co gi|noi dung|benefit|result)/i.test(normalized)) topic = "outcome";
+  else if (/(so sanh|khac gi|khac nhau|nen chon|compare|option)/i.test(normalized)) topic = "comparison";
+  else if (/(san pham|dich vu|tinh nang|goi nao|product|service|feature)/i.test(normalized)) topic = "offering";
 
   let expectedPhase: QueryProfile["expectedPhase"] = "unknown";
   if (/(sau khoa|tiep theo|30 ngay|ngay\s*15\s*[-–]\s*44|brand playbook)/i.test(normalized)) {
@@ -2389,8 +2496,12 @@ function buildQueryProfile(query: string): QueryProfile {
     query,
     `${query} ${topic}`,
     requestedCourseDay ? `ngày ${requestedCourseDay} lộ trình học nội dung bài học` : "",
-    durationQuestion ? "thời lượng khóa học chính học bao nhiêu ngày" : "",
-    topic === "pricing" ? "học phí giá chi phí chính sách thanh toán" : ""
+    durationQuestion ? "thời lượng thời gian xử lý kéo dài bao lâu" : "",
+    topic === "pricing" ? "giá chi phí báo giá bảng giá ưu đãi thanh toán" : "",
+    topic === "shipping" ? "giao hàng vận chuyển phí ship thời gian giao" : "",
+    topic === "policy" ? "chính sách bảo hành đổi trả hoàn tiền cam kết" : "",
+    topic === "howto" ? "hướng dẫn sử dụng cách dùng cài đặt bảo quản" : "",
+    topic === "offering" ? "sản phẩm dịch vụ tính năng gói nội dung chính" : ""
   ]);
 
   return {
@@ -2484,7 +2595,8 @@ function buildNaturalFallbackAnswer(
   query: string,
   activeChunks: Array<{ chunk: KnowledgeChunk; score: number }>,
   pronoun: string,
-  targetName: string
+  targetName: string,
+  queryProfile = buildQueryProfile(query)
 ): string {
   const brandName = bot.name || bot.telegramBotUsername || "bên em";
   const lead = pronoun === "Anh/Chị" ? "mình" : `${pronoun} ${targetName}`;
@@ -2495,6 +2607,7 @@ function buildNaturalFallbackAnswer(
     .map(item => cleanKnowledgeText(item.chunk.content))
     .filter(Boolean)
     .join(". ");
+  const educationContext = isEducationContext(bot, query, sourceText);
 
   const requestedDay = extractRequestedCourseDay(query);
   if (requestedDay) {
@@ -2510,7 +2623,7 @@ ${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em nói tiếp ngày ${re
 
   const durationSummary = extractCourseDurationSummary(sourceText);
   const asksDurationConflict = durationQuestion && /(30|ba muoi|muoi lam|15|chac|khong em|thay)/i.test(normalizeSearchText(query));
-  if (asksDurationConflict && (durationSummary.mainDuration || durationSummary.followUpPlan)) {
+  if (educationContext && asksDurationConflict && (durationSummary.mainDuration || durationSummary.followUpPlan)) {
     const mainDuration = durationSummary.mainDuration || extractDurationAnswer(sourceText) || "thời lượng chính trong tài liệu";
     const followUp = durationSummary.followUpPlan || "kế hoạch triển khai tiếp theo";
     return `Dạ đúng rồi ${lead} ơi, mình đang thấy hai mốc khác nhau nên dễ bị nhầm ạ.
@@ -2530,6 +2643,11 @@ Nếu ${lead} hỏi “học bao lâu” thì câu trả lời nên hiểu là $
   if (durationQuestion) {
     const duration = extractDurationAnswer(sourceText);
     if (duration) {
+      if (!educationContext) {
+        return `Dạ ${lead} ơi, thời gian hiện có trong dữ liệu là ${duration} ạ.
+
+Em hiểu đây là mốc thời gian liên quan đến phần mình đang hỏi. Nếu ${lead} cho em biết thêm trường hợp cụ thể, em sẽ đối chiếu kỹ hơn để tránh nhầm với các mốc khác trong tài liệu nhé.`;
+      }
       return `Dạ ${lead} ơi, khóa học này kéo dài ${duration} ạ.
 
 Trong thời gian đó, nội dung học đi theo hướng thực chiến để mình từng bước nắm cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc.
@@ -2555,7 +2673,7 @@ ${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em nói thêm lộ trình
   const intent = inferSupportIntent(query);
   const emotion = inferCustomerEmotion(query);
 
-  if (isCourseQuestion && !durationQuestion && !requestedDay) {
+  if (isCourseQuestion && educationContext && !durationQuestion && !requestedDay) {
     const duration = extractDurationAnswer(sourceText);
     const naturalPoints = pickNaturalCoursePoints(sourceText, 3);
     const pointBlock = naturalPoints.length
@@ -2583,10 +2701,14 @@ ${nextQuestion}`;
   let opening = `Dạ ${lead} ơi, thông tin hiện tại là phần này tập trung vào các điểm chính sau ạ.`;
   if (intent === "complaint" || emotion === "frustrated" || emotion === "angry") {
     opening = `Dạ ${lead} ơi, em hiểu vấn đề này có thể làm mình khó chịu. Trường hợp này mình có thể xử lý theo các ý chính sau ạ.`;
-  } else if (isCourseQuestion) {
+  } else if (isCourseQuestion && educationContext) {
     opening = `Dạ ${lead} ơi, khóa học của ${brandName} thiên về hướng thực chiến: giúp mình biết cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc hằng ngày, chứ không chỉ học lý thuyết suông.`;
   } else if (isPriceQuestion) {
     opening = `Dạ ${lead} ơi, phần giá hoặc chi phí sẽ phụ thuộc vào chương trình/gói đang áp dụng. Em gửi mình các điểm quan trọng trước nha.`;
+  }
+
+  if (!educationContext) {
+    return buildGenericGroundedAnswer(bot, query, sourceText, lead, queryProfile);
   }
 
   const pointBlock = basePoints
@@ -2705,7 +2827,7 @@ RESPONSE WORKFLOW NỘI BỘ:
 ${directDuration ? `- Với câu hỏi hiện tại, thông tin thời lượng đã xác định là: ${directDuration}. Phải trả lời trực tiếp con số này.` : ""}
 
 SALES ASSISTANT LOGIC:
-- Nếu khách có ý định mua, hỏi giá, hỏi khóa học, hỏi dịch vụ, so sánh lựa chọn hoặc hỏi khuyến mãi: hiểu nhu cầu, đề xuất giải pháp phù hợp nhất, giải thích lý do phù hợp, gợi ý bước tiếp theo.
+- Nếu khách có ý định mua, hỏi giá, hỏi sản phẩm/dịch vụ/khóa học/gói giải pháp, so sánh lựa chọn hoặc hỏi khuyến mãi: hiểu nhu cầu, đề xuất giải pháp phù hợp nhất, giải thích lý do phù hợp, gợi ý bước tiếp theo.
 - Không ép mua, không spam bán hàng, không phóng đại.
 
 LEAD COLLECTION:
@@ -2727,7 +2849,7 @@ PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
 - Tránh tuyệt đối lối hành văn rập khuôn, copy nguyên văn tài liệu nguồn, hoặc phản hồi cộc lốc như một công cụ tra cứu. Hãy diễn đạt lại thông tin một cách mượt mà, logic và sinh động như một chuyên viên giàu kinh nghiệm.
 - Trước khi trả lời, hãy tự phân tích tài liệu trong đầu: khách đang hỏi gì, tài liệu có những ý nào liên quan, ý nào quan trọng nhất, rồi mới tổng hợp thành câu trả lời mới bằng lời của bạn.
 - Tuyệt đối không trích xuất nguyên văn, không đưa tiêu đề chunk, mã mục, tên mục, cụm "Mục 27", "Tài liệu nguồn", "theo tri thức", "danh mục huấn luyện", hoặc bất kỳ dòng nào giống copy từ tài liệu. Khách chỉ cần nghe lời tư vấn đã được hiểu và diễn giải lại.
-- Nếu tài liệu là ghi chú khóa học dạng gạch đầu dòng, hãy chuyển thành lời tư vấn tự nhiên: khóa học giúp được gì, phù hợp với ai, kết quả mong đợi là gì, nên bắt đầu từ đâu.
+- Nếu tài liệu là ghi chú sản phẩm/dịch vụ/khóa học dạng gạch đầu dòng, hãy chuyển thành lời tư vấn tự nhiên: nội dung đó giúp được gì, phù hợp với ai, điểm quan trọng là gì, khách nên làm bước tiếp theo nào.
 - Ở cuối câu trả lời, luôn hỏi thêm một câu mở để giữ tương tác ấm áp (Ví dụ: "Dạ không biết thông tin trên đã giúp ích được cho ${pronoun} ${targetName} chưa ạ?" hoặc "${pronoun} ${targetName} cần em hỗ trợ giải đáp thêm thông tin gì nữa không cứ bảo em nha!").
 
 ĐỊNH DẠNG VĂN BẢN & BIỂU TƯỢNG (BẮT BUỘC):
@@ -2739,11 +2861,11 @@ PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
 Ví dụ cấu trúc tin nhắn đạt chuẩn:
 Dạ em chào ${pronoun} ${targetName} ạ! Rất vui được đồng hành cùng ${pronoun} ${targetName} ngày hôm nay nha.
 
-Hiện tại bên em đang có chương trình đào tạo ứng dụng công nghệ AI vô cùng hiệu quả:
+Hiện tại bên em đang có phần thông tin phù hợp với nhu cầu của ${pronoun} ${targetName}:
 
-- Giúp ${pronoun} ${targetName} biết cách dùng AI để tối ưu hóa thời gian làm việc hàng ngày.
+- Giúp ${pronoun} ${targetName} nắm nhanh điểm chính và hiểu phần nào phù hợp với nhu cầu hiện tại.
 
-- Hướng dẫn xây dựng một hệ thống tạo thu nhập bền vững và lâu dài.
+- Nếu cần triển khai tiếp, em có thể hỏi thêm một thông tin quan trọng rồi tư vấn bước tiếp theo cho sát hơn.
 
 Dạ không biết thông tin trên đã rõ ràng chưa hay ${pronoun} ${targetName} cần em hỗ trợ giải đáp thêm phần nào khác nữa không ạ?
 
@@ -2870,7 +2992,7 @@ ${pronoun === "chị" ? "Chị" : pronoun === "anh" ? "Anh" : "Anh/Chị"} cứ 
   }
 
   // Auto-compose response string locally based on matched chunk data
-  const replyText = buildNaturalFallbackAnswer(bot, query, activeChunks, pronoun, targetName);
+  const replyText = buildNaturalFallbackAnswer(bot, query, activeChunks, pronoun, targetName, queryProfile);
 
   return {
     text: postProcessBotReply(replyText, replyOptions),
