@@ -2051,6 +2051,39 @@ function cleanKnowledgeText(text: string): string {
     .trim();
 }
 
+function normalizeSearchText(text: string): string {
+  return (text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isDurationQuestion(query: string): boolean {
+  const normalized = normalizeSearchText(query);
+  return /(bao nhieu ngay|may ngay|bao lau|thoi luong|do dai|hoc trong bao lau|hoc bao nhieu|duration|how long)/i.test(normalized);
+}
+
+function extractDurationAnswer(text: string): string | null {
+  const source = cleanKnowledgeText(text);
+  const patterns = [
+    /kh[oó]a\s*h[oọ]c\s*(?:kéo dài|trong|dài)?\s*(\d{1,3})\s*(ngày|day|days|tuần|tháng)/i,
+    /(\d{1,3})\s*(ngày|day|days|tuần|tháng)\s*(?:xây dựng|học|thực chiến|đào tạo|challenge|course)?/i,
+    /thời\s*lượng[^.\n:]*[:\-]?\s*(\d{1,3})\s*(ngày|day|days|tuần|tháng)/i,
+    /độ\s*dài[^.\n:]*[:\-]?\s*(\d{1,3})\s*(ngày|day|days|tuần|tháng)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (match) {
+      return `${match[1]} ${match[2].toLowerCase().replace("days", "ngày").replace("day", "ngày")}`;
+    }
+  }
+  return null;
+}
+
 function isInstructionLikeSentence(sentence: string): boolean {
   const normalized = sentence.trim().toLowerCase();
   if (!normalized) return true;
@@ -2099,6 +2132,7 @@ function buildNaturalFallbackAnswer(
   const brandName = bot.name || bot.telegramBotUsername || "bên em";
   const lead = pronoun === "Anh/Chị" ? "mình" : `${pronoun} ${targetName}`;
   const queryWords = query.toLowerCase().split(/[\s,.;:!?()"'`]+/).filter(word => word.length >= 3);
+  const durationQuestion = isDurationQuestion(query);
 
   const sourceText = activeChunks
     .map(item => cleanKnowledgeText(item.chunk.content))
@@ -2109,6 +2143,17 @@ function buildNaturalFallbackAnswer(
     .split(/(?<=[.!?。])\s+|\n+/)
     .map(sentence => sentence.trim())
     .filter(sentence => sentence.length > 18);
+
+  if (durationQuestion) {
+    const duration = extractDurationAnswer(sourceText);
+    if (duration) {
+      return `Dạ ${lead} ơi, khóa học này kéo dài ${duration} ạ.
+
+Trong thời gian đó, nội dung học đi theo hướng thực chiến để mình từng bước nắm cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc.
+
+${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em nói thêm lộ trình học trong ${duration} này gồm những phần nào không ạ?`;
+    }
+  }
 
   const selected = sentences
     .map(sentence => {
@@ -2184,24 +2229,36 @@ async function generateRAGAnswer(
   const botFAQs = await dbGetFAQs(bot.id, faqList.filter(f => f.botId === bot.id));
   const detectedIntent = inferSupportIntent(query);
   const detectedEmotion = inferCustomerEmotion(query);
+  const durationQuestion = isDurationQuestion(query);
   
   // 2. Simple phrase match search to rank chunks
   const matchedChunks = botChunks.map(chunk => {
     let score = 0;
-    const queryWords = query.toLowerCase().split(/[\s,\.\?\!]+/);
-    const chunkWords = chunk.content.toLowerCase().split(/[\s,\.\?\!]+/);
-    const titleWords = chunk.title.toLowerCase().split(/[\s,\.\?\!]+/);
+    const normalizedQuery = normalizeSearchText(query);
+    const normalizedContent = normalizeSearchText(chunk.content);
+    const normalizedTitle = normalizeSearchText(chunk.title);
+    const queryWords = normalizedQuery.split(/[\s,\.\?\!]+/);
+    const chunkWords = normalizedContent.split(/[\s,\.\?\!]+/);
+    const titleWords = normalizedTitle.split(/[\s,\.\?\!]+/);
 
     // simple overlap scoring
     queryWords.forEach(word => {
       if (word.length < 2) return;
+      if (["hoc", "ngay", "la", "bao", "nhieu", "vay", "em"].includes(word)) return;
       if (chunkWords.includes(word)) score += 0.1;
       if (titleWords.includes(word)) score += 0.3;
     });
 
     // exact substring matches yield high score boost
-    if (chunk.content.toLowerCase().includes(query.toLowerCase())) score += 0.8;
-    if (chunk.title.toLowerCase().includes(query.toLowerCase())) score += 1.0;
+    if (normalizedContent.includes(normalizedQuery)) score += 0.8;
+    if (normalizedTitle.includes(normalizedQuery)) score += 1.0;
+
+    if (durationQuestion) {
+      const combined = `${chunk.title} ${chunk.content}`;
+      if (extractDurationAnswer(combined)) score += 2.5;
+      if (/(thời\s*lượng|độ\s*dài|kéo\s*dài|bao\s*lâu)/i.test(combined)) score += 1.0;
+      if (/kh[oó]a\s*h[oọ]c/i.test(combined)) score += 0.5;
+    }
 
     return { chunk, score };
   })
@@ -2238,6 +2295,7 @@ async function generateRAGAnswer(
       const faqContextString = matchedFAQs.length
         ? matchedFAQs.map((item, id) => `FAQ #${id + 1}:\nHỏi: ${item.faq.question}\nĐáp: ${item.faq.answer}`).join("\n\n")
         : "Không có FAQ phù hợp trực tiếp.";
+      const directDuration = durationQuestion ? extractDurationAnswer(contextString) : null;
 
       const systemPrompt = `Bạn là ${bot.telegramBotUsername || bot.name}, một tư vấn viên chăm sóc khách hàng bằng xương bằng thịt, hỗ trợ trực tuyến khách hàng cho thương hiệu thuộc lĩnh vực "${bot.field}". 
 
@@ -2261,6 +2319,8 @@ RESPONSE WORKFLOW NỘI BỘ:
 - Step 2: Hiểu cảm xúc của khách. Cảm xúc sơ bộ: "${detectedEmotion}".
 - Step 3: Tìm thông tin liên quan nhất trong Knowledge Base và FAQ, ưu tiên chính xác, liên quan, mới nhất.
 - Step 4: Trả lời tự nhiên như người thật, không nói "dựa trên dữ liệu", "theo tài liệu", "tôi là AI", "theo tri thức".
+- Nếu khách hỏi câu fact ngắn như thời lượng, giá, ngày học, lịch học, điều kiện tham gia: trả lời thẳng thông tin chính ở câu đầu tiên, rồi mới bổ sung ngắn nếu cần. Không trả lời vòng vo bằng mô tả tổng quan.
+${directDuration ? `- Với câu hỏi hiện tại, thông tin thời lượng đã xác định là: ${directDuration}. Phải trả lời trực tiếp con số này.` : ""}
 
 SALES ASSISTANT LOGIC:
 - Nếu khách có ý định mua, hỏi giá, hỏi khóa học, hỏi dịch vụ, so sánh lựa chọn hoặc hỏi khuyến mãi: hiểu nhu cầu, đề xuất giải pháp phù hợp nhất, giải thích lý do phù hợp, gợi ý bước tiếp theo.
