@@ -2008,6 +2008,76 @@ function getGenderAndName(fullName: string): { pronoun: string; name: string } {
   return { pronoun: "Anh/Chị", name };
 }
 
+function cleanKnowledgeText(text: string): string {
+  return (text || "")
+    .replace(/\[[^\]]+\]/g, " ")
+    .replace(/\*\*/g, "")
+    .replace(/\*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildNaturalFallbackAnswer(
+  bot: BotConfig,
+  query: string,
+  activeChunks: Array<{ chunk: KnowledgeChunk; score: number }>,
+  pronoun: string,
+  targetName: string
+): string {
+  const brandName = bot.name || bot.telegramBotUsername || "bên em";
+  const lead = pronoun === "Anh/Chị" ? "mình" : `${pronoun} ${targetName}`;
+  const queryWords = query.toLowerCase().split(/[\s,.;:!?()"'`]+/).filter(word => word.length >= 3);
+
+  const sourceText = activeChunks
+    .map(item => cleanKnowledgeText(item.chunk.content))
+    .filter(Boolean)
+    .join(". ");
+
+  const sentences = sourceText
+    .split(/(?<=[.!?。])\s+|\n+/)
+    .map(sentence => sentence.trim())
+    .filter(sentence => sentence.length > 18);
+
+  const selected = sentences
+    .map(sentence => {
+      const lower = sentence.toLowerCase();
+      const score = queryWords.reduce((total, word) => total + (lower.includes(word) ? 1 : 0), 0);
+      return { sentence, score };
+    })
+    .sort((a, b) => b.score - a.score || a.sentence.length - b.sentence.length)
+    .filter(item => item.score > 0)
+    .slice(0, 4)
+    .map(item => item.sentence);
+
+  const basePoints = selected.length > 0 ? selected : sentences.slice(0, 4);
+  const isCourseQuestion = /kh[oó]a|course|h[oọ]c|train|đ[aà]o t[aạ]o/i.test(query);
+  const isPriceQuestion = /gi[aá]|bao nhi[eê]u|ph[ií]|cost|price/i.test(query);
+
+  let opening = `Dạ ${lead} ơi, em đã kiểm tra phần thông tin liên quan và tóm lại theo cách dễ hiểu hơn cho mình nha.`;
+  if (isCourseQuestion) {
+    opening = `Dạ ${lead} ơi, khóa học của ${brandName} thiên về hướng thực chiến: giúp mình hiểu cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc hằng ngày, chứ không chỉ học lý thuyết suông.`;
+  } else if (isPriceQuestion) {
+    opening = `Dạ ${lead} ơi, em kiểm tra thông tin hiện có thì phần này cần được hiểu theo đúng chương trình hoặc gói đang áp dụng, nên em tóm lại phần quan trọng nhất cho mình dễ nắm nha.`;
+  }
+
+  const pointBlock = basePoints
+    .slice(0, 3)
+    .map(point => point.replace(/[.;:,]+$/, "").trim())
+    .filter(Boolean)
+    .map((point, index) => `${index + 1}. ${point}`)
+    .join("\n\n");
+
+  return `${opening}
+
+Nội dung chính em hiểu được là:
+
+${pointBlock}
+
+Nếu nói ngắn gọn, phần này phù hợp để ${lead} nắm được hướng đi, biết nên bắt đầu từ đâu và có thể áp dụng vào mục tiêu thực tế của mình.
+
+${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em tư vấn sâu hơn theo hướng học để làm content, bán hàng, xây bot hay tự động hóa công việc trước ạ?`;
+}
+
 // Core RAG matching & AI generation call
 async function generateRAGAnswer(
   bot: BotConfig, 
@@ -2076,6 +2146,9 @@ PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
 - BẮT BUỘC xưng hô "Em" (hoặc từ phù hợp với thương hiệu) và gọi người dùng bằng đại từ xưng hô tương ứng giới tính đã được xác định của họ là "${pronoun}" kèm theo tên của họ là "${targetName}" (Ví dụ gọi: "${pronoun} ${targetName}"). Không sử dụng chung chung "Quý khách" hay "anh/chị" bừa bãi khi đã biết pronoun chính xác của họ là "${pronoun}" và tên của họ là "${targetName}".
 - Luôn sử dụng từ ngữ nói tự nhiên, trôi chảy, có từ kính ngữ cảm thán nhẹ nhàng ở đầu và cuối câu (Ví dụ: "Dạ em chào ${pronoun} ${targetName} ạ", "Dạ vâng ạ", "nhe ${pronoun} ${targetName}", "nhé ạ", "nha ${pronoun} ${targetName}", "ạ", v.v.).
 - Tránh tuyệt đối lối hành văn rập khuôn, copy nguyên văn tài liệu nguồn, hoặc phản hồi cộc lốc như một công cụ tra cứu. Hãy diễn đạt lại thông tin một cách mượt mà, logic và sinh động như một chuyên viên giàu kinh nghiệm.
+- Trước khi trả lời, hãy tự phân tích tài liệu trong đầu: khách đang hỏi gì, tài liệu có những ý nào liên quan, ý nào quan trọng nhất, rồi mới tổng hợp thành câu trả lời mới bằng lời của bạn.
+- Tuyệt đối không trích xuất nguyên văn, không đưa tiêu đề chunk, mã mục, tên mục, cụm "Mục 27", "Tài liệu nguồn", "theo tri thức", "danh mục huấn luyện", hoặc bất kỳ dòng nào giống copy từ tài liệu. Khách chỉ cần nghe lời tư vấn đã được hiểu và diễn giải lại.
+- Nếu tài liệu là ghi chú khóa học dạng gạch đầu dòng, hãy chuyển thành lời tư vấn tự nhiên: khóa học giúp được gì, phù hợp với ai, kết quả mong đợi là gì, nên bắt đầu từ đâu.
 - Ở cuối câu trả lời, luôn hỏi thêm một câu mở để giữ tương tác ấm áp (Ví dụ: "Dạ không biết thông tin trên đã giúp ích được cho ${pronoun} ${targetName} chưa ạ?" hoặc "${pronoun} ${targetName} cần em hỗ trợ giải đáp thêm thông tin gì nữa không cứ bảo em nha!").
 
 ĐỊNH DẠNG VĂN BẢN & BIỂU TƯỢNG (BẮT BUỘC):
@@ -2200,13 +2273,7 @@ ${pronoun === "chị" ? "Chị" : pronoun === "anh" ? "Anh" : "Anh/Chị"} cứ 
   }
 
   // Auto-compose response string locally based on matched chunk data
-  const primeChunk = activeChunks[0].chunk;
-  let replyText = "";
-  if (bot.tone === "friendly") {
-    replyText = `Dạ ${pronoun} ${targetName} ơi, về vấn đề "${query}" em xin gửi ${pronoun} ${targetName} thông tin từ tri thức của AAA Farm nha:\n\n👉 *${primeChunk.title}*: ${primeChunk.content}\n\nHi vọng sẽ giúp ích được cho mình ạ! 💚`;
-  } else {
-    replyText = `Kính gửi ${pronoun} ${targetName}, liên quan đến thông tin tìm kiếm: "${query}". AAA Farm xin phản hồi chính xác dựa trên danh mục huấn luyện:\n\n📖 *${primeChunk.title}*: ${primeChunk.content}\n\nĐể biết thêm chi tiết, vui lòng liên kết tổng đài ${bot.fallbackPhone}.`;
-  }
+  const replyText = buildNaturalFallbackAnswer(bot, query, activeChunks, pronoun, targetName);
 
   return {
     text: replyText,
