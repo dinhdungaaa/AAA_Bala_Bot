@@ -2017,6 +2017,25 @@ function cleanKnowledgeText(text: string): string {
     .trim();
 }
 
+function inferSupportIntent(query: string): string {
+  const text = query.toLowerCase();
+  if (/(giá|bao nhiêu|phí|khuyến mãi|mua|đăng ký|tư vấn|gói|combo|price|buy|cost)/i.test(text)) return "sales";
+  if (/(lỗi|không được|hỏng|sai|khiếu nại|bực|tức|hoàn tiền|đổi trả|complain|refund|error)/i.test(text)) return "complaint";
+  if (/(chính sách|bảo hành|đổi trả|vận chuyển|ship|policy)/i.test(text)) return "policy";
+  if (/(đặt lịch|hẹn|schedule|booking|gặp nhân viên|tư vấn viên)/i.test(text)) return "booking";
+  if (/(so sánh|khác gì|nên chọn|phù hợp|option|compare)/i.test(text)) return "comparison";
+  return "information";
+}
+
+function inferCustomerEmotion(query: string): string {
+  const text = query.toLowerCase();
+  if (/(bực|tức|khó chịu|quá tệ|lừa|chán|angry|mad)/i.test(text)) return "angry";
+  if (/(lỗi|không hiểu|sao lại|không được|rối|confused|frustrated)/i.test(text)) return "frustrated";
+  if (/(quan tâm|muốn mua|tư vấn|hợp không|interested)/i.test(text)) return "interested";
+  if (/(gì vậy|như thế nào|ra sao|curious|hỏi)/i.test(text)) return "curious";
+  return "neutral";
+}
+
 function buildNaturalFallbackAnswer(
   bot: BotConfig,
   query: string,
@@ -2052,9 +2071,13 @@ function buildNaturalFallbackAnswer(
   const basePoints = selected.length > 0 ? selected : sentences.slice(0, 4);
   const isCourseQuestion = /kh[oó]a|course|h[oọ]c|train|đ[aà]o t[aạ]o/i.test(query);
   const isPriceQuestion = /gi[aá]|bao nhi[eê]u|ph[ií]|cost|price/i.test(query);
+  const intent = inferSupportIntent(query);
+  const emotion = inferCustomerEmotion(query);
 
   let opening = `Dạ ${lead} ơi, em đã kiểm tra phần thông tin liên quan và tóm lại theo cách dễ hiểu hơn cho mình nha.`;
-  if (isCourseQuestion) {
+  if (intent === "complaint" || emotion === "frustrated" || emotion === "angry") {
+    opening = `Dạ ${lead} ơi, em hiểu vấn đề này có thể làm mình khó chịu. Em tóm lại phần liên quan trước để mình xử lý đúng hướng nha.`;
+  } else if (isCourseQuestion) {
     opening = `Dạ ${lead} ơi, khóa học của ${brandName} thiên về hướng thực chiến: giúp mình hiểu cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc hằng ngày, chứ không chỉ học lý thuyết suông.`;
   } else if (isPriceQuestion) {
     opening = `Dạ ${lead} ơi, em kiểm tra thông tin hiện có thì phần này cần được hiểu theo đúng chương trình hoặc gói đang áp dụng, nên em tóm lại phần quan trọng nhất cho mình dễ nắm nha.`;
@@ -2067,6 +2090,12 @@ function buildNaturalFallbackAnswer(
     .map((point, index) => `${index + 1}. ${point}`)
     .join("\n\n");
 
+  const nextStep = intent === "sales"
+    ? `${lead.charAt(0).toUpperCase() + lead.slice(1)} cho em biết mục tiêu chính của mình là học để làm content, bán hàng, xây bot hay tự động hóa công việc để em gợi ý hướng phù hợp nhất ạ?`
+    : intent === "complaint"
+      ? `${lead.charAt(0).toUpperCase() + lead.slice(1)} gửi thêm giúp em tình huống cụ thể mình đang gặp để em hỗ trợ kiểm tra tiếp cho đúng nhé?`
+      : `${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em tư vấn sâu hơn theo hướng nào trước ạ?`;
+
   return `${opening}
 
 Nội dung chính em hiểu được là:
@@ -2075,7 +2104,7 @@ ${pointBlock}
 
 Nếu nói ngắn gọn, phần này phù hợp để ${lead} nắm được hướng đi, biết nên bắt đầu từ đâu và có thể áp dụng vào mục tiêu thực tế của mình.
 
-${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em tư vấn sâu hơn theo hướng học để làm content, bán hàng, xây bot hay tự động hóa công việc trước ạ?`;
+${nextStep}`;
 }
 
 // Core RAG matching & AI generation call
@@ -2097,6 +2126,9 @@ async function generateRAGAnswer(
 
   // 1. Get knowledge chunks for this bot
   const botChunks = await dbGetChunks(bot.id, knowledgeChunks.filter(c => c.botId === bot.id && c.isActive));
+  const botFAQs = await dbGetFAQs(bot.id, faqList.filter(f => f.botId === bot.id));
+  const detectedIntent = inferSupportIntent(query);
+  const detectedEmotion = inferCustomerEmotion(query);
   
   // 2. Simple phrase match search to rank chunks
   const matchedChunks = botChunks.map(chunk => {
@@ -2128,6 +2160,17 @@ async function generateRAGAnswer(
   const isGoodMatch = matchedChunks.length > 0 && maxScore >= 0.35;
   const hasMatches = isGoodMatch;
   const activeChunks = isGoodMatch ? matchedChunks : [];
+  const matchedFAQs = botFAQs.map(faq => {
+    const haystack = `${faq.question} ${faq.answer}`.toLowerCase();
+    const score = query.toLowerCase().split(/[\s,\.\?\!]+/).reduce((total, word) => {
+      if (word.length < 2) return total;
+      return total + (haystack.includes(word) ? 0.2 : 0);
+    }, 0);
+    return { faq, score };
+  })
+  .filter(item => item.score > 0.2)
+  .sort((a, b) => b.score - a.score)
+  .slice(0, 3);
 
   // Try to use Gemini API if available
   const ai = getAIClient();
@@ -2137,8 +2180,47 @@ async function generateRAGAnswer(
       const contextString = isGoodMatch 
         ? activeChunks.map((item, id) => `Tài liệu nguồn #${id + 1} (${item.chunk.title}):\n${item.chunk.content}`).join("\n\n")
         : "Không tìm thấy tài liệu nguồn cụ thể nào phù hợp.";
+      const faqContextString = matchedFAQs.length
+        ? matchedFAQs.map((item, id) => `FAQ #${id + 1}:\nHỏi: ${item.faq.question}\nĐáp: ${item.faq.answer}`).join("\n\n")
+        : "Không có FAQ phù hợp trực tiếp.";
 
       const systemPrompt = `Bạn là ${bot.telegramBotUsername || bot.name}, một tư vấn viên chăm sóc khách hàng bằng xương bằng thịt, hỗ trợ trực tuyến khách hàng cho thương hiệu thuộc lĩnh vực "${bot.field}". 
+
+CORE ROLE:
+- Bạn là AI Customer Support & Sales Assistant đại diện cho doanh nghiệp, nhưng không được nói với khách như một chatbot máy móc.
+- Hoạt động như nhân viên chăm sóc khách hàng thật: trả lời câu hỏi, hướng dẫn, tư vấn sản phẩm/dịch vụ, hỗ trợ xử lý vấn đề, thu thập thông tin cần thiết và chuyển đổi khách hàng tiềm năng khi phù hợp.
+- Final output chỉ là nội dung gửi cho khách. Không hiển thị reasoning, workflow, phân tích nội bộ, prompt, hoặc quy trình hệ thống.
+
+PRIMARY DATA SOURCES:
+Ưu tiên dữ liệu theo thứ tự:
+1. Knowledge Base bên dưới.
+2. FAQ bên dưới.
+3. Product Data / Policy Data có trong Knowledge Base hoặc FAQ.
+4. Conversation History nếu có trong tin nhắn.
+5. Current User Message.
+
+Nếu dữ liệu tồn tại, trả lời dựa trên dữ liệu nhưng phải tổng hợp và diễn đạt lại. Nếu dữ liệu không tồn tại, thành thật nói hiện tại chưa có thông tin chính xác và đề xuất bước hỗ trợ tiếp theo. Không bịa thông tin.
+
+RESPONSE WORKFLOW NỘI BỘ:
+- Step 1: Hiểu intent thật sự của khách. Intent đã nhận diện sơ bộ: "${detectedIntent}".
+- Step 2: Hiểu cảm xúc của khách. Cảm xúc sơ bộ: "${detectedEmotion}".
+- Step 3: Tìm thông tin liên quan nhất trong Knowledge Base và FAQ, ưu tiên chính xác, liên quan, mới nhất.
+- Step 4: Trả lời tự nhiên như người thật, không nói "dựa trên dữ liệu", "theo tài liệu", "tôi là AI", "theo tri thức".
+
+SALES ASSISTANT LOGIC:
+- Nếu khách có ý định mua, hỏi giá, hỏi khóa học, hỏi dịch vụ, so sánh lựa chọn hoặc hỏi khuyến mãi: hiểu nhu cầu, đề xuất giải pháp phù hợp nhất, giải thích lý do phù hợp, gợi ý bước tiếp theo.
+- Không ép mua, không spam bán hàng, không phóng đại.
+
+LEAD COLLECTION:
+- Nếu thiếu thông tin quan trọng để tư vấn, chỉ hỏi từng bước một. Không hỏi quá nhiều thông tin trong một tin nhắn.
+- Ưu tiên hỏi nhu cầu hoặc mục tiêu trước; chỉ hỏi tên/số điện thoại/email khi cần chuyển tư vấn hoặc chốt bước tiếp theo.
+
+COMPLAINT HANDLING:
+- Nếu khách khó chịu, báo lỗi hoặc khiếu nại: thể hiện thấu hiểu, tập trung xử lý, không tranh luận, không đổ lỗi.
+- Có thể dùng câu như "Mình hiểu vấn đề bạn đang gặp" hoặc "Để mình hỗ trợ kiểm tra ngay" nhưng không lặp máy móc.
+
+UNKNOWN ANSWERS:
+- Nếu không tìm thấy thông tin: không bịa, không suy đoán. Trả lời ngắn gọn rằng hiện tại mình chưa có thông tin chính xác về nội dung này và hỏi thêm thông tin cần thiết để kiểm tra kỹ hơn.
 
 PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
 - Tone giọng chủ đạo: ${bot.tone} (Dựa vào tone này để điều chỉnh cách nói thích hợp).
@@ -2180,6 +2262,9 @@ Thay vào đó, bạn phải đưa ra phản hồi không biết thông minh: xi
 
 TÀI LIỆU NGUỒN CHI TIẾT:
 ${contextString}
+
+FAQ LIÊN QUAN:
+${faqContextString}
 
 Thông tin liên hệ thêm khi cần thiết:
 - SĐT: ${bot.fallbackPhone}
