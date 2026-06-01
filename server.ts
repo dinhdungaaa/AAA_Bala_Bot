@@ -781,33 +781,11 @@ Nội dung chính của tài liệu ${baseName}:
     knowledgeSources.push(newSource);
     await dbSaveSource(newSource);
 
-    // Instant split into chunks
-    const sentences = fullText.split(/[.\n]+/);
-    const chunkContents: string[] = [];
-    let currentChunk = "";
+    const generatedChunks = buildKnowledgeChunksForSource(newSource, [
+      strategy === 'default' ? "supabase-storage" : (strategy === 'byo-cloud' ? "byo-cloud" : "extract-instant-rag")
+    ]);
 
-    sentences.forEach((sentence: string) => {
-      if ((currentChunk.length + sentence.length) < 250) {
-        currentChunk += sentence + ". ";
-      } else {
-        if (currentChunk.trim()) chunkContents.push(currentChunk.trim());
-        currentChunk = sentence + ". ";
-      }
-    });
-    if (currentChunk.trim()) chunkContents.push(currentChunk.trim());
-
-    for (const [index, chunkText] of chunkContents.entries()) {
-      const chunkId = "chk-" + Math.random().toString(36).substr(2, 9);
-      const newChunk: KnowledgeChunk = {
-        id: chunkId,
-        botId,
-        sourceId: newSource.id,
-        title: `${newSource.name.substring(0, 30)} (Mục ${index + 1})`,
-        content: chunkText,
-        category: newSource.category,
-        tags: [newSource.category, strategy === 'default' ? "supabase-storage" : (strategy === 'byo-cloud' ? "byo-cloud" : "extract-instant-rag")],
-        isActive: true
-      };
+    for (const newChunk of generatedChunks) {
       knowledgeChunks.push(newChunk);
       await dbSaveChunk(newChunk);
     }
@@ -1024,33 +1002,9 @@ app.post("/api/bots/:botId/sources", async (req, res) => {
       newSource.status = "completed";
       await dbSaveSource(newSource);
       
-      // Auto Split into logical simple chunks for RAG Retrieval
-      const sentences = resolvedText.split(/[.\n]+/);
-      const chunkContents: string[] = [];
-      let currentChunk = "";
-      
-      sentences.forEach((sentence: string) => {
-        if ((currentChunk.length + sentence.length) < 250) {
-          currentChunk += sentence + ". ";
-        } else {
-          if (currentChunk.trim()) chunkContents.push(currentChunk.trim());
-          currentChunk = sentence + ". ";
-        }
-      });
-      if (currentChunk.trim()) chunkContents.push(currentChunk.trim());
-      
-      for (const [index, chunkText] of chunkContents.entries()) {
-        const chunkId = "chk-" + Math.random().toString(36).substr(2, 9);
-        const newChunk: KnowledgeChunk = {
-          id: chunkId,
-          botId,
-          sourceId: newSource.id,
-          title: `${name.substring(0, 30)} (Mục ${index + 1})`,
-          content: chunkText,
-          category: newSource.category,
-          tags: [newSource.category, type === "url" ? "web-crawler" : "manual-insert"],
-          isActive: true
-        };
+      const generatedChunks = buildKnowledgeChunksForSource(newSource, [type === "url" ? "web-crawler" : "manual-insert"]);
+
+      for (const newChunk of generatedChunks) {
         knowledgeChunks.push(newChunk);
         await dbSaveChunk(newChunk);
       }
@@ -2059,6 +2013,125 @@ function cleanKnowledgeText(text: string): string {
     .trim();
 }
 
+type ChunkMetadata = {
+  topic?: string;
+  dayNumber?: number;
+  coursePhase?: "main" | "followup" | "bonus" | "unknown";
+  priority?: number;
+  sourceName?: string;
+};
+
+function getTagValue(tags: string[] = [], key: string): string | undefined {
+  const prefix = `${key}:`;
+  return tags.find(tag => tag.startsWith(prefix))?.slice(prefix.length);
+}
+
+function normalizeChunkTags(tags: string[] = []): string[] {
+  return Array.from(new Set(tags.map(tag => String(tag || "").trim()).filter(Boolean)));
+}
+
+function inferChunkMetadata(text: string, title = "", sourceName = ""): ChunkMetadata {
+  const raw = `${title}\n${sourceName}\n${text}`;
+  const normalized = normalizeSearchText(raw);
+  const dayMatch = normalized.match(/\b(?:ngay|day)\s*(\d{1,2})\b/) || normalized.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/);
+  const dayNumber = dayMatch ? Number(dayMatch[1]) : undefined;
+
+  let topic = "general";
+  if (/(bao lau|bao nhieu ngay|thoi luong|do dai|keo dai|duration|hoc bao nhieu)/i.test(normalized)) topic = "duration";
+  else if (dayNumber || /(lo trinh|lich hoc|tung ngay|ngay hoc|module|bai hoc)/i.test(normalized)) topic = "timeline";
+  else if (/(gia|hoc phi|chi phi|phi|bao nhieu tien|price|cost)/i.test(normalized)) topic = "pricing";
+  else if (/(phu hop|doi tuong|ai nen hoc|danh cho ai|customer avatar)/i.test(normalized)) topic = "audience";
+  else if (/(ket qua|dau ra|nhan duoc|dat duoc|ung dung|thuc chien)/i.test(normalized)) topic = "outcome";
+  else if (/(bao hanh|doi tra|chinh sach|cam ket|policy)/i.test(normalized)) topic = "policy";
+  else if (/(faq|hoi dap|cau hoi)/i.test(normalized)) topic = "faq";
+
+  let coursePhase: ChunkMetadata["coursePhase"] = "unknown";
+  if (/(sau khoa|tiep theo|ngay\s*15\s*[-–]\s*44|30 ngay tiep|brand playbook|playbook 30)/i.test(normalized)) {
+    coursePhase = "followup";
+  } else if (/(khoa hoc chinh|14 ngay|15 ngay|ngay\s*1\s*[-–]\s*14|ngay\s*1\s*[-–]\s*15|course)/i.test(normalized)) {
+    coursePhase = "main";
+  } else if (/(bonus|tang kem|qua tang)/i.test(normalized)) {
+    coursePhase = "bonus";
+  }
+
+  const priority = topic === "duration" ? 9 : topic === "timeline" ? 8 : topic === "pricing" ? 7 : 5;
+  return { topic, dayNumber: Number.isFinite(dayNumber) ? dayNumber : undefined, coursePhase, priority, sourceName };
+}
+
+function metadataToTags(meta: ChunkMetadata): string[] {
+  const tags: string[] = [];
+  if (meta.topic) tags.push(`topic:${meta.topic}`);
+  if (meta.dayNumber) tags.push(`day:${meta.dayNumber}`);
+  if (meta.coursePhase && meta.coursePhase !== "unknown") tags.push(`phase:${meta.coursePhase}`);
+  if (meta.priority) tags.push(`priority:${meta.priority}`);
+  return tags;
+}
+
+function getChunkMetadata(chunk: KnowledgeChunk): ChunkMetadata {
+  const tags = chunk.tags || [];
+  const dayTag = getTagValue(tags, "day");
+  const priorityTag = getTagValue(tags, "priority");
+  const inferred = inferChunkMetadata(chunk.content, chunk.title);
+  return {
+    ...inferred,
+    topic: getTagValue(tags, "topic") || inferred.topic,
+    dayNumber: dayTag ? Number(dayTag) : inferred.dayNumber,
+    coursePhase: (getTagValue(tags, "phase") as ChunkMetadata["coursePhase"]) || inferred.coursePhase,
+    priority: priorityTag ? Number(priorityTag) : inferred.priority
+  };
+}
+
+function buildKnowledgeChunksForSource(source: KnowledgeSource, baseTags: string[] = []): KnowledgeChunk[] {
+  const text = (source.fullText || "").replace(/\r\n/g, "\n").trim();
+  if (!text) return [];
+
+  const lines = text
+    .split(/\n+/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  const shouldKeepLines = lines.some(line => /^(ngày|day)\s*\d{1,2}\b|^\d{1,2}[\).\-\s]+|^[-•]\s+|lộ trình|khóa học|học phí|giá|faq/i.test(line));
+  const units = shouldKeepLines ? lines : text.split(/(?<=[.!?。])\s+/).map(part => part.trim()).filter(Boolean);
+  const chunkContents: string[] = [];
+  let currentChunk = "";
+
+  for (const unit of units) {
+    const isStandalone = /^(ngày|day)\s*\d{1,2}\b|^\d{1,2}\s*[-–]\s*\d{1,2}\b/i.test(unit);
+    if (isStandalone && currentChunk.trim()) {
+      chunkContents.push(currentChunk.trim());
+      currentChunk = "";
+    }
+
+    const next = currentChunk ? `${currentChunk}\n${unit}` : unit;
+    if (next.length <= 650) {
+      currentChunk = next;
+    } else {
+      if (currentChunk.trim()) chunkContents.push(currentChunk.trim());
+      currentChunk = unit;
+    }
+  }
+  if (currentChunk.trim()) chunkContents.push(currentChunk.trim());
+
+  return chunkContents.map((chunkText, index) => {
+    const meta = inferChunkMetadata(chunkText, `${source.name} (Mục ${index + 1})`, source.name);
+    const tags = normalizeChunkTags([
+      source.category,
+      ...baseTags,
+      ...metadataToTags(meta)
+    ]);
+    return {
+      id: "chk-" + Math.random().toString(36).substr(2, 9),
+      botId: source.botId,
+      sourceId: source.id,
+      title: `${source.name.substring(0, 30)} (Mục ${index + 1})`,
+      content: chunkText,
+      category: source.category,
+      tags,
+      isActive: true,
+      metadata: meta
+    };
+  });
+}
+
 function normalizeSearchText(text: string): string {
   return (text || "")
     .toLowerCase()
@@ -2160,6 +2233,36 @@ function humanizeKnowledgePoint(sentence: string): string {
   return cleanBotReplyText(text.replace(/[.;:,]+$/, ""));
 }
 
+function isTimelineHeavyPoint(text: string): boolean {
+  const normalized = normalizeSearchText(text);
+  return /^(ngay|day)\s*\d{1,2}\b|ngay\s*\d{1,2}\s*[-–]\s*\d{1,2}|^\d{1,2}\s*[\).\-]/i.test(normalized);
+}
+
+function pickNaturalCoursePoints(sourceText: string, maxPoints = 3): string[] {
+  const sentences = sourceText
+    .split(/(?<=[.!?。])\s+|\n+/)
+    .map(sentence => humanizeKnowledgePoint(sentence))
+    .filter(sentence => sentence.length > 24)
+    .filter(sentence => !isInstructionLikeSentence(sentence))
+    .filter(sentence => !isTimelineHeavyPoint(sentence));
+
+  const scored = sentences.map(sentence => {
+    const normalized = normalizeSearchText(sentence);
+    let score = 0;
+    if (/(thuc chien|ung dung|ap dung|cong viec|ban hang|noi dung|content|ai)/i.test(normalized)) score += 4;
+    if (/(ket qua|dau ra|giup|minh biet|nam duoc|xay he thong)/i.test(normalized)) score += 3;
+    if (/(phu hop|danh cho|nguoi moi|doi tuong|avatar)/i.test(normalized)) score += 2;
+    if (/(muc tieu|nhiem vu|bai hoc|tieu chi)/i.test(normalized)) score += 1;
+    return { sentence, score };
+  });
+
+  return scored
+    .sort((a, b) => b.score - a.score || a.sentence.length - b.sentence.length)
+    .filter(item => item.score > 0)
+    .map(item => item.sentence)
+    .slice(0, maxPoints);
+}
+
 const VI_UPPERCASE_TO_LOWERCASE: Record<string, string> = {
   "Á": "á", "À": "à", "Ả": "ả", "Ã": "ã", "Ạ": "ạ",
   "Ắ": "ắ", "Ằ": "ằ", "Ẳ": "ẳ", "Ẵ": "ẵ", "Ặ": "ặ", "Ă": "ă",
@@ -2240,9 +2343,12 @@ type QueryProfile = {
   bigrams: string[];
   intent: string;
   emotion: string;
+  topic: string;
+  expectedPhase: "main" | "followup" | "bonus" | "unknown";
   durationQuestion: boolean;
   priceQuestion: boolean;
   requestedCourseDay: number | null;
+  subqueries: string[];
 };
 
 function tokenizeSearchText(text: string): string[] {
@@ -2263,6 +2369,30 @@ function getBigrams(tokens: string[]): string[] {
 function buildQueryProfile(query: string): QueryProfile {
   const normalized = normalizeSearchText(query);
   const tokens = tokenizeSearchText(query);
+  const requestedCourseDay = extractRequestedCourseDay(query);
+  const durationQuestion = isDurationQuestion(query);
+  let topic = "general";
+  if (durationQuestion) topic = "duration";
+  else if (requestedCourseDay || /(lo trinh|lich hoc|ngay hoc|hoc gi|noi dung ngay|tung ngay)/i.test(normalized)) topic = "timeline";
+  else if (/(gia|hoc phi|chi phi|bao nhieu tien|price|cost)/i.test(normalized)) topic = "pricing";
+  else if (/(phu hop|ai nen hoc|danh cho ai|doi tuong|avatar)/i.test(normalized)) topic = "audience";
+  else if (/(ket qua|dau ra|nhan duoc|ung dung|thuc chien|co gi|noi dung)/i.test(normalized)) topic = "outcome";
+
+  let expectedPhase: QueryProfile["expectedPhase"] = "unknown";
+  if (/(sau khoa|tiep theo|30 ngay|ngay\s*15\s*[-–]\s*44|brand playbook)/i.test(normalized)) {
+    expectedPhase = "followup";
+  } else if (durationQuestion || /(khoa hoc|hoc bao lau|hoc may ngay|ngay\s*1|14 ngay|15 ngay)/i.test(normalized)) {
+    expectedPhase = "main";
+  }
+
+  const subqueries = normalizeChunkTags([
+    query,
+    `${query} ${topic}`,
+    requestedCourseDay ? `ngày ${requestedCourseDay} lộ trình học nội dung bài học` : "",
+    durationQuestion ? "thời lượng khóa học chính học bao nhiêu ngày" : "",
+    topic === "pricing" ? "học phí giá chi phí chính sách thanh toán" : ""
+  ]);
+
   return {
     raw: query,
     normalized,
@@ -2270,9 +2400,12 @@ function buildQueryProfile(query: string): QueryProfile {
     bigrams: getBigrams(tokens),
     intent: inferSupportIntent(query),
     emotion: inferCustomerEmotion(query),
-    durationQuestion: isDurationQuestion(query),
+    topic,
+    expectedPhase,
+    durationQuestion,
     priceQuestion: /(gia|phi|bao nhieu tien|chi phi|cost|price)/i.test(normalized),
-    requestedCourseDay: extractRequestedCourseDay(query)
+    requestedCourseDay,
+    subqueries
   };
 }
 
@@ -2281,6 +2414,17 @@ function scoreTextRetrieval(profile: QueryProfile, title: string, content: strin
   const normalizedContent = normalizeSearchText(content);
   const normalizedMeta = normalizeSearchText(metadata);
   const combined = `${normalizedTitle} ${normalizedContent} ${normalizedMeta}`;
+  const pseudoChunk: KnowledgeChunk = {
+    id: "",
+    botId: "",
+    sourceId: "",
+    title,
+    content,
+    category: "faq",
+    tags: metadata.split(/\s+/).filter(Boolean),
+    isActive: true
+  };
+  const chunkMeta = getChunkMetadata(pseudoChunk);
   let score = 0;
 
   if (profile.normalized.length > 4) {
@@ -2300,16 +2444,23 @@ function scoreTextRetrieval(profile: QueryProfile, title: string, content: strin
     if (normalizedContent.includes(bigram)) score += 1.2;
   }
 
+  if (chunkMeta.topic === profile.topic) score += 4;
+  if (profile.expectedPhase !== "unknown" && chunkMeta.coursePhase === profile.expectedPhase) score += 3;
+  if (profile.expectedPhase !== "unknown" && chunkMeta.coursePhase !== "unknown" && chunkMeta.coursePhase !== profile.expectedPhase) score -= 2.5;
+
   if (profile.durationQuestion) {
     const originalCombined = `${title} ${content} ${metadata}`;
     if (extractDurationAnswer(originalCombined)) score += 8;
     if (/(thời\s*lượng|độ\s*dài|kéo\s*dài|bao\s*lâu|duration|how long)/i.test(originalCombined)) score += 3;
+    if (chunkMeta.topic !== "duration" && chunkMeta.coursePhase === "followup") score -= 3;
   }
 
   if (profile.requestedCourseDay) {
     const originalCombined = `${title} ${content} ${metadata}`;
     if (extractDayScheduleAnswer(originalCombined, profile.requestedCourseDay)) score += 8;
     if (new RegExp(`ngày\\s*${profile.requestedCourseDay}\\b|day\\s*${profile.requestedCourseDay}\\b`, "i").test(originalCombined)) score += 4;
+    if (chunkMeta.dayNumber === profile.requestedCourseDay) score += 6;
+    if (chunkMeta.dayNumber && chunkMeta.dayNumber !== profile.requestedCourseDay) score -= 1.5;
   }
 
   if (profile.priceQuestion && /(\d+[\.,]?\d*)\s*(k|000|vnđ|vnd|đ|usd|\$)|giá|học phí|chi phí/i.test(content)) {
@@ -2324,7 +2475,8 @@ function scoreTextRetrieval(profile: QueryProfile, title: string, content: strin
     score += 3;
   }
 
-  return score;
+  if (Number.isFinite(chunkMeta.priority)) score += Math.min(2, (chunkMeta.priority || 0) / 10);
+  return Math.max(0, score);
 }
 
 function buildNaturalFallbackAnswer(
@@ -2403,6 +2555,31 @@ ${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em nói thêm lộ trình
   const intent = inferSupportIntent(query);
   const emotion = inferCustomerEmotion(query);
 
+  if (isCourseQuestion && !durationQuestion && !requestedDay) {
+    const duration = extractDurationAnswer(sourceText);
+    const naturalPoints = pickNaturalCoursePoints(sourceText, 3);
+    const pointBlock = naturalPoints.length
+      ? naturalPoints.map((point, index) => `${index + 1}. ${point}`).join("\n\n")
+      : [
+        "1. Khóa học đi theo hướng thực chiến, giúp mình biết cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc.",
+        "2. Nội dung được triển khai theo từng bước để mình dễ nắm hướng đi và áp dụng vào mục tiêu thực tế.",
+        "3. Phần học phù hợp với người muốn làm việc rõ quy trình hơn, không chỉ nghe lý thuyết."
+      ].join("\n\n");
+
+    const durationLine = duration ? `\n\nThời lượng khóa học chính là ${duration}.` : "";
+    const nextQuestion = intent === "sales"
+      ? `${lead.charAt(0).toUpperCase() + lead.slice(1)} đang muốn học để làm content, bán hàng hay tự động hóa công việc để em tư vấn đúng hướng hơn ạ?`
+      : `${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em tóm tắt lộ trình theo từng ngày hay nói kỹ phần kết quả sau khi học trước ạ?`;
+
+    return `Dạ ${lead} ơi, khóa học của ${brandName} tập trung vào hướng thực chiến, giúp mình ứng dụng AI vào công việc thay vì chỉ học lý thuyết suông.${durationLine}
+
+Nội dung nổi bật là:
+
+${pointBlock}
+
+${nextQuestion}`;
+  }
+
   let opening = `Dạ ${lead} ơi, thông tin hiện tại là phần này tập trung vào các điểm chính sau ạ.`;
   if (intent === "complaint" || emotion === "frustrated" || emotion === "angry") {
     opening = `Dạ ${lead} ơi, em hiểu vấn đề này có thể làm mình khó chịu. Trường hợp này mình có thể xử lý theo các ý chính sau ạ.`;
@@ -2465,28 +2642,25 @@ async function generateRAGAnswer(
   const durationQuestion = queryProfile.durationQuestion;
   
   // 2. Multi-signal retrieval: normalized tokens, phrases, intent boosts, and metadata.
-  const matchedChunks = botChunks.map(chunk => ({
-    chunk,
-    score: scoreTextRetrieval(
-      queryProfile,
-      chunk.title,
-      chunk.content,
-      `${chunk.category || ""} ${(chunk.tags || []).join(" ")}`
-    )
-  }))
+  const retrievalProfiles = queryProfile.subqueries.map(buildQueryProfile);
+  const matchedChunks = botChunks.map(chunk => {
+    const metadata = `${chunk.category || ""} ${(chunk.tags || []).join(" ")}`;
+    const score = Math.max(...retrievalProfiles.map(profile => scoreTextRetrieval(profile, chunk.title, chunk.content, metadata)));
+    return { chunk, score };
+  })
   .filter(item => item.score >= 0.8)
   .sort((a, b) => b.score - a.score)
-  .slice(0, 6);
+  .slice(0, 10);
 
   // Determine maximum match quality
   const maxScore = matchedChunks.length > 0 ? matchedChunks[0].score : 0;
   // Consider match trustworthy only if retrieval has meaningful semantic/token evidence.
   const isGoodMatch = matchedChunks.length > 0 && maxScore >= (durationQuestion ? 2.5 : 1.2);
   const activeChunks = isGoodMatch ? matchedChunks : [];
-  const matchedFAQs = botFAQs.map(faq => ({
-    faq,
-    score: scoreTextRetrieval(queryProfile, faq.question, faq.answer, faq.category || "faq")
-  }))
+  const matchedFAQs = botFAQs.map(faq => {
+    const score = Math.max(...retrievalProfiles.map(profile => scoreTextRetrieval(profile, faq.question, faq.answer, faq.category || "faq")));
+    return { faq, score };
+  })
   .filter(item => item.score >= 0.8)
   .sort((a, b) => b.score - a.score)
   .slice(0, 4);
@@ -2719,6 +2893,53 @@ app.post("/api/bots/:botId/playgroundChat", async (req, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+app.post("/api/bots/:botId/rag-eval", async (req, res) => {
+  const botId = req.params.botId;
+  const { testCases = [] } = req.body as {
+    testCases?: Array<{
+      id?: string;
+      question: string;
+      mustInclude?: string[];
+      mustNotInclude?: string[];
+    }>;
+  };
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === botId);
+  if (!bot) return res.status(404).json({ error: "Bot not found" });
+  if (!Array.isArray(testCases) || testCases.length === 0) {
+    return res.status(400).json({ error: "testCases must be a non-empty array." });
+  }
+
+  const results = [];
+  for (const testCase of testCases.slice(0, 50)) {
+    const question = String(testCase.question || "").trim();
+    if (!question) continue;
+    const answer = await generateRAGAnswer(bot, question);
+    const normalizedAnswer = normalizeSearchText(answer.text);
+    const missing = (testCase.mustInclude || []).filter(item => !normalizedAnswer.includes(normalizeSearchText(item)));
+    const forbidden = (testCase.mustNotInclude || []).filter(item => normalizedAnswer.includes(normalizeSearchText(item)));
+    results.push({
+      id: testCase.id || question,
+      question,
+      passed: missing.length === 0 && forbidden.length === 0 && !answer.fallbackTriggered,
+      missing,
+      forbidden,
+      fallbackTriggered: answer.fallbackTriggered,
+      answer: answer.text,
+      sources: answer.sources
+    });
+  }
+
+  const passed = results.filter(item => item.passed).length;
+  res.json({
+    total: results.length,
+    passed,
+    failed: results.length - passed,
+    passRate: results.length ? Math.round((passed / results.length) * 100) : 0,
+    results
+  });
 });
 
 function verifyExternalApiSecret(req: express.Request) {

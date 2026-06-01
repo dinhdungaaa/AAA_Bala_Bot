@@ -50,6 +50,13 @@ export interface KnowledgeChunk {
   category: 'product' | 'policy' | 'pricing' | 'shipping' | 'warranty' | 'hdsd' | 'faq';
   tags: string[];
   isActive: boolean;
+  metadata?: {
+    topic?: string;
+    dayNumber?: number;
+    coursePhase?: 'main' | 'followup' | 'bonus' | 'unknown';
+    priority?: number;
+    sourceName?: string;
+  };
 }
 
 export interface Message {
