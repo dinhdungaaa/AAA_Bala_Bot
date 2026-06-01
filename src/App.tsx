@@ -58,6 +58,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin'>('dashboard');
+  const [telegramPanel, setTelegramPanel] = useState<'connection' | 'schedules' | 'train-schedules'>('connection');
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
@@ -1519,12 +1520,38 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => { setActiveTab('telegram'); setIsMobileMenuOpen(false); }}
+            onClick={() => { setActiveTab('telegram'); setTelegramPanel('connection'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'telegram' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
             <Link2 className="w-4 h-4 text-cyan-400" />
             Tích hợp Telegram
           </button>
+
+          {activeTab === 'telegram' && (
+            <div className="ml-7 mr-2 mb-1 space-y-1 border-l border-slate-700/60 pl-3">
+              <button
+                onClick={() => setTelegramPanel('connection')}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all ${telegramPanel === 'connection' ? 'bg-cyan-500/10 text-cyan-300 font-bold' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800/40'}`}
+              >
+                <Link2 className="w-3.5 h-3.5" />
+                Káº¿t ná»‘i Bot
+              </button>
+              <button
+                onClick={() => setTelegramPanel('schedules')}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all ${telegramPanel === 'schedules' ? 'bg-teal-500/10 text-teal-300 font-bold' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800/40'}`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                Lá»‹ch nháº¯c
+              </button>
+              <button
+                onClick={() => setTelegramPanel('train-schedules')}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all ${telegramPanel === 'train-schedules' ? 'bg-purple-500/10 text-purple-300 font-bold' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800/40'}`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Train lá»‹ch AI
+              </button>
+            </div>
+          )}
 
           <button
             onClick={() => { setActiveTab('conversations'); setIsMobileMenuOpen(false); }}
@@ -1564,16 +1591,16 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => { setActiveTab('schedules'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'schedules' ? 'bg-blue-600/10 text-teal-400 border-l-4 border-teal-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            onClick={() => { setActiveTab('telegram'); setTelegramPanel('schedules'); setIsMobileMenuOpen(false); }}
+            className={`hidden w-full items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'schedules' ? 'bg-blue-600/10 text-teal-400 border-l-4 border-teal-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
             <Clock className="w-4 h-4 text-teal-400" />
             Lịch Nhắc Tự Động
           </button>
 
           <button
-            onClick={() => { setActiveTab('train-schedules'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'train-schedules' ? 'bg-blue-600/10 text-teal-400 border-l-4 border-teal-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            onClick={() => { setActiveTab('telegram'); setTelegramPanel('train-schedules'); setIsMobileMenuOpen(false); }}
+            className={`hidden w-full items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'train-schedules' ? 'bg-blue-600/10 text-teal-400 border-l-4 border-teal-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
             <Sparkles className="w-4 h-4 text-teal-400" />
             Train Lịch Nhắc (AI)
@@ -2482,8 +2509,43 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 6: TELEGRAM SETUP & WEBHOOK SIMULATION */}
           {activeTab === 'telegram' && activeBot && bots.length > 0 && (
+            <div className="mb-6 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                {([
+                  ['connection', 'Káº¿t ná»‘i Bot', 'Token, webhook, test tin nháº¯n', Link2, 'cyan'],
+                  ['schedules', 'Lá»‹ch nháº¯c tá»± Ä‘á»™ng', `${schedules.filter(s => s.status === 'active').length} Ä‘ang báº­t / ${schedules.length} tá»•ng lá»‹ch`, Clock, 'teal'],
+                  ['train-schedules', 'Train lá»‹ch nháº¯c (AI)', 'Parse file hoáº·c text thÃ nh lá»‹ch', Sparkles, 'purple']
+                ] as [typeof telegramPanel, string, string, any, string][]).map(([key, label, desc, Icon, color]) => {
+                  const isActive = telegramPanel === key;
+                  const activeClass = color === 'purple'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : color === 'teal'
+                      ? 'bg-teal-600 text-white shadow-sm'
+                      : 'bg-cyan-600 text-white shadow-sm';
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setTelegramPanel(key)}
+                      className={`min-h-[72px] rounded-lg px-4 py-3 text-left transition-all flex items-center gap-3 ${isActive ? activeClass : 'text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      <span className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${isActive ? 'bg-white/15' : 'bg-slate-100'}`}>
+                        <Icon className={`w-5 h-5 ${isActive ? 'text-white' : color === 'purple' ? 'text-purple-500' : color === 'teal' ? 'text-teal-500' : 'text-cyan-500'}`} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-extrabold leading-tight">{label}</span>
+                        <span className={`block text-[11px] mt-1 leading-snug ${isActive ? 'text-white/75' : 'text-slate-400'}`}>{desc}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: TELEGRAM SETUP & WEBHOOK SIMULATION */}
+          {activeTab === 'telegram' && telegramPanel === 'connection' && activeBot && bots.length > 0 && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-xs p-6 md:p-8 space-y-6">
                 <div>
@@ -4412,7 +4474,7 @@ WHERE email = 'customer-email@example.com';`}
             </div>
           )}
 
-          {activeTab === 'schedules' && (
+          {(activeTab === 'schedules' || (activeTab === 'telegram' && telegramPanel === 'schedules')) && (
             <div className="space-y-6 animate-fade-in text-left">
               {/* HEADER BANNER */}
               <div className="bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 border border-slate-800 text-white rounded-2xl p-6 md:p-8 relative overflow-hidden shadow-xl">
@@ -4661,7 +4723,7 @@ WHERE email = 'customer-email@example.com';`}
             </div>
           )}
 
-          {activeTab === 'train-schedules' && (
+          {(activeTab === 'train-schedules' || (activeTab === 'telegram' && telegramPanel === 'train-schedules')) && (
             <div className="space-y-6 animate-fade-in text-left">
               {/* HEADER BANNER */}
               <div className="bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 border border-slate-800 text-white rounded-2xl p-6 md:p-8 relative overflow-hidden shadow-xl">
@@ -4703,7 +4765,8 @@ WHERE email = 'customer-email@example.com';`}
                           setSchedules(prev => [...data.schedules, ...prev]);
                           alert(`Nạp thành công ${data.totalParsed} lịch nhắc!`);
                           setSchedUploadFile(null);
-                          setActiveTab('schedules');
+                          setActiveTab('telegram');
+                          setTelegramPanel('schedules');
                           setSchedTab('list');
                         }
                         else { alert('Lỗi: ' + (data.errors?.join(', ') || 'Không thể parse')); }
@@ -4731,7 +4794,8 @@ WHERE email = 'customer-email@example.com';`}
                         setSchedules(prev => [...data.schedules, ...prev]);
                         alert(`AI trích xuất thành công ${data.totalParsed} lịch nhắc!`);
                         setSchedParseText('');
-                        setActiveTab('schedules');
+                        setActiveTab('telegram');
+                        setTelegramPanel('schedules');
                         setSchedTab('list');
                       }
                       else { alert('Lỗi: ' + (data.errors?.join(', ') || 'AI không thể phân tích')); }
