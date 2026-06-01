@@ -2084,6 +2084,55 @@ function extractDurationAnswer(text: string): string | null {
   return null;
 }
 
+function extractCourseDurationSummary(text: string): { mainDuration?: string; followUpPlan?: string } {
+  const normalized = normalizeSearchText(text);
+  const mainMatch = normalized.match(/(?:khoa hoc|course)[^.\n]{0,40}?(\d{1,3})\s*ngay/);
+  const followUpMatch = normalized.match(/(?:ke hoach|playbook|brand playbook)[^.\n]{0,60}?(\d{1,3})\s*ngay[^.\n]{0,80}?(?:tiep theo|ngay\s*15\s*[-–]\s*44|sau khi ket thuc)/)
+    || normalized.match(/(\d{1,3})\s*ngay\s*tiep\s*theo[^.\n]{0,80}?(?:ngay\s*15\s*[-–]\s*44|sau khi ket thuc)/);
+
+  return {
+    mainDuration: mainMatch ? `${mainMatch[1]} ngày` : undefined,
+    followUpPlan: followUpMatch ? `${followUpMatch[1]} ngày tiếp theo` : undefined
+  };
+}
+
+function extractRequestedCourseDay(query: string): number | null {
+  const normalized = normalizeSearchText(query);
+  const match = normalized.match(/(?:ngay|day)\s*(\d{1,2})(?:\b|[^0-9])/) || normalized.match(/\b(\d{1,2})\s*(?:hoc gi|co gi|noi dung gi)/);
+  if (!match) return null;
+  const day = Number(match[1]);
+  return Number.isFinite(day) && day > 0 && day < 100 ? day : null;
+}
+
+function extractDayScheduleAnswer(text: string, day: number): string | null {
+  const source = cleanKnowledgeText(text);
+  const escapedDay = String(day).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`ngày\\s*${escapedDay}\\b\\s*[:\\-–)]?\\s*([^\\.\\n]{12,220})`, "i"),
+    new RegExp(`\\bday\\s*${escapedDay}\\b\\s*[:\\-–)]?\\s*([^\\.\\n]{12,220})`, "i"),
+    new RegExp(`\\(${`ngày\\s*${escapedDay}`}[^)]*\\)\\s*([^\\.\\n]{12,220})`, "i")
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (match?.[1]) {
+      return humanizeKnowledgePoint(match[1]);
+    }
+  }
+
+  const rangePattern = new RegExp(`ngày\\s*(\\d{1,2})\\s*[-–]\\s*(\\d{1,2})[^\\.\\n]{0,160}`, "i");
+  const rangeMatch = source.match(rangePattern);
+  if (rangeMatch) {
+    const start = Number(rangeMatch[1]);
+    const end = Number(rangeMatch[2]);
+    if (day >= start && day <= end) {
+      return humanizeKnowledgePoint(rangeMatch[0]);
+    }
+  }
+
+  return null;
+}
+
 function isInstructionLikeSentence(sentence: string): boolean {
   const normalized = sentence.trim().toLowerCase();
   if (!normalized) return true;
@@ -2139,6 +2188,7 @@ type QueryProfile = {
   emotion: string;
   durationQuestion: boolean;
   priceQuestion: boolean;
+  requestedCourseDay: number | null;
 };
 
 function tokenizeSearchText(text: string): string[] {
@@ -2167,7 +2217,8 @@ function buildQueryProfile(query: string): QueryProfile {
     intent: inferSupportIntent(query),
     emotion: inferCustomerEmotion(query),
     durationQuestion: isDurationQuestion(query),
-    priceQuestion: /(gia|phi|bao nhieu tien|chi phi|cost|price)/i.test(normalized)
+    priceQuestion: /(gia|phi|bao nhieu tien|chi phi|cost|price)/i.test(normalized),
+    requestedCourseDay: extractRequestedCourseDay(query)
   };
 }
 
@@ -2201,6 +2252,12 @@ function scoreTextRetrieval(profile: QueryProfile, title: string, content: strin
     if (/(thời\s*lượng|độ\s*dài|kéo\s*dài|bao\s*lâu|duration|how long)/i.test(originalCombined)) score += 3;
   }
 
+  if (profile.requestedCourseDay) {
+    const originalCombined = `${title} ${content} ${metadata}`;
+    if (extractDayScheduleAnswer(originalCombined, profile.requestedCourseDay)) score += 8;
+    if (new RegExp(`ngày\\s*${profile.requestedCourseDay}\\b|day\\s*${profile.requestedCourseDay}\\b`, "i").test(originalCombined)) score += 4;
+  }
+
   if (profile.priceQuestion && /(\d+[\.,]?\d*)\s*(k|000|vnđ|vnd|đ|usd|\$)|giá|học phí|chi phí/i.test(content)) {
     score += 4;
   }
@@ -2232,6 +2289,32 @@ function buildNaturalFallbackAnswer(
     .map(item => cleanKnowledgeText(item.chunk.content))
     .filter(Boolean)
     .join(". ");
+
+  const requestedDay = extractRequestedCourseDay(query);
+  if (requestedDay) {
+    const dayAnswer = extractDayScheduleAnswer(sourceText, requestedDay);
+    if (dayAnswer) {
+      return `Dạ ${lead} ơi, ngày ${requestedDay} tập trung vào phần: ${dayAnswer}.
+
+Hiểu đơn giản, đây là phần giúp mình chuyển từ học sang triển khai thực tế, để có kế hoạch rõ hơn cho các bước tiếp theo.
+
+${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em nói tiếp ngày ${requestedDay + 1} hoặc tóm tắt cả lộ trình theo từng ngày không ạ?`;
+    }
+  }
+
+  const durationSummary = extractCourseDurationSummary(sourceText);
+  const asksDurationConflict = durationQuestion && /(30|ba muoi|muoi lam|15|chac|khong em|thay)/i.test(normalizeSearchText(query));
+  if (asksDurationConflict && (durationSummary.mainDuration || durationSummary.followUpPlan)) {
+    const mainDuration = durationSummary.mainDuration || extractDurationAnswer(sourceText) || "thời lượng chính trong tài liệu";
+    const followUp = durationSummary.followUpPlan || "kế hoạch triển khai tiếp theo";
+    return `Dạ đúng rồi ${lead} ơi, mình đang thấy hai mốc khác nhau nên dễ bị nhầm ạ.
+
+Phần khóa học chính là ${mainDuration}.
+
+Còn ${followUp} là phần kế hoạch/triển khai sau giai đoạn học chính, không phải thời lượng học chính.
+
+Nếu ${lead} hỏi “học bao lâu” thì câu trả lời nên hiểu là ${mainDuration}. Còn nếu hỏi “sau khóa học làm tiếp gì” thì mới nói tới phần ${followUp}.`;
+  }
 
   const sentences = sourceText
     .split(/(?<=[.!?。])\s+|\n+/)
