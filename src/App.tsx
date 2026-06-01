@@ -335,20 +335,39 @@ export default function App() {
           });
         };
 
+        // Multi-source config recovery chain:
+        // 1. Server DB (survives restarts) → 2. localStorage → 3. Server current env
         if (parsed.email) {
           fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(parsed.email)}`)
             .then(res => res.json())
             .then(data => {
-              const urlToUse = data.url || savedUrl;
-              const keyToUse = data.key || savedKey;
-              if (urlToUse && keyToUse) {
-                activateConfig(urlToUse, keyToUse);
+              if (data.success && data.url && data.key) {
+                // Config found from server (DB, JSON, or env) — always use it
+                activateConfig(data.url, data.key);
+              } else if (savedUrl && savedKey) {
+                // Fallback: use localStorage credentials
+                activateConfig(savedUrl, savedKey);
+              } else {
+                // Last resort: check if server already has Supabase configured
+                fetch('/api/supabase/config')
+                  .then(r => r.json())
+                  .then(serverCfg => {
+                    if (serverCfg.config?.isConfigured && serverCfg.status?.connected) {
+                      setSbUrl(serverCfg.config.url);
+                      setSbKey(serverCfg.config.key);
+                      setSbStatus(serverCfg.status);
+                      fetchBots(parsed.id);
+                    }
+                  });
               }
             })
             .catch(err => {
               console.error("Error restoring user config on mount", err);
               if (savedUrl && savedKey) {
                 activateConfig(savedUrl, savedKey);
+              } else {
+                // Even on network error, try to fetch bots in case server has env config
+                fetchBots(parsed.id);
               }
             });
         }
@@ -521,6 +540,7 @@ export default function App() {
         }
         
         // Retrieve and restore user's saved Supabase credentials if present
+        // Multi-source recovery: Server DB → localStorage → Server env
         if (data.user.email) {
           const savedUrl = localStorage.getItem("sbUrl");
           const savedKey = localStorage.getItem("sbKey");
@@ -552,16 +572,32 @@ export default function App() {
           fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(data.user.email)}`)
             .then(r => r.json())
             .then(configData => {
-              const urlToUse = configData.url || savedUrl;
-              const keyToUse = configData.key || savedKey;
-              if (urlToUse && keyToUse) {
-                activateSigninConfig(urlToUse, keyToUse);
+              if (configData.success && configData.url && configData.key) {
+                // Config found from server (DB, JSON, or env) — always use it
+                activateSigninConfig(configData.url, configData.key);
+              } else if (savedUrl && savedKey) {
+                activateSigninConfig(savedUrl, savedKey);
+              } else {
+                // Last resort: check if server already has Supabase
+                fetch('/api/supabase/config')
+                  .then(r => r.json())
+                  .then(serverCfg => {
+                    if (serverCfg.config?.isConfigured && serverCfg.status?.connected) {
+                      setSbUrl(serverCfg.config.url);
+                      setSbKey(serverCfg.config.key);
+                      setSbStatus(serverCfg.status);
+                      fetchBots(data.user.id);
+                    }
+                  });
               }
             })
             .catch(err => {
               console.error("Error retrieving user config upon signin", err);
               if (savedUrl && savedKey) {
                 activateSigninConfig(savedUrl, savedKey);
+              } else {
+                // Even on error, try fetching bots in case server has env config
+                fetchBots(data.user.id);
               }
             });
         }

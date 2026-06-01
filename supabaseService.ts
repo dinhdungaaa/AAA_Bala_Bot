@@ -332,6 +332,25 @@ DROP POLICY IF EXISTS "Allow public read rlogs" ON reminder_logs;
 DROP POLICY IF EXISTS "Allow public insert rlogs" ON reminder_logs;
 CREATE POLICY "Allow public read rlogs" ON reminder_logs FOR SELECT USING (true);
 CREATE POLICY "Allow public insert rlogs" ON reminder_logs FOR INSERT WITH CHECK (true);
+
+-- =========================================================================
+-- 9. BẢNG CẤU HÌNH SUPABASE CỦA TỪNG USER (PERSISTENT ACROSS RESTARTS)
+-- Lưu Supabase URL + Key cho từng user để không bị mất khi server restart/deploy
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS user_configs (
+  email TEXT PRIMARY KEY,
+  supabase_url TEXT NOT NULL,
+  supabase_key TEXT NOT NULL,
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE user_configs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read user_configs" ON user_configs;
+DROP POLICY IF EXISTS "Allow public insert user_configs" ON user_configs;
+DROP POLICY IF EXISTS "Allow public update user_configs" ON user_configs;
+CREATE POLICY "Allow public read user_configs" ON user_configs FOR SELECT USING (true);
+CREATE POLICY "Allow public insert user_configs" ON user_configs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update user_configs" ON user_configs FOR UPDATE USING (true);
 `;
 }
 
@@ -1040,6 +1059,48 @@ export async function dbGetReminderLogs(botId: string, localFallback: ReminderLo
   } catch (err: any) {
     console.warn("Supabase dbGetReminderLogs failed:", err.message || err);
     return localFallback.slice(0, limit);
+  }
+}
+
+// ================= USER CONFIG PERSISTENCE (SURVIVES RESTARTS) =================
+
+export async function dbSaveUserConfig(email: string, url: string, key: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('user_configs').upsert({
+      email: email.toLowerCase(),
+      supabase_url: url,
+      supabase_key: key,
+      updatedAt: new Date().toISOString()
+    }, { onConflict: 'email' });
+    if (error) {
+      // Table might not exist yet - that's OK, we have JSON fallback
+      console.warn("dbSaveUserConfig: table may not exist yet:", error.message);
+      return false;
+    }
+    console.log(`[UserConfig] Saved config for ${email} to Supabase DB`);
+    return true;
+  } catch (err: any) {
+    console.warn("dbSaveUserConfig failed (non-critical):", err.message || err);
+    return false;
+  }
+}
+
+export async function dbGetUserConfig(email: string): Promise<{ url: string; key: string } | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from('user_configs')
+      .select('supabase_url, supabase_key')
+      .eq('email', email.toLowerCase())
+      .single();
+    if (error || !data) return null;
+    return { url: data.supabase_url, key: data.supabase_key };
+  } catch (err: any) {
+    console.warn("dbGetUserConfig failed (non-critical):", err.message || err);
+    return null;
   }
 }
 

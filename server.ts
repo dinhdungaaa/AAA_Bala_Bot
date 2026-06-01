@@ -41,7 +41,9 @@ import {
   dbUpdateSchedule,
   dbDeleteSchedule,
   dbSaveReminderLog,
-  dbGetReminderLogs
+  dbGetReminderLogs,
+  dbSaveUserConfig,
+  dbGetUserConfig
 } from "./supabaseService.js";
 
 
@@ -438,8 +440,14 @@ app.post("/api/supabase/config", async (req, res) => {
   const { url, key, email } = req.body;
   updateDynamicConfig(url, key);
 
-  // 1. Persist email-specific configuration to user configs JSON file
+  // 1. PRIMARY: Persist email-specific config to Supabase DB (survives restarts/deploys)
   if (email) {
+    const dbSaved = await dbSaveUserConfig(email, url, key);
+    if (dbSaved) {
+      console.log(`[Config] Saved user config for ${email} to Supabase DB (permanent)`);
+    }
+
+    // 2. FALLBACK: Also save to local JSON file (works when DB table doesn't exist yet)
     const configsPath = path.join(process.cwd(), "supabase-user-configs.json");
     let configs: Record<string, { url: string; key: string }> = {};
     if (fs.existsSync(configsPath)) {
@@ -457,7 +465,7 @@ app.post("/api/supabase/config", async (req, res) => {
     }
   }
 
-  // 2. Persist configuration to .env file safely, preserving other settings (like GEMINI_API_KEY)
+  // 3. Also persist to .env file safely (works for local dev)
   const envPath = path.join(process.cwd(), ".env");
   let content = "";
   if (fs.existsSync(envPath)) {
@@ -508,27 +516,54 @@ app.post("/api/supabase/config", async (req, res) => {
   });
 });
 
-app.get("/api/supabase/config/retrieve", (req, res) => {
+app.get("/api/supabase/config/retrieve", async (req, res) => {
   const email = req.query.email as string;
   if (!email) {
     return res.status(400).json({ success: false, error: "Email is required" });
   }
 
+  // 1. PRIMARY: Try to retrieve from Supabase DB (permanent storage, survives restarts)
+  const dbConfig = await dbGetUserConfig(email);
+  if (dbConfig) {
+    return res.json({
+      success: true,
+      url: dbConfig.url,
+      key: dbConfig.key,
+      source: "database"
+    });
+  }
+
+  // 2. FALLBACK: Try local JSON file (may exist on local dev or before DB table is created)
   const configsPath = path.join(process.cwd(), "supabase-user-configs.json");
   if (fs.existsSync(configsPath)) {
     try {
       const configs = JSON.parse(fs.readFileSync(configsPath, "utf8"));
       const userConfig = configs[email.toLowerCase()];
       if (userConfig) {
+        // Migrate this config to DB so it persists next time
+        dbSaveUserConfig(email, userConfig.url, userConfig.key);
         return res.json({
           success: true,
           url: userConfig.url,
-          key: userConfig.key
+          key: userConfig.key,
+          source: "json-migrated"
         });
       }
     } catch (e) {
       console.error("Failed to parse user configs:", e);
     }
+  }
+
+  // 3. LAST RESORT: Check if server already has Supabase configured (from env vars)
+  //    Return the current server config so the client can use it directly
+  const currentConfig = getSupabaseConfig();
+  if (currentConfig.isConfigured) {
+    return res.json({
+      success: true,
+      url: currentConfig.url,
+      key: currentConfig.key,
+      source: "server-env"
+    });
   }
 
   res.json({ success: false, error: "No custom configuration found" });
@@ -2933,6 +2968,28 @@ app.post("/api/schedules/:id/trigger-now", async (req, res) => {
 });
 
 
+// ================= STARTUP SUPABASE VERIFICATION =================
+async function initializeSupabaseOnStartup() {
+  const config = getSupabaseConfig();
+  if (config.isConfigured) {
+    const status = await testConnection();
+    if (status.connected) {
+      console.log(`[Startup] ✅ Supabase connected successfully: ${config.url}`);
+      console.log(`[Startup] ✅ Key: ${config.keyMasked}`);
+      if (status.missingTables.length > 0) {
+        console.warn(`[Startup] ⚠️ Missing tables: ${status.missingTables.join(', ')}`);
+      } else {
+        console.log(`[Startup] ✅ All database tables are ready`);
+      }
+    } else {
+      console.error(`[Startup] ❌ Supabase connection FAILED: ${status.message}`);
+    }
+  } else {
+    console.warn(`[Startup] ⚠️ Supabase NOT configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables for persistent data.`);
+    console.warn(`[Startup] ⚠️ Without Supabase, ALL user data will be LOST on restart!`);
+  }
+}
+
 // Serve static/vite assets as required by environment
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
@@ -2951,6 +3008,9 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", async () => {
     console.log(`BalaBot Server running on http://0.0.0.0:${PORT}`);
+
+    // Verify Supabase connection on startup
+    await initializeSupabaseOnStartup();
 
     // Initialize Scheduler Engine
     await loadSchedulesFromDB();
