@@ -2122,6 +2122,100 @@ function inferCustomerEmotion(query: string): string {
   return "neutral";
 }
 
+const SEARCH_STOPWORDS = new Set([
+  "a", "ạ", "oi", "ơi", "em", "anh", "chi", "chị", "minh", "mình", "ban", "bạn",
+  "la", "là", "co", "có", "khong", "không", "duoc", "được", "vay", "vậy",
+  "cho", "toi", "tôi", "toi", "cua", "của", "ben", "bên", "nay", "này",
+  "do", "đó", "thi", "thì", "ve", "về", "gi", "gì", "nao", "nào", "bao",
+  "nhieu", "nhiêu", "may", "mấy"
+]);
+
+type QueryProfile = {
+  raw: string;
+  normalized: string;
+  tokens: string[];
+  bigrams: string[];
+  intent: string;
+  emotion: string;
+  durationQuestion: boolean;
+  priceQuestion: boolean;
+};
+
+function tokenizeSearchText(text: string): string[] {
+  return normalizeSearchText(text)
+    .split(/[^a-z0-9]+/)
+    .map(token => token.trim())
+    .filter(token => token.length >= 2 && !SEARCH_STOPWORDS.has(token));
+}
+
+function getBigrams(tokens: string[]): string[] {
+  const bigrams: string[] = [];
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    bigrams.push(`${tokens[i]} ${tokens[i + 1]}`);
+  }
+  return bigrams;
+}
+
+function buildQueryProfile(query: string): QueryProfile {
+  const normalized = normalizeSearchText(query);
+  const tokens = tokenizeSearchText(query);
+  return {
+    raw: query,
+    normalized,
+    tokens,
+    bigrams: getBigrams(tokens),
+    intent: inferSupportIntent(query),
+    emotion: inferCustomerEmotion(query),
+    durationQuestion: isDurationQuestion(query),
+    priceQuestion: /(gia|phi|bao nhieu tien|chi phi|cost|price)/i.test(normalized)
+  };
+}
+
+function scoreTextRetrieval(profile: QueryProfile, title: string, content: string, metadata = ""): number {
+  const normalizedTitle = normalizeSearchText(title);
+  const normalizedContent = normalizeSearchText(content);
+  const normalizedMeta = normalizeSearchText(metadata);
+  const combined = `${normalizedTitle} ${normalizedContent} ${normalizedMeta}`;
+  let score = 0;
+
+  if (profile.normalized.length > 4) {
+    if (normalizedTitle.includes(profile.normalized)) score += 5;
+    if (normalizedContent.includes(profile.normalized)) score += 3;
+  }
+
+  for (const token of profile.tokens) {
+    const tokenWeight = token.length >= 6 ? 1.2 : 1;
+    if (normalizedTitle.split(/\s+/).includes(token)) score += 1.4 * tokenWeight;
+    if (normalizedContent.includes(token)) score += 0.45 * tokenWeight;
+    if (normalizedMeta.includes(token)) score += 0.8 * tokenWeight;
+  }
+
+  for (const bigram of profile.bigrams) {
+    if (normalizedTitle.includes(bigram)) score += 2;
+    if (normalizedContent.includes(bigram)) score += 1.2;
+  }
+
+  if (profile.durationQuestion) {
+    const originalCombined = `${title} ${content} ${metadata}`;
+    if (extractDurationAnswer(originalCombined)) score += 8;
+    if (/(thời\s*lượng|độ\s*dài|kéo\s*dài|bao\s*lâu|duration|how long)/i.test(originalCombined)) score += 3;
+  }
+
+  if (profile.priceQuestion && /(\d+[\.,]?\d*)\s*(k|000|vnđ|vnd|đ|usd|\$)|giá|học phí|chi phí/i.test(content)) {
+    score += 4;
+  }
+
+  if (profile.intent === "policy" && /(policy|chính sách|đổi trả|bảo hành|vận chuyển|shipping|warranty)/i.test(`${title} ${content} ${metadata}`)) {
+    score += 3;
+  }
+
+  if (profile.intent === "complaint" && /(lỗi|hỏng|đổi trả|hoàn tiền|bảo hành|khiếu nại|support|hỗ trợ)/i.test(`${title} ${content}`)) {
+    score += 3;
+  }
+
+  return score;
+}
+
 function buildNaturalFallbackAnswer(
   bot: BotConfig,
   query: string,
@@ -2227,62 +2321,38 @@ async function generateRAGAnswer(
   // 1. Get knowledge chunks for this bot
   const botChunks = await dbGetChunks(bot.id, knowledgeChunks.filter(c => c.botId === bot.id && c.isActive));
   const botFAQs = await dbGetFAQs(bot.id, faqList.filter(f => f.botId === bot.id));
-  const detectedIntent = inferSupportIntent(query);
-  const detectedEmotion = inferCustomerEmotion(query);
-  const durationQuestion = isDurationQuestion(query);
+  const queryProfile = buildQueryProfile(query);
+  const detectedIntent = queryProfile.intent;
+  const detectedEmotion = queryProfile.emotion;
+  const durationQuestion = queryProfile.durationQuestion;
   
-  // 2. Simple phrase match search to rank chunks
-  const matchedChunks = botChunks.map(chunk => {
-    let score = 0;
-    const normalizedQuery = normalizeSearchText(query);
-    const normalizedContent = normalizeSearchText(chunk.content);
-    const normalizedTitle = normalizeSearchText(chunk.title);
-    const queryWords = normalizedQuery.split(/[\s,\.\?\!]+/);
-    const chunkWords = normalizedContent.split(/[\s,\.\?\!]+/);
-    const titleWords = normalizedTitle.split(/[\s,\.\?\!]+/);
-
-    // simple overlap scoring
-    queryWords.forEach(word => {
-      if (word.length < 2) return;
-      if (["hoc", "ngay", "la", "bao", "nhieu", "vay", "em"].includes(word)) return;
-      if (chunkWords.includes(word)) score += 0.1;
-      if (titleWords.includes(word)) score += 0.3;
-    });
-
-    // exact substring matches yield high score boost
-    if (normalizedContent.includes(normalizedQuery)) score += 0.8;
-    if (normalizedTitle.includes(normalizedQuery)) score += 1.0;
-
-    if (durationQuestion) {
-      const combined = `${chunk.title} ${chunk.content}`;
-      if (extractDurationAnswer(combined)) score += 2.5;
-      if (/(thời\s*lượng|độ\s*dài|kéo\s*dài|bao\s*lâu)/i.test(combined)) score += 1.0;
-      if (/kh[oó]a\s*h[oọ]c/i.test(combined)) score += 0.5;
-    }
-
-    return { chunk, score };
-  })
-  .filter(item => item.score > 0.05)
+  // 2. Multi-signal retrieval: normalized tokens, phrases, intent boosts, and metadata.
+  const matchedChunks = botChunks.map(chunk => ({
+    chunk,
+    score: scoreTextRetrieval(
+      queryProfile,
+      chunk.title,
+      chunk.content,
+      `${chunk.category || ""} ${(chunk.tags || []).join(" ")}`
+    )
+  }))
+  .filter(item => item.score >= 0.8)
   .sort((a, b) => b.score - a.score)
-  .slice(0, 3); // Get top 3 matched chunks
+  .slice(0, 6);
 
   // Determine maximum match quality
   const maxScore = matchedChunks.length > 0 ? matchedChunks[0].score : 0;
-  // Consider match trustworthy only if total overlap score is sufficient (> 0.35)
-  const isGoodMatch = matchedChunks.length > 0 && maxScore >= 0.35;
-  const hasMatches = isGoodMatch;
+  // Consider match trustworthy only if retrieval has meaningful semantic/token evidence.
+  const isGoodMatch = matchedChunks.length > 0 && maxScore >= (durationQuestion ? 2.5 : 1.2);
   const activeChunks = isGoodMatch ? matchedChunks : [];
-  const matchedFAQs = botFAQs.map(faq => {
-    const haystack = `${faq.question} ${faq.answer}`.toLowerCase();
-    const score = query.toLowerCase().split(/[\s,\.\?\!]+/).reduce((total, word) => {
-      if (word.length < 2) return total;
-      return total + (haystack.includes(word) ? 0.2 : 0);
-    }, 0);
-    return { faq, score };
-  })
-  .filter(item => item.score > 0.2)
+  const matchedFAQs = botFAQs.map(faq => ({
+    faq,
+    score: scoreTextRetrieval(queryProfile, faq.question, faq.answer, faq.category || "faq")
+  }))
+  .filter(item => item.score >= 0.8)
   .sort((a, b) => b.score - a.score)
-  .slice(0, 3);
+  .slice(0, 4);
+  const hasUsableKnowledge = isGoodMatch || matchedFAQs.length > 0;
 
   // Try to use Gemini API if available
   const ai = getAIClient();
@@ -2295,7 +2365,7 @@ async function generateRAGAnswer(
       const faqContextString = matchedFAQs.length
         ? matchedFAQs.map((item, id) => `FAQ #${id + 1}:\nHỏi: ${item.faq.question}\nĐáp: ${item.faq.answer}`).join("\n\n")
         : "Không có FAQ phù hợp trực tiếp.";
-      const directDuration = durationQuestion ? extractDurationAnswer(contextString) : null;
+      const directDuration = durationQuestion ? extractDurationAnswer(`${contextString}\n${faqContextString}`) : null;
 
       const systemPrompt = `Bạn là ${bot.telegramBotUsername || bot.name}, một tư vấn viên chăm sóc khách hàng bằng xương bằng thịt, hỗ trợ trực tuyến khách hàng cho thương hiệu thuộc lĩnh vực "${bot.field}". 
 
@@ -2398,7 +2468,7 @@ Hãy trình bày bố cục thông tin đẹp mắt, rõ ràng, dễ đọc, ng�
       });
 
       const responseText = response.text || "";
-      const isFallback = !isGoodMatch || 
+      const isFallback = !hasUsableKnowledge || 
                          responseText.includes(bot.fallbackMessage.substring(0, 15)) || 
                          responseText.toLowerCase().includes("em chưa có thông tin") || 
                          responseText.toLowerCase().includes("chưa có sẵn trong dữ liệu") ||
@@ -2425,7 +2495,10 @@ Hãy trình bày bố cục thông tin đẹp mắt, rõ ràng, dễ đọc, ng�
 
       return {
         text: responseText,
-        sources: isGoodMatch ? activeChunks.map(m => ({ id: m.chunk.id, name: m.chunk.title, score: Math.min(0.99, 0.4 + m.score) })) : [],
+        sources: [
+          ...(isGoodMatch ? activeChunks.map(m => ({ id: m.chunk.id, name: m.chunk.title, score: Math.min(0.99, 0.4 + m.score) })) : []),
+          ...matchedFAQs.map(m => ({ id: m.faq.id, name: `FAQ: ${m.faq.question}`, score: Math.min(0.99, 0.4 + m.score) }))
+        ],
         fallbackTriggered: isFallback
       };
     } catch (err: any) {
@@ -2437,6 +2510,18 @@ Hãy trình bày bố cục thông tin đẹp mắt, rõ ràng, dễ đọc, ng�
   // --- LOCAL FALLBACK SIMULATOR (In case AI is offline / credential not configured) ---
   console.log("Using Local Simulation Engine for Query: ", query);
   
+  if (!isGoodMatch && matchedFAQs.length > 0) {
+    const lead = pronoun === "Anh/Chị" ? "mình" : `${pronoun} ${targetName}`;
+    const topFaq = matchedFAQs[0].faq;
+    return {
+      text: `Dạ ${lead} ơi, thông tin hiện tại là ${cleanKnowledgeText(topFaq.answer)}
+
+${lead.charAt(0).toUpperCase() + lead.slice(1)} cần em giải thích kỹ hơn phần nào không ạ?`,
+      sources: matchedFAQs.map(m => ({ id: m.faq.id, name: `FAQ: ${m.faq.question}`, score: Math.min(0.98, 0.5 + m.score) })),
+      fallbackTriggered: false
+    };
+  }
+
   if (!isGoodMatch) {
     // Report unanswered question to update knowledge base
     const cleanQuery = query.trim();
