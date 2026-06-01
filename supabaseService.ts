@@ -1,7 +1,10 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { BotConfig, KnowledgeSource, KnowledgeChunk, ChatSession, FAQItem, WorkspaceUser, ScheduleItem, ReminderLog } from './src/types';
+import { AsyncLocalStorage } from 'async_hooks';
 
 let _supabaseClient: SupabaseClient | null = null;
+const requestConfigStorage = new AsyncLocalStorage<{ url: string; key: string }>();
+const scopedClients = new Map<string, SupabaseClient>();
 
 // Keep dynamic configurations in memory if the user overrides them from UI
 let dynamicConfig = {
@@ -15,9 +18,15 @@ export function updateDynamicConfig(url: string, key: string) {
   _supabaseClient = null; // Forces re-initialization
 }
 
+export function withSupabaseConfig<T>(config: { url: string; key: string } | null, fn: () => T): T {
+  if (!config?.url || !config?.key) return fn();
+  return requestConfigStorage.run({ url: config.url, key: config.key }, fn);
+}
+
 export function getSupabaseConfig() {
-  const url = dynamicConfig.url || process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const key = dynamicConfig.key || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "";
+  const requestConfig = requestConfigStorage.getStore();
+  const url = requestConfig?.url || dynamicConfig.url || process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const key = requestConfig?.key || dynamicConfig.key || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "";
   return {
     url,
     key,
@@ -27,6 +36,25 @@ export function getSupabaseConfig() {
 }
 
 export function getSupabaseClient(): SupabaseClient | null {
+  const requestConfig = requestConfigStorage.getStore();
+  if (requestConfig?.url && requestConfig?.key) {
+    const cacheKey = `${requestConfig.url}|${requestConfig.key}`;
+    const cached = scopedClients.get(cacheKey);
+    if (cached) return cached;
+    try {
+      const client = createClient(requestConfig.url, requestConfig.key, {
+        auth: {
+          persistSession: false
+        }
+      });
+      scopedClients.set(cacheKey, client);
+      return client;
+    } catch (e) {
+      console.error("Failed to initialize request-scoped Supabase client:", e);
+      return null;
+    }
+  }
+
   if (_supabaseClient) return _supabaseClient;
   const config = getSupabaseConfig();
   if (!config.url || !config.key) {

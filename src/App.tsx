@@ -116,6 +116,23 @@ export default function App() {
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
   const [newCustomerTier, setNewCustomerTier] = useState<'free' | 'pro' | 'enterprise'>('free');
 
+  const getScopedApiHeaders = () => {
+    const savedUser = localStorage.getItem("sbUser");
+    const savedUrl = localStorage.getItem("sbUrl");
+    const savedKey = localStorage.getItem("sbKey");
+    let email = sbUser?.email || "";
+    if (!email && savedUser) {
+      try {
+        email = JSON.parse(savedUser)?.email || "";
+      } catch (_) {}
+    }
+    const headers: Record<string, string> = {};
+    if (email) headers["x-balabot-user-email"] = email;
+    if (savedUrl) headers["x-balabot-supabase-url"] = savedUrl;
+    if (savedKey) headers["x-balabot-supabase-key"] = savedKey;
+    return headers;
+  };
+
   const handleUpdateCustomer = (id: string, updates: Partial<SaasCustomer>) => {
     setSimulatedCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
     fetch(`/api/admin/customers/${id}`, {
@@ -281,7 +298,7 @@ export default function App() {
   // Reusable function to fetch bots from the backend
   const fetchBots = (userId?: string) => {
     const url = userId ? `/api/bots?userId=${userId}` : '/api/bots';
-    fetch(url)
+    fetch(url, { headers: getScopedApiHeaders() })
       .then(res => res.json())
       .then(data => {
         setBots(data);
@@ -293,6 +310,29 @@ export default function App() {
       })
       .catch(err => console.error("Error fetching bots:", err));
   };
+
+  useEffect(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const isInternalApi = url.startsWith("/api/") || url.startsWith(`${window.location.origin}/api/`);
+      if (!isInternalApi) return originalFetch(input, init);
+
+      const existingHeaders = new Headers(init?.headers || {});
+      Object.entries(getScopedApiHeaders()).forEach(([key, value]) => {
+        if (!existingHeaders.has(key)) existingHeaders.set(key, value);
+      });
+
+      return originalFetch(input, {
+        ...init,
+        headers: existingHeaders
+      });
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [sbUser?.email, sbUrl, sbKey]);
 
   // Rehydrate Supabase Auth Session & Restore User Config
   useEffect(() => {

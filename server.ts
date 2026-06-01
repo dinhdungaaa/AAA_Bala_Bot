@@ -7,6 +7,7 @@ import { GoogleGenAI } from "@google/genai";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult } from "./src/types.js";
 import {
   getSupabaseConfig,
+  withSupabaseConfig,
   updateDynamicConfig,
   testConnection,
   getSQLSchema,
@@ -52,6 +53,54 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: "50mb" }));
+
+const USER_CONFIGS_FILE = path.join(process.cwd(), "supabase-user-configs.json");
+const BOT_CONFIGS_FILE = path.join(process.cwd(), "supabase-bot-configs.json");
+
+function readJsonFile<T>(filePath: string, fallback: T): T {
+  if (!fs.existsSync(filePath)) return fallback;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
+  } catch (e) {
+    console.error(`Failed to read JSON file ${filePath}:`, e);
+    return fallback;
+  }
+}
+
+function writeJsonFile(filePath: string, data: unknown) {
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  } catch (e) {
+    console.error(`Failed to write JSON file ${filePath}:`, e);
+  }
+}
+
+function getRequestConfig(req: express.Request): { url: string; key: string } | null {
+  const url = (req.headers["x-balabot-supabase-url"] || "").toString().trim();
+  const key = (req.headers["x-balabot-supabase-key"] || "").toString().trim();
+  if (url && key) return { url, key };
+
+  const email = (req.headers["x-balabot-user-email"] || "").toString().trim().toLowerCase();
+  if (email) {
+    const userConfigs = readJsonFile<Record<string, { url: string; key: string }>>(USER_CONFIGS_FILE, {});
+    const userConfig = userConfigs[email];
+    if (userConfig?.url && userConfig?.key) return userConfig;
+  }
+
+  const botMatch = req.path.match(/^\/api\/(?:bots|telegram-webhook|facebook-webhook)\/([^/]+)/);
+  const botId = botMatch?.[1];
+  if (botId) {
+    const botConfigs = readJsonFile<Record<string, { url: string; key: string }>>(BOT_CONFIGS_FILE, {});
+    const botConfig = botConfigs[botId];
+    if (botConfig?.url && botConfig?.key) return botConfig;
+  }
+
+  return null;
+}
+
+app.use((req, _res, next) => {
+  withSupabaseConfig(getRequestConfig(req), next);
+});
 
 // Lazy initializer for Gemini Client
 let _aiClient: GoogleGenAI | null = null;
@@ -438,81 +487,33 @@ app.get("/api/supabase/config", async (req, res) => {
 
 app.post("/api/supabase/config", async (req, res) => {
   const { url, key, email } = req.body;
-  updateDynamicConfig(url, key);
+  if (!url || !key) {
+    return res.status(400).json({ success: false, error: "Missing Supabase URL or key" });
+  }
 
-  // 1. PRIMARY: Persist email-specific config to Supabase DB (survives restarts/deploys)
-  if (email) {
-    const dbSaved = await dbSaveUserConfig(email, url, key);
-    if (dbSaved) {
-      console.log(`[Config] Saved user config for ${email} to Supabase DB (permanent)`);
+  return withSupabaseConfig({ url, key }, async () => {
+    if (!email) {
+      updateDynamicConfig(url, key);
     }
 
-    // 2. FALLBACK: Also save to local JSON file (works when DB table doesn't exist yet)
-    const configsPath = path.join(process.cwd(), "supabase-user-configs.json");
-    let configs: Record<string, { url: string; key: string }> = {};
-    if (fs.existsSync(configsPath)) {
-      try {
-        configs = JSON.parse(fs.readFileSync(configsPath, "utf8"));
-      } catch (e) {
-        console.error("Failed to read user configs file:", e);
+    if (email) {
+      const normalizedEmail = email.toLowerCase();
+      const dbSaved = await dbSaveUserConfig(normalizedEmail, url, key);
+      if (dbSaved) {
+        console.log(`[Config] Saved user config for ${normalizedEmail} to that user's Supabase DB`);
       }
+
+      const configs = readJsonFile<Record<string, { url: string; key: string }>>(USER_CONFIGS_FILE, {});
+      configs[normalizedEmail] = { url, key };
+      writeJsonFile(USER_CONFIGS_FILE, configs);
     }
-    configs[email.toLowerCase()] = { url, key };
-    try {
-      fs.writeFileSync(configsPath, JSON.stringify(configs, null, 2), "utf8");
-    } catch (e) {
-      console.error("Failed to write user configs file:", e);
-    }
-  }
 
-  // 3. Also persist to .env file safely (works for local dev)
-  const envPath = path.join(process.cwd(), ".env");
-  let content = "";
-  if (fs.existsSync(envPath)) {
-    try {
-      content = fs.readFileSync(envPath, "utf8");
-    } catch (e) {
-      console.error("Failed to read .env file:", e);
-    }
-  }
-
-  const lines = content.split(/\r?\n/);
-  const newLines: string[] = [];
-  let hasUrl = false;
-  let hasAnon = false;
-  let hasRole = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("SUPABASE_URL=")) {
-      newLines.push(`SUPABASE_URL="${url}"`);
-      hasUrl = true;
-    } else if (trimmed.startsWith("SUPABASE_ANON_KEY=")) {
-      newLines.push(`SUPABASE_ANON_KEY="${key}"`);
-      hasAnon = true;
-    } else if (trimmed.startsWith("SUPABASE_SERVICE_ROLE_KEY=")) {
-      newLines.push(`SUPABASE_SERVICE_ROLE_KEY="${key}"`);
-      hasRole = true;
-    } else {
-      newLines.push(line);
-    }
-  }
-
-  if (!hasUrl) newLines.push(`SUPABASE_URL="${url}"`);
-  if (!hasAnon) newLines.push(`SUPABASE_ANON_KEY="${key}"`);
-  if (!hasRole) newLines.push(`SUPABASE_SERVICE_ROLE_KEY="${key}"`);
-
-  try {
-    fs.writeFileSync(envPath, newLines.join("\n"), "utf8");
-  } catch (e) {
-    console.error("Failed to write .env file:", e);
-  }
-
-  const status = await testConnection();
-  res.json({
-    success: true,
-    config: getSupabaseConfig(),
-    status
+    const status = await testConnection();
+    res.json({
+      success: true,
+      config: getSupabaseConfig(),
+      status
+    });
   });
 });
 
@@ -522,7 +523,17 @@ app.get("/api/supabase/config/retrieve", async (req, res) => {
     return res.status(400).json({ success: false, error: "Email is required" });
   }
 
-  // 1. PRIMARY: Try to retrieve from Supabase DB (permanent storage, survives restarts)
+  const configs = readJsonFile<Record<string, { url: string; key: string }>>(USER_CONFIGS_FILE, {});
+  const userConfig = configs[email.toLowerCase()];
+  if (userConfig?.url && userConfig?.key) {
+    return res.json({
+      success: true,
+      url: userConfig.url,
+      key: userConfig.key,
+      source: "json"
+    });
+  }
+
   const dbConfig = await dbGetUserConfig(email);
   if (dbConfig) {
     return res.json({
@@ -530,39 +541,6 @@ app.get("/api/supabase/config/retrieve", async (req, res) => {
       url: dbConfig.url,
       key: dbConfig.key,
       source: "database"
-    });
-  }
-
-  // 2. FALLBACK: Try local JSON file (may exist on local dev or before DB table is created)
-  const configsPath = path.join(process.cwd(), "supabase-user-configs.json");
-  if (fs.existsSync(configsPath)) {
-    try {
-      const configs = JSON.parse(fs.readFileSync(configsPath, "utf8"));
-      const userConfig = configs[email.toLowerCase()];
-      if (userConfig) {
-        // Migrate this config to DB so it persists next time
-        dbSaveUserConfig(email, userConfig.url, userConfig.key);
-        return res.json({
-          success: true,
-          url: userConfig.url,
-          key: userConfig.key,
-          source: "json-migrated"
-        });
-      }
-    } catch (e) {
-      console.error("Failed to parse user configs:", e);
-    }
-  }
-
-  // 3. LAST RESORT: Check if server already has Supabase configured (from env vars)
-  //    Return the current server config so the client can use it directly
-  const currentConfig = getSupabaseConfig();
-  if (currentConfig.isConfigured) {
-    return res.json({
-      success: true,
-      url: currentConfig.url,
-      key: currentConfig.key,
-      source: "server-env"
     });
   }
 
@@ -873,6 +851,12 @@ app.post("/api/bots", async (req, res) => {
   };
   bots.push(newBot);
   await dbSaveBot(newBot);
+  const requestConfig = getRequestConfig(req);
+  if (requestConfig) {
+    const botConfigs = readJsonFile<Record<string, { url: string; key: string }>>(BOT_CONFIGS_FILE, {});
+    botConfigs[newBot.id] = requestConfig;
+    writeJsonFile(BOT_CONFIGS_FILE, botConfigs);
+  }
 
   // Register live Webhook automatically with Telegram
   if (newBot.telegramToken) {
@@ -904,6 +888,12 @@ app.put("/api/bots/:id", async (req, res) => {
     };
   }
   await dbUpdateBot(req.params.id, updates);
+  const requestConfig = getRequestConfig(req);
+  if (requestConfig) {
+    const botConfigs = readJsonFile<Record<string, { url: string; key: string }>>(BOT_CONFIGS_FILE, {});
+    botConfigs[req.params.id] = requestConfig;
+    writeJsonFile(BOT_CONFIGS_FILE, botConfigs);
+  }
 
   // Register/update live Webhook automatically when token is configured or changed
   const updatedBot = idx !== -1 ? bots[idx] : null;
@@ -931,6 +921,11 @@ app.put("/api/bots/:id", async (req, res) => {
 app.delete("/api/bots/:id", async (req, res) => {
   bots = bots.filter(b => b.id !== req.params.id);
   await dbDeleteBot(req.params.id);
+  const botConfigs = readJsonFile<Record<string, { url: string; key: string }>>(BOT_CONFIGS_FILE, {});
+  if (botConfigs[req.params.id]) {
+    delete botConfigs[req.params.id];
+    writeJsonFile(BOT_CONFIGS_FILE, botConfigs);
+  }
   res.json({ success: true });
 });
 
