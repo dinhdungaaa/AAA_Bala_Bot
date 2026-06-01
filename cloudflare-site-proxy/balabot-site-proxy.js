@@ -33,8 +33,8 @@ export default {
     } else {
       targetUrl = new URL(PAGES_ORIGIN);
       const strippedPath = incomingUrl.pathname.slice("/balabot".length) || "/";
-      if (strippedPath === "/") {
-        targetUrl.pathname = "/index.html";
+      if (strippedPath === "/" || strippedPath === "/index.html") {
+        targetUrl.pathname = "/";
       } else {
         targetUrl.pathname = strippedPath;
       }

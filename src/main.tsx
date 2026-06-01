@@ -6,23 +6,34 @@ import './index.css';
 // Intercept all fetch requests to prepend `/balabot` to `/api` requests in production/staging environments
 const originalFetch = window.fetch;
 window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  let url = '';
+  let urlStr = '';
   if (typeof input === 'string') {
-    url = input;
+    urlStr = input;
   } else if (input instanceof URL) {
-    url = input.pathname + input.search;
+    urlStr = input.pathname + input.search;
   } else if (input && typeof input === 'object' && 'url' in input) {
-    url = (input as Request).url;
+    urlStr = (input as Request).url;
   }
 
-  if (url.startsWith('/api')) {
+  // Parse pathname to support absolute URLs (e.g. from Request objects)
+  let pathname = urlStr;
+  let search = '';
+  if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) {
+    try {
+      const parsedUrl = new URL(urlStr);
+      pathname = parsedUrl.pathname;
+      search = parsedUrl.search;
+    } catch (_) {}
+  }
+
+  if (pathname.startsWith('/api')) {
     const isLocal = window.location.hostname === 'localhost' || 
                     window.location.hostname === '127.0.0.1' || 
                     window.location.hostname.startsWith('192.168.');
     const isProd = !isLocal;
     
     if (isProd && window.location.pathname.includes('/balabot')) {
-      const newUrl = `/balabot${url}`;
+      const newUrl = `/balabot${pathname}${search}`;
       if (typeof input === 'string') {
         input = newUrl;
       } else if (input instanceof URL) {
