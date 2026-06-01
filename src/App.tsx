@@ -1534,21 +1534,21 @@ export default function App() {
                 className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all ${telegramPanel === 'connection' ? 'bg-cyan-500/10 text-cyan-300 font-bold' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800/40'}`}
               >
                 <Link2 className="w-3.5 h-3.5" />
-                Káº¿t ná»‘i Bot
+                Kết nối Bot
               </button>
               <button
                 onClick={() => setTelegramPanel('schedules')}
                 className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all ${telegramPanel === 'schedules' ? 'bg-teal-500/10 text-teal-300 font-bold' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800/40'}`}
               >
                 <Clock className="w-3.5 h-3.5" />
-                Lá»‹ch nháº¯c
+                Lịch nhắc
               </button>
               <button
                 onClick={() => setTelegramPanel('train-schedules')}
                 className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all ${telegramPanel === 'train-schedules' ? 'bg-purple-500/10 text-purple-300 font-bold' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800/40'}`}
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                Train lá»‹ch AI
+                Train lịch AI
               </button>
             </div>
           )}
@@ -2513,9 +2513,9 @@ export default function App() {
             <div className="mb-6 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                 {([
-                  ['connection', 'Káº¿t ná»‘i Bot', 'Token, webhook, test tin nháº¯n', Link2, 'cyan'],
-                  ['schedules', 'Lá»‹ch nháº¯c tá»± Ä‘á»™ng', `${schedules.filter(s => s.status === 'active').length} Ä‘ang báº­t / ${schedules.length} tá»•ng lá»‹ch`, Clock, 'teal'],
-                  ['train-schedules', 'Train lá»‹ch nháº¯c (AI)', 'Parse file hoáº·c text thÃ nh lá»‹ch', Sparkles, 'purple']
+                  ['connection', 'Kết nối Bot', 'Token, webhook, test tin nhắn', Link2, 'cyan'],
+                  ['schedules', 'Lịch nhắc tự động', `${schedules.filter(s => s.status === 'active').length} đang bật / ${schedules.length} tổng lịch`, Clock, 'teal'],
+                  ['train-schedules', 'Train lịch nhắc (AI)', 'Parse file hoặc text thành lịch', Sparkles, 'purple']
                 ] as [typeof telegramPanel, string, string, any, string][]).map(([key, label, desc, Icon, color]) => {
                   const isActive = telegramPanel === key;
                   const activeClass = color === 'purple'
