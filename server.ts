@@ -2051,6 +2051,25 @@ function cleanKnowledgeText(text: string): string {
     .trim();
 }
 
+function isInstructionLikeSentence(sentence: string): boolean {
+  const normalized = sentence.trim().toLowerCase();
+  if (!normalized) return true;
+  return /^(hãy|tôi sẽ|viết|dán|phỏng vấn|lời khuyên|bài tập|yêu cầu|prompt|copy|paste)\b/i.test(normalized)
+    || /\?$/.test(normalized)
+    || normalized.length < 24;
+}
+
+function humanizeKnowledgePoint(sentence: string): string {
+  let text = sentence
+    .replace(/^[\-\d.)\s]+/, "")
+    .replace(/\b(MICRO|PSYCHOLOGICAL TACTICS|CTA|HOOK)\b/gi, match => match.toLowerCase())
+    .replace(/\s+/g, " ")
+    .trim();
+
+  text = text.replace(/^(.)(.*)$/, (_, first, rest) => first.toUpperCase() + rest);
+  return text.replace(/[.;:,]+$/, "");
+}
+
 function inferSupportIntent(query: string): string {
   const text = query.toLowerCase();
   if (/(giá|bao nhiêu|phí|khuyến mãi|mua|đăng ký|tư vấn|gói|combo|price|buy|cost)/i.test(text)) return "sales";
@@ -2108,21 +2127,23 @@ function buildNaturalFallbackAnswer(
   const intent = inferSupportIntent(query);
   const emotion = inferCustomerEmotion(query);
 
-  let opening = `Dạ ${lead} ơi, em đã kiểm tra phần thông tin liên quan và tóm lại theo cách dễ hiểu hơn cho mình nha.`;
+  let opening = `Dạ ${lead} ơi, thông tin hiện tại là phần này tập trung vào các điểm chính sau ạ.`;
   if (intent === "complaint" || emotion === "frustrated" || emotion === "angry") {
-    opening = `Dạ ${lead} ơi, em hiểu vấn đề này có thể làm mình khó chịu. Em tóm lại phần liên quan trước để mình xử lý đúng hướng nha.`;
+    opening = `Dạ ${lead} ơi, em hiểu vấn đề này có thể làm mình khó chịu. Trường hợp này mình có thể xử lý theo các ý chính sau ạ.`;
   } else if (isCourseQuestion) {
-    opening = `Dạ ${lead} ơi, khóa học của ${brandName} thiên về hướng thực chiến: giúp mình hiểu cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc hằng ngày, chứ không chỉ học lý thuyết suông.`;
+    opening = `Dạ ${lead} ơi, khóa học của ${brandName} thiên về hướng thực chiến: giúp mình biết cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc hằng ngày, chứ không chỉ học lý thuyết suông.`;
   } else if (isPriceQuestion) {
-    opening = `Dạ ${lead} ơi, em kiểm tra thông tin hiện có thì phần này cần được hiểu theo đúng chương trình hoặc gói đang áp dụng, nên em tóm lại phần quan trọng nhất cho mình dễ nắm nha.`;
+    opening = `Dạ ${lead} ơi, phần giá hoặc chi phí sẽ phụ thuộc vào chương trình/gói đang áp dụng. Em gửi mình các điểm quan trọng trước nha.`;
   }
 
   const pointBlock = basePoints
+    .map(humanizeKnowledgePoint)
+    .filter(point => !isInstructionLikeSentence(point))
     .slice(0, 3)
-    .map(point => point.replace(/[.;:,]+$/, "").trim())
     .filter(Boolean)
     .map((point, index) => `${index + 1}. ${point}`)
     .join("\n\n");
+  const bodyBlock = pointBlock || "1. Khóa học tập trung vào tư duy triển khai thực tế, giúp mình biến kiến thức thành nội dung, quy trình hoặc hệ thống có thể áp dụng ngay.\n\n2. Phần học đi theo hướng cầm tay chỉ việc, phù hợp với người muốn dùng AI để làm việc nhanh hơn và rõ hướng hơn.";
 
   const nextStep = intent === "sales"
     ? `${lead.charAt(0).toUpperCase() + lead.slice(1)} cho em biết mục tiêu chính của mình là học để làm content, bán hàng, xây bot hay tự động hóa công việc để em gợi ý hướng phù hợp nhất ạ?`
@@ -2132,9 +2153,9 @@ function buildNaturalFallbackAnswer(
 
   return `${opening}
 
-Nội dung chính em hiểu được là:
+Các phần chính gồm:
 
-${pointBlock}
+${bodyBlock}
 
 Nếu nói ngắn gọn, phần này phù hợp để ${lead} nắm được hướng đi, biết nên bắt đầu từ đâu và có thể áp dụng vào mục tiêu thực tế của mình.
 
