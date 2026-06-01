@@ -51,6 +51,7 @@ import {
 // Helper for type compatibility (since we'll import types in types.ts but write server)
 const app = express();
 const PORT = 3000;
+const processedTelegramUpdateIds = new Set<string>();
 
 app.use(express.json({ limit: "50mb" }));
 
@@ -120,6 +121,17 @@ function getAIClient(): GoogleGenAI | null {
     }
   });
   return _aiClient;
+}
+
+function markTelegramUpdateProcessed(key: string): boolean {
+  if (!key) return false;
+  if (processedTelegramUpdateIds.has(key)) return true;
+  processedTelegramUpdateIds.add(key);
+  if (processedTelegramUpdateIds.size > 1000) {
+    const oldest = processedTelegramUpdateIds.values().next().value;
+    if (oldest) processedTelegramUpdateIds.delete(oldest);
+  }
+  return false;
 }
 
 // Global In-Memory Persistent Database (seeding with real/active primary profile first, strictly removing mock players)
@@ -1512,12 +1524,26 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
       return;
     }
 
+    const updateKey = `${botId}:${update.update_id || "no-update"}:${update.message?.chat?.id || "no-chat"}:${update.message?.message_id || "no-message"}`;
+    if (markTelegramUpdateProcessed(updateKey)) {
+      console.log(`[Telegram Webhook] Duplicate update skipped: ${updateKey}`);
+      return;
+    }
+
     const message = update.message;
     const fromUser = message.from;
     const chat = message.chat;
     let text = message.text || "";
 
     if (!fromUser || !chat) return;
+    if (fromUser.is_bot) return;
+
+    const normalizedText = text.trim();
+    const command = normalizedText.match(/^\/([a-zA-Z0-9_]+)(?:@[a-zA-Z0-9_]+)?(?:\s|$)/)?.[1]?.toLowerCase();
+    if (command && command !== "start") {
+      console.log(`[Telegram Webhook] Unsupported command ignored: /${command}`);
+      return;
+    }
 
     const tUserId = String(fromUser.id);
     const tUsername = fromUser.username || `telegram_${tUserId}`;
@@ -1558,7 +1584,7 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
     let sourcesUsed: any[] = [];
     let fallbackTriggered = false;
 
-    if (text.trim().toLowerCase() === "/start") {
+    if (command === "start") {
       const detected = getGenderAndName(tFullName);
       const pr = detected.pronoun;
       const nm = detected.name;
@@ -1631,6 +1657,14 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
   const tUserId = userId || "u-sim-" + Math.floor(Math.random() * 10000);
   const tUsername = username || "user_test_" + Math.floor(Math.random() * 100);
   const tFullName = fullName || "Khách Hàng Thử Nghiệm";
+  const normalizedSimText = (text || "").trim();
+  const simCommand = normalizedSimText.match(/^\/([a-zA-Z0-9_]+)(?:@[a-zA-Z0-9_]+)?(?:\s|$)/)?.[1]?.toLowerCase();
+  if (simCommand && simCommand !== "start") {
+    return res.json({
+      ignored: true,
+      reason: "unsupported_command"
+    });
+  }
 
   // Check if session exists or create one
   let session = chatSessions.find(s => s.botId === botId && s.telegramUserId === tUserId);
@@ -1664,7 +1698,7 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
 
   // Process through AI Answer retrieval or /start detection
   let aiAnswer;
-  if (text.trim().toLowerCase() === "/start") {
+  if (simCommand === "start") {
     const detected = getGenderAndName(tFullName);
     const pr = detected.pronoun;
     const nm = detected.name;
