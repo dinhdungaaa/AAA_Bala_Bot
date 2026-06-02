@@ -117,6 +117,55 @@ function isSmallTalk(text) {
     || q.length <= 8;
 }
 
+function detectOffTopicChitChat(text = "") {
+  const q = normalize(text).replace(/\s+/g, " ").trim();
+  if (!q) return null;
+  if (/(anh yeu em|em yeu anh|chi yeu em|yeu em|yeu anh|thuong em|nho em|hon em|crush|love you|i love you)/i.test(q)) return "romantic";
+  if (/^(hi|hello|helo|alo|chao|xin chao|hey|yo|em oi|bot oi|shop oi|ad oi)(\s|$)/i.test(q)) return "greeting";
+  if (/(cam on|thanks|thank you|tks|thank|ok cam on|tot qua|hay qua)/i.test(q)) return "thanks";
+  if (/(ke chuyen cuoi|noi cau vui|ke truyen vui|joke|vui len|hat cho|doc tho)/i.test(q)) return "joke";
+  if (q.length <= 18 && /(haha|hihi|hehe|test|thu xem|ok|oke|uh|ua|wow)/i.test(q)) return "casual";
+  return null;
+}
+
+function buildOffTopicReply(bot, customer, kind, isFirstInteraction) {
+  const label = customer.confidence === "low" ? "mình" : customer.label;
+  const labelCap = label.charAt(0).toUpperCase() + label.slice(1);
+  const offering = bot.field || bot.description || "nội dung bên em đang hỗ trợ";
+
+  if (kind === "romantic") {
+    if (!isFirstInteraction) {
+      return `Dạ câu này em nhận bằng một nụ cười thật tươi nha ${label} ơi.
+
+${labelCap} dễ thương vậy thì em trả lời cũng phải dễ thương theo chứ.`;
+    }
+    return `Dạ nghe câu này em thấy vui quá chừng luôn ạ.
+
+Em xin nhận tình cảm đẹp này bằng một nụ cười thật tươi nha. Nếu ${label} cần em hỗ trợ thêm về ${offering}, em sẵn sàng liền ạ.`;
+  }
+
+  if (kind === "greeting") {
+    if (!isFirstInteraction) return `Em đây nè ${label} ơi, vẫn đang nghe mình đó ạ. Mình nói tiếp đi, em theo kịp.`;
+    return `Dạ em đây ${label} ơi, em đang online và sẵn sàng hỗ trợ mình ạ. ${labelCap} muốn hỏi phần nào trước nè?`;
+  }
+
+  if (kind === "thanks") {
+    return isFirstInteraction
+      ? `Dạ em vui vì hỗ trợ được ${label} ạ. Có gì cần hỏi tiếp thì mình cứ nhắn em nha.`
+      : `Dạ không có gì đâu ạ. Giúp được ${label} là em vui rồi.`;
+  }
+
+  if (kind === "joke") {
+    return isFirstInteraction
+      ? `Dạ em cũng muốn pha trò lắm, nhưng em sợ cười xong mình quên mất việc chính ạ. Mình muốn em hỗ trợ phần nào trước nè?`
+      : `Dạ được chứ, nhưng em kể nhẹ thôi nha: bot mà thấy mình vui là tự nhiên chạy nhanh hơn hẳn ạ.`;
+  }
+
+  return isFirstInteraction
+    ? `Dạ em nghe rồi ${label} ơi. Câu này hơi ngoài phần công việc chính của em một chút, nhưng không sao, em vẫn ở đây hỗ trợ mình.`
+    : `Dạ em nghe nè ${label} ơi. Câu này hơi lạc nhịp một chút, nhưng mình cứ nói tiếp, em bắt nhịp được.`;
+}
+
 function rankChunks(query, chunks = [], faqs = []) {
   const normalizedQuery = normalize(query);
   const words = normalizedQuery
@@ -262,6 +311,8 @@ async function handleBotpressReply(request, env) {
   const text = typeof body.text === "string" ? body.text.trim() : "";
   const fullName = body.fullName || body.name || "";
   const username = body.username || body.userId || "";
+  const recentMessages = Array.isArray(body.recentMessages) ? body.recentMessages : [];
+  const hasPriorBotReply = Boolean(body.hasPriorBotReply) || recentMessages.some(message => message?.sender === "bot");
 
   if (!botId) return json({ error: "Missing botId" }, 400);
   if (!text) return json({ error: "Missing text" }, 400);
@@ -274,6 +325,23 @@ async function handleBotpressReply(request, env) {
   ]);
 
   const customer = inferCustomer(fullName, username, text);
+  const chitChatKind = detectOffTopicChitChat(text);
+  if (chitChatKind) {
+    const reply = buildOffTopicReply(bot, customer, chitChatKind, !hasPriorBotReply);
+    return json({
+      reply,
+      text: reply,
+      botId,
+      channel: "botpress-facebook",
+      memorySource: "balabot-customer-bot",
+      customer,
+      sources: [],
+      fallbackTriggered: false,
+    }, 200, {
+      "x-balabot-forwarded-to": "worker-rag-customer-memory",
+    });
+  }
+
   const ranked = rankChunks(text, chunks, faqs);
   const aiReply = await askGemini(env, bot, text, customer, ranked);
   const reply = aiReply || summarizeLocal(bot, text, customer, ranked);
