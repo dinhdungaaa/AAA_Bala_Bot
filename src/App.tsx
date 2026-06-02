@@ -115,6 +115,7 @@ export default function App() {
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerEmail, setNewCustomerEmail] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  const [newCustomerPassword, setNewCustomerPassword] = useState('');
   const [newCustomerTier, setNewCustomerTier] = useState<'free' | 'pro' | 'enterprise'>('free');
 
   const getScopedApiHeaders = () => {
@@ -138,7 +139,7 @@ export default function App() {
     setSimulatedCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
     fetch(`/api/admin/customers/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
       body: JSON.stringify(updates)
     })
     .then(res => {
@@ -156,7 +157,8 @@ export default function App() {
   const handleDeleteCustomer = (id: string) => {
     setSimulatedCustomers(prev => prev.filter(c => c.id !== id));
     fetch(`/api/admin/customers/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: getScopedApiHeaders()
     })
     .then(res => {
       if (!res.ok) throw new Error("Xóa thất bại");
@@ -483,7 +485,7 @@ export default function App() {
   // Fetch real SaaS users to enrich the admin directory with active data from backend
   useEffect(() => {
     if (activeTab === 'admin' && sbUser?.email === 'ox102.crypto@gmail.com') {
-      fetch('/api/admin/customers')
+      fetch('/api/admin/customers', { headers: getScopedApiHeaders() })
         .then(res => res.json())
         .then(data => {
           if (Array.isArray(data)) {
@@ -4504,10 +4506,13 @@ export default function App() {
                                 };
                                 fetch('/api/admin/customers', {
                                   method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify(newC)
+                                  headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
+                                  body: JSON.stringify({ ...newC, password: newCustomerPassword, status: 'active' })
                                 })
-                                  .then(res => res.json())
+                                  .then(res => {
+                                    if (!res.ok) throw new Error('Không có quyền hoặc tạo khách hàng thất bại');
+                                    return res.json();
+                                  })
                                   .then(addedCust => {
                                     setSimulatedCustomers(prev => [...prev, addedCust]);
                                     setNewCustomerName('');
@@ -5092,7 +5097,7 @@ WHERE email = 'customer-email@example.com';`}
                           Cấn nhanh Tài khoản Mới hoặc Đại lý Thử Nghiệm
                         </span>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5">
                         <input
                           type="text"
                           placeholder="Tên doanh nghiệp / Người đại diện"
@@ -5114,6 +5119,22 @@ WHERE email = 'customer-email@example.com';`}
                           onChange={(e) => setNewCustomerPhone(e.target.value)}
                           className="bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 placeholder:text-slate-400 font-sans focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium"
                         />
+                        <input
+                          type="password"
+                          placeholder="Mật khẩu tạm"
+                          value={newCustomerPassword}
+                          onChange={(e) => setNewCustomerPassword(e.target.value)}
+                          className="bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 placeholder:text-slate-400 font-sans focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium"
+                        />
+                        <select
+                          value={newCustomerTier}
+                          onChange={(e) => setNewCustomerTier(e.target.value as 'free' | 'pro' | 'enterprise')}
+                          className="bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 font-sans focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-bold"
+                        >
+                          <option value="free">Free</option>
+                          <option value="pro">Pro</option>
+                          <option value="enterprise">Enterprise</option>
+                        </select>
                         <button
                           type="button"
                           onClick={() => {
@@ -5121,21 +5142,27 @@ WHERE email = 'customer-email@example.com';`}
                               alert('Vui lòng điền đủ Tên và Email để đăng ký khách hàng!');
                               return;
                             }
-                            const defaultLimit = 1000;
+                            const limitMap = { free: 1000, pro: 25000, enterprise: 150000 };
+                            const defaultLimit = limitMap[newCustomerTier];
                             const newGuest = {
                               name: newCustomerName,
                               email: newCustomerEmail,
                               phone: newCustomerPhone || 'Không có',
-                              tier: 'free' as const,
+                              password: newCustomerPassword,
+                              tier: newCustomerTier,
                               messageLimit: defaultLimit,
+                              status: 'active',
                               joinedDate: new Date().toLocaleDateString('vi-VN')
                             };
                             fetch('/api/admin/customers', {
                               method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
+                              headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
                               body: JSON.stringify(newGuest)
                             })
-                              .then(res => res.json())
+                              .then(res => {
+                                if (!res.ok) throw new Error('Không có quyền hoặc tạo tài khoản thất bại');
+                                return res.json();
+                              })
                               .then(addedCust => {
                                 setSimulatedCustomers(prev => [...prev, addedCust]);
                                 
@@ -5149,6 +5176,8 @@ WHERE email = 'customer-email@example.com';`}
                                 setNewCustomerName('');
                                 setNewCustomerEmail('');
                                 setNewCustomerPhone('');
+                                setNewCustomerPassword('');
+                                setNewCustomerTier('free');
                                 alert(`💡 Đã tạo thành công khách hàng mới: ${addedCust.name}! Đã ghi nhận mô-đun SQL profiles.`);
                               })
                               .catch(err => {
@@ -5171,6 +5200,8 @@ WHERE email = 'customer-email@example.com';`}
                             <tr className="bg-slate-50 border-b border-slate-200 text-slate-550 font-sans font-bold text-[10.5px] uppercase tracking-wider">
                               <th className="p-3 pl-4">Khách hàng / Đại lý</th>
                               <th className="p-3">Gói dịch vụ</th>
+                              <th className="p-3">Trạng thái</th>
+                              <th className="p-3">Mật khẩu</th>
                               <th className="p-3">Hạn mức tin nhắn / tháng</th>
                               <th className="p-3 text-right pr-4">Hành động nâng / hạ gói thủ công</th>
                             </tr>
@@ -5198,6 +5229,35 @@ WHERE email = 'customer-email@example.com';`}
                                       <span className={`px-2.5 py-1 rounded-full text-[9px] uppercase tracking-wider border font-sans ${badgeClass}`}>
                                         {c.tier === 'free' ? 'Standard Free' : c.tier === 'pro' ? 'Premium Pro ⭐' : 'Enterprise 👑'}
                                       </span>
+                                    </td>
+                                    <td className="p-3 text-left">
+                                      <span className={`px-2.5 py-1 rounded-full text-[9px] uppercase tracking-wider border font-bold ${c.status === 'suspended' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                                        {c.status === 'suspended' ? 'Đã khóa' : 'Đang hoạt động'}
+                                      </span>
+                                      <div className="text-[10px] text-slate-400 mt-1">Bot: {c.botsCount || 0}</div>
+                                    </td>
+                                    <td className="p-3 text-left">
+                                      <div className="text-[10px] text-slate-600 font-bold">
+                                        {c.passwordSet ? 'Đã thiết lập' : 'Chưa có mật khẩu tạm'}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400">
+                                        {c.passwordUpdatedAt ? new Date(c.passwordUpdatedAt).toLocaleDateString('vi-VN') : 'Không hiển thị mật khẩu thật'}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const password = prompt(`Nhập mật khẩu tạm mới cho ${c.email}`);
+                                          if (!password) return;
+                                          handleUpdateCustomer(c.id, { email: c.email, passwordSet: true, passwordUpdatedAt: new Date().toISOString(), ...({ password } as any) });
+                                          setAdminActionLogs(prevLogs => [
+                                            { timestamp: new Date().toLocaleTimeString('vi-VN'), query: `RESET PASSWORD FOR '${c.email}'; -- mật khẩu mới không được hiển thị lại`, status: 'SUCCESS' },
+                                            ...prevLogs
+                                          ]);
+                                        }}
+                                        className="mt-1 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold"
+                                      >
+                                        Reset mật khẩu
+                                      </button>
                                     </td>
                                     <td className="p-3">
                                       <div className="space-y-1 text-left">
@@ -5293,6 +5353,21 @@ WHERE email = 'customer-email@example.com';`}
                                         {/* Quick Volume compensation actions - Row 2 */}
                                         <div className="flex items-center gap-1.5">
                                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-sans">Cấp bù:</span>
+                                          <button
+                                            onClick={() => {
+                                              const nextStatus = c.status === 'suspended' ? 'active' : 'suspended';
+                                              handleUpdateCustomer(c.id, { email: c.email, status: nextStatus } as any);
+                                              setAdminActionLogs(prevLogs => [
+                                                { timestamp: new Date().toLocaleTimeString('vi-VN'), query: `UPDATE public.profiles SET status = '${nextStatus}' WHERE id = '${c.id}';`, status: 'SUCCESS' },
+                                                ...prevLogs
+                                              ]);
+                                            }}
+                                            disabled={c.role === 'owner'}
+                                            className="px-2 py-1 bg-slate-50 hover:bg-slate-100 disabled:opacity-50 text-slate-700 border border-slate-200 text-[10px] font-bold rounded cursor-pointer transition-all active:scale-95 whitespace-nowrap"
+                                            title="Khóa hoặc mở tài khoản"
+                                          >
+                                            {c.status === 'suspended' ? 'Mở khóa' : 'Khóa'}
+                                          </button>
                                           <button
                                             onClick={() => {
                                               const targetVal = c.messageLimit + 5000;

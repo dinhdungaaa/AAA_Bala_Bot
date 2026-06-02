@@ -65,6 +65,8 @@ app.use(express.json({ limit: "50mb" }));
 
 const USER_CONFIGS_FILE = path.join(process.cwd(), "supabase-user-configs.json");
 const BOT_CONFIGS_FILE = path.join(process.cwd(), "supabase-bot-configs.json");
+const CRM_CUSTOMERS_FILE = path.join(process.cwd(), "crm-customers.json");
+const ADMIN_EMAIL = "ox102.crypto@gmail.com";
 
 function readJsonFile<T>(filePath: string, fallback: T): T {
   if (!fs.existsSync(filePath)) return fallback;
@@ -82,6 +84,21 @@ function writeJsonFile(filePath: string, data: unknown) {
   } catch (e) {
     console.error(`Failed to write JSON file ${filePath}:`, e);
   }
+}
+
+function getRequestUserEmail(req: express.Request) {
+  return (
+    req.headers["x-balabot-user-email"] ||
+    req.body?.adminEmail ||
+    req.query?.adminEmail ||
+    ""
+  ).toString().trim().toLowerCase();
+}
+
+function requireOwnerAdmin(req: express.Request, res: express.Response) {
+  if (getRequestUserEmail(req) === ADMIN_EMAIL) return true;
+  res.status(403).json({ error: "Chỉ tài khoản owner ox102.crypto@gmail.com được truy cập admin CRM." });
+  return false;
 }
 
 function getRequestConfig(req: express.Request): { url: string; key: string } | null {
@@ -147,7 +164,40 @@ let workspaceUsers: WorkspaceUser[] = [
   { id: "u-1", email: "ox102.crypto@gmail.com", fullName: "Doanh Nghiệp AAA", avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", role: "owner", workspace: "AAA Workspace" }
 ];
 
-let saasCustomers: SaasCustomer[] = [];
+type AdminCustomer = SaasCustomer & {
+  status: "active" | "suspended";
+  role: "owner" | "customer";
+  passwordSet: boolean;
+  passwordUpdatedAt?: string;
+  lastLoginAt?: string;
+  botsCount?: number;
+};
+
+let saasCustomers: AdminCustomer[] = readJsonFile<AdminCustomer[]>(CRM_CUSTOMERS_FILE, []);
+
+function saveSaasCustomers() {
+  writeJsonFile(CRM_CUSTOMERS_FILE, saasCustomers);
+}
+
+function normalizeCustomerRecord(customer: Partial<SaasCustomer> & { id?: string; email?: string }): AdminCustomer {
+  const email = (customer.email || "").trim().toLowerCase();
+  const isOwner = email === ADMIN_EMAIL;
+  return {
+    id: customer.id || `cust-${Date.now()}`,
+    name: customer.name || email.split("@")[0] || "Khách hàng mới",
+    email,
+    phone: customer.phone || "Chưa cập nhật",
+    tier: (customer.tier || (isOwner ? "enterprise" : "free")) as "free" | "pro" | "enterprise",
+    messageLimit: Number(customer.messageLimit) || (isOwner ? 250000 : 1000),
+    joinedDate: customer.joinedDate || new Date().toLocaleDateString("vi-VN"),
+    status: customer.status || "active",
+    role: customer.role || (isOwner ? "owner" : "customer"),
+    passwordSet: Boolean(customer.passwordSet),
+    passwordUpdatedAt: customer.passwordUpdatedAt,
+    lastLoginAt: customer.lastLoginAt,
+    botsCount: Number(customer.botsCount) || 0
+  };
+}
 
 let bots: BotConfig[] = [
   {
@@ -385,8 +435,9 @@ app.post("/api/workspace/users", (req, res) => {
 
 // Real SaaS Customers endpoints
 app.get("/api/admin/customers", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
   const client = getSupabaseClient();
-  let dbCustomers: SaasCustomer[] = [];
+  let dbCustomers: AdminCustomer[] = [];
 
   if (client) {
     try {
@@ -400,7 +451,12 @@ app.get("/api/admin/customers", async (req, res) => {
           phone: p.phone || "Không có",
           tier: (p.tier || "free") as "free" | "pro" | "enterprise",
           messageLimit: Number(p.message_limit) || 1000,
-          joinedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
+          joinedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN'),
+          status: (p.status === "suspended" ? "suspended" : "active") as "active" | "suspended",
+          role: (p.email === ADMIN_EMAIL ? "owner" : "customer") as "owner" | "customer",
+          passwordSet: false,
+          lastLoginAt: p.last_sign_in_at ? new Date(p.last_sign_in_at).toLocaleString('vi-VN') : undefined,
+          botsCount: bots.filter(bot => bot.userId === p.id || bot.userId === p.email).length
         }));
       } else {
         // 2. If table is empty or doesn't have rows, try to pull list of registered Auth users using service role API
@@ -411,9 +467,14 @@ app.get("/api/admin/customers", async (req, res) => {
             name: u.email?.split('@')[0] || "Khách Hàng Thật",
             email: u.email || "",
             phone: u.phone || "Chưa cập nhật",
-            tier: (u.email === 'ox102.crypto@gmail.com' ? 'enterprise' : 'free') as "free" | "pro" | "enterprise",
-            messageLimit: u.email === 'ox102.crypto@gmail.com' ? 250000 : 1000,
-            joinedDate: u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN')
+            tier: (u.email === ADMIN_EMAIL ? 'enterprise' : 'free') as "free" | "pro" | "enterprise",
+            messageLimit: u.email === ADMIN_EMAIL ? 250000 : 1000,
+            joinedDate: u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN'),
+            status: (u.banned_until ? "suspended" : "active") as "active" | "suspended",
+            role: (u.email === ADMIN_EMAIL ? "owner" : "customer") as "owner" | "customer",
+            passwordSet: true,
+            lastLoginAt: u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString('vi-VN') : undefined,
+            botsCount: bots.filter(bot => bot.userId === u.id || bot.userId === u.email).length
           }));
         }
       }
@@ -423,11 +484,11 @@ app.get("/api/admin/customers", async (req, res) => {
   }
 
   // Merge database players with dynamic workspace session registers
-  const finalCustomers = [...saasCustomers];
+  const finalCustomers: AdminCustomer[] = [...saasCustomers.map(normalizeCustomerRecord)];
   
   dbCustomers.forEach(dbCust => {
     if (dbCust.email && !finalCustomers.some(c => c.email.toLowerCase() === dbCust.email.toLowerCase())) {
-      finalCustomers.push(dbCust);
+      finalCustomers.push(normalizeCustomerRecord(dbCust));
     }
   });
 
@@ -438,63 +499,151 @@ app.get("/api/admin/customers", async (req, res) => {
         id: u.id,
         name: u.fullName || u.email.split('@')[0],
         email: u.email,
-        phone: u.email === 'ox102.crypto@gmail.com' ? '090.888.9999' : 'Sử dụng Zalo',
+        phone: u.email === ADMIN_EMAIL ? '090.888.9999' : 'Sử dụng Zalo',
         tier: u.role === 'owner' ? 'enterprise' : 'free',
         messageLimit: u.role === 'owner' ? 250000 : 1000,
-        joinedDate: new Date().toLocaleDateString('vi-VN')
+        joinedDate: new Date().toLocaleDateString('vi-VN'),
+        status: "active",
+        role: u.role === "owner" ? "owner" : "customer",
+        passwordSet: false,
+        botsCount: bots.filter(bot => bot.userId === u.id || bot.userId === u.email).length
       });
     }
   });
 
   // Always ensure our master user exists
-  const hasAdmin = finalCustomers.some(c => c.email.toLowerCase() === 'ox102.crypto@gmail.com');
+  const hasAdmin = finalCustomers.some(c => c.email.toLowerCase() === ADMIN_EMAIL);
   if (!hasAdmin) {
     finalCustomers.unshift({
       id: "u-1",
       name: "Founder Doanh Nghiệp AAA",
-      email: "ox102.crypto@gmail.com",
+      email: ADMIN_EMAIL,
       phone: "090.888.9999",
       tier: "enterprise",
       messageLimit: 250000,
-      joinedDate: new Date().toLocaleDateString('vi-VN')
+      joinedDate: new Date().toLocaleDateString('vi-VN'),
+      status: "active",
+      role: "owner",
+      passwordSet: true,
+      botsCount: bots.length
     });
   }
 
   res.json(finalCustomers);
 });
 
-app.post("/api/admin/customers", (req, res) => {
-  const { name, email, phone, tier, messageLimit, joinedDate } = req.body;
-  const newCust: SaasCustomer = {
-    id: "cust-" + (saasCustomers.length + 1),
-    name: name || "Khách hàng mới",
-    email: email || "",
-    phone: phone || "Không có",
+app.post("/api/admin/customers", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const { name, email, phone, tier, messageLimit, joinedDate, password, status } = req.body;
+  const normalizedEmail = (email || "").trim().toLowerCase();
+  if (!normalizedEmail) return res.status(400).json({ error: "Email là bắt buộc để tạo tài khoản CRM." });
+
+  const client = getSupabaseClient();
+  let authUserId = "";
+  let authSync: "created" | "skipped" | "failed" = "skipped";
+  let authError = "";
+
+  if (client && password) {
+    try {
+      const { data, error } = await client.auth.admin.createUser({
+        email: normalizedEmail,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: name || normalizedEmail.split("@")[0] }
+      });
+      if (error) {
+        authSync = "failed";
+        authError = error.message;
+      } else {
+        authSync = "created";
+        authUserId = data.user?.id || "";
+      }
+    } catch (err: any) {
+      authSync = "failed";
+      authError = err.message || String(err);
+    }
+  }
+
+  const existingIndex = saasCustomers.findIndex(c => c.email.toLowerCase() === normalizedEmail);
+  const newCust = normalizeCustomerRecord({
+    id: authUserId || saasCustomers[existingIndex]?.id || "cust-" + Date.now(),
+    name: name || normalizedEmail.split("@")[0],
+    email: normalizedEmail,
+    phone: phone || "Chưa cập nhật",
     tier: tier || "free",
-    messageLimit: Number(messageLimit) || 1000,
-    joinedDate: joinedDate || new Date().toLocaleDateString('vi-VN')
-  };
-  saasCustomers.push(newCust);
-  res.status(201).json(newCust);
+    messageLimit: Number(messageLimit) || (tier === "enterprise" ? 150000 : tier === "pro" ? 25000 : 1000),
+    joinedDate: joinedDate || new Date().toLocaleDateString('vi-VN'),
+    status: status === "suspended" ? "suspended" : "active",
+    passwordSet: Boolean(password),
+    passwordUpdatedAt: password ? new Date().toISOString() : undefined
+  });
+
+  if (existingIndex >= 0) saasCustomers[existingIndex] = { ...saasCustomers[existingIndex], ...newCust };
+  else saasCustomers.push(newCust);
+  saveSaasCustomers();
+
+  res.status(existingIndex >= 0 ? 200 : 201).json({ ...newCust, authSync, authError });
 });
 
-app.put("/api/admin/customers/:id", (req, res) => {
+app.put("/api/admin/customers/:id", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
   const { id } = req.params;
-  const { tier, messageLimit, phone, name } = req.body;
-  const customer = saasCustomers.find(c => c.id === id);
+  const { tier, messageLimit, phone, name, email, status, password } = req.body;
+  let customer = saasCustomers.find(c => c.id === id || (email && c.email.toLowerCase() === String(email).toLowerCase()));
   if (!customer) {
-    return res.status(404).json({ error: "Không tìm thấy khách hàng này!" });
+    customer = normalizeCustomerRecord({
+      id,
+      name,
+      email: email || "",
+      phone,
+      tier,
+      messageLimit,
+      status,
+      joinedDate: new Date().toLocaleDateString("vi-VN")
+    });
+    saasCustomers.push(customer);
   }
   if (tier !== undefined) customer.tier = tier;
   if (messageLimit !== undefined) customer.messageLimit = Number(messageLimit);
   if (phone !== undefined) customer.phone = phone;
   if (name !== undefined) customer.name = name;
-  res.json(customer);
+  if (email !== undefined) customer.email = String(email).trim().toLowerCase();
+  if (status !== undefined) customer.status = status === "suspended" ? "suspended" : "active";
+
+  let passwordSync: "updated" | "skipped" | "failed" = "skipped";
+  let passwordError = "";
+  if (password) {
+    const client = getSupabaseClient();
+    if (client && !id.startsWith("cust-") && !id.startsWith("u-")) {
+      try {
+        const { error } = await client.auth.admin.updateUserById(id, { password });
+        if (error) {
+          passwordSync = "failed";
+          passwordError = error.message;
+        } else {
+          passwordSync = "updated";
+        }
+      } catch (err: any) {
+        passwordSync = "failed";
+        passwordError = err.message || String(err);
+      }
+    }
+    customer.passwordSet = true;
+    customer.passwordUpdatedAt = new Date().toISOString();
+  }
+
+  saveSaasCustomers();
+  res.json({ ...customer, passwordSync, passwordError });
 });
 
 app.delete("/api/admin/customers/:id", (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
   const { id } = req.params;
+  if (id === "u-1" || saasCustomers.some(c => c.id === id && c.email === ADMIN_EMAIL)) {
+    return res.status(400).json({ error: "Không thể xóa tài khoản owner." });
+  }
   saasCustomers = saasCustomers.filter(c => c.id !== id);
+  saveSaasCustomers();
   res.json({ success: true, message: `Đã xóa khách hàng ${id} thành công!` });
 });
 
@@ -607,15 +756,18 @@ app.post("/api/supabase/auth/signup", async (req, res) => {
     }
 
     if (!saasCustomers.some(c => c.email.toLowerCase() === freshEmail)) {
-      saasCustomers.push({
+      saasCustomers.push(normalizeCustomerRecord({
         id: userId,
         name: email.split('@')[0],
         email: email,
         phone: 'Chưa cập nhật',
         tier: isOwner ? 'enterprise' : 'free',
         messageLimit: isOwner ? 250000 : 1000,
-        joinedDate: new Date().toLocaleDateString('vi-VN')
-      });
+        joinedDate: new Date().toLocaleDateString('vi-VN'),
+        passwordSet: true,
+        passwordUpdatedAt: new Date().toISOString()
+      }));
+      saveSaasCustomers();
     }
 
     // Attempt direct real-time insert into the public.profiles database table if configured
@@ -666,15 +818,24 @@ app.post("/api/supabase/auth/signin", async (req, res) => {
     }
 
     if (!saasCustomers.some(c => c.email.toLowerCase() === freshEmail)) {
-      saasCustomers.push({
+      saasCustomers.push(normalizeCustomerRecord({
         id: userId,
         name: email.split('@')[0],
         email: email,
         phone: 'Chưa cập nhật',
         tier: isOwner ? 'enterprise' : 'free',
         messageLimit: isOwner ? 250000 : 1000,
-        joinedDate: new Date().toLocaleDateString('vi-VN')
-      });
+        joinedDate: new Date().toLocaleDateString('vi-VN'),
+        passwordSet: true,
+        lastLoginAt: new Date().toISOString()
+      }));
+      saveSaasCustomers();
+    } else {
+      const customer = saasCustomers.find(c => c.email.toLowerCase() === freshEmail);
+      if (customer) {
+        customer.lastLoginAt = new Date().toISOString();
+        saveSaasCustomers();
+      }
     }
 
     res.json(result);

@@ -125,6 +125,12 @@ export interface SaasCustomer {
   tier: 'free' | 'pro' | 'enterprise';
   messageLimit: number;
   joinedDate: string;
+  status?: 'active' | 'suspended';
+  role?: 'owner' | 'customer';
+  passwordSet?: boolean;
+  passwordUpdatedAt?: string;
+  lastLoginAt?: string;
+  botsCount?: number;
 }
 
 // === REMINDER / SCHEDULE SYSTEM ===
