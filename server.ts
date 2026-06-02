@@ -1529,6 +1529,8 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
       chatSessions.unshift(session);
     }
 
+    const hasPriorBotReply = session.messages.some(msg => msg.sender === "bot");
+
     // Save actual user message
     const userMsg: Message = {
       id: "m-tg-" + Math.random().toString(36).substr(2, 9),
@@ -1558,7 +1560,12 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
       responseText = postProcessBotReply(customWelcome, { shouldGreet: true });
     } else {
       // Fetch dynamic answer using vector tri thức
-      const aiAnswer = await generateRAGAnswer(bot, text, { fullName: tFullName, username: tUsername, id: tUserId });
+      const aiAnswer = await generateRAGAnswer(
+        bot,
+        text,
+        { fullName: tFullName, username: tUsername, id: tUserId },
+        { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8) }
+      );
       responseText = aiAnswer.text;
       sourcesUsed = aiAnswer.sources;
       fallbackTriggered = aiAnswer.fallbackTriggered;
@@ -1646,6 +1653,8 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
     chatSessions.unshift(session); // Insert at beginning
   }
 
+  const hasPriorBotReply = session.messages.some(msg => msg.sender === "bot");
+
   const userMsg: Message = {
     id: "m-tg-" + Math.random().toString(36).substr(2, 9),
     sender: "user",
@@ -1675,7 +1684,12 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
       fallbackTriggered: false
     };
   } else {
-    aiAnswer = await generateRAGAnswer(bot, text, { fullName: tFullName, username: tUsername, id: tUserId });
+    aiAnswer = await generateRAGAnswer(
+      bot,
+      text,
+      { fullName: tFullName, username: tUsername, id: tUserId },
+      { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8) }
+    );
   }
 
   const botMsg: Message = {
@@ -2482,13 +2496,20 @@ function buildOffTopicChitChatReply(
   query: string,
   pronoun: string,
   targetName: string,
-  kind: NonNullable<ReturnType<typeof detectOffTopicChitChat>>
+  kind: NonNullable<ReturnType<typeof detectOffTopicChitChat>>,
+  isFirstInteraction = true
 ): string {
   const lead = pronoun === "Anh/Chị" ? "mình" : `${pronoun} ${targetName}`;
   const offeringLabel = getOfferingLabel(bot);
   const brandName = bot.name || bot.telegramBotUsername || "bên em";
 
   if (kind === "romantic") {
+    if (!isFirstInteraction) {
+      return `Dạ câu này em nhận bằng một nụ cười thật tươi nha ${lead} ơi.
+
+${lead.charAt(0).toUpperCase() + lead.slice(1)} dễ thương vậy thì em trả lời cũng phải dễ thương theo chứ.`;
+    }
+
     return `Dạ nghe câu này tim em suýt bật chế độ trả lời nhanh hơn cả webhook luôn đó ${lead} ơi 😄
 
 Em xin nhận tình cảm đẹp này bằng một nụ cười thật tươi, còn nhiệm vụ chính của em vẫn là hỗ trợ ${lead} về ${offeringLabel} của ${brandName} cho thật chuẩn ạ.
@@ -2497,21 +2518,37 @@ Giờ mình quay lại việc chính nha: ${lead} muốn em tư vấn phần nà
   }
 
   if (kind === "greeting") {
+    if (!isFirstInteraction) {
+      return `Em đây nè ${lead} ơi, vẫn đang nghe mình đó ạ. Mình nói tiếp đi, em theo kịp.`;
+    }
+
     return `Dạ em đây ${lead} ơi, em đang online và sẵn sàng hỗ trợ mình ạ.
 
 ${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn hỏi về ${offeringLabel}, giá, chính sách hay cần em tư vấn lựa chọn phù hợp trước nè?`;
   }
 
   if (kind === "thanks") {
+    if (!isFirstInteraction) {
+      return `Dạ không có gì đâu ạ. Giúp được ${lead} là em vui rồi.`;
+    }
+
     return `Dạ em vui vì hỗ trợ được ${lead} ạ.
 
 Nếu còn phần nào chưa rõ, ${lead} cứ hỏi tiếp nhé. Em vẫn đang trực ở đây, chưa xin nghỉ giải lao đâu ạ 😄`;
   }
 
   if (kind === "joke") {
+    if (!isFirstInteraction) {
+      return `Dạ được chứ, nhưng em kể nhẹ thôi nha: bot mà thấy mình vui là tự nhiên chạy nhanh hơn hẳn ạ.`;
+    }
+
     return `Dạ em cũng muốn pha trò lắm, nhưng em sợ cười xong mình quên mất việc chính ạ 😄
 
 Em xin giữ mood vui vẻ rồi quay lại hỗ trợ ${lead} về ${offeringLabel} của ${brandName} nha. Mình muốn em tư vấn phần nào trước?`;
+  }
+
+  if (!isFirstInteraction) {
+    return `Dạ em nghe nè ${lead} ơi. Câu này hơi lạc nhịp một chút, nhưng mình cứ nói tiếp, em bắt nhịp được.`;
   }
 
   return `Dạ em nghe rồi ${lead} ơi 😄
@@ -2850,8 +2887,10 @@ async function generateRAGAnswer(
 
   const chitChatKind = detectOffTopicChitChat(query);
   if (chitChatKind) {
+    const isFirstInteraction = replyOptions?.shouldGreet !== false &&
+      !(replyOptions?.recentMessages || []).some(msg => msg.sender === "bot");
     return {
-      text: postProcessBotReply(buildOffTopicChitChatReply(bot, query, pronoun, targetName, chitChatKind), replyOptions),
+      text: postProcessBotReply(buildOffTopicChitChatReply(bot, query, pronoun, targetName, chitChatKind, isFirstInteraction), replyOptions),
       sources: [],
       fallbackTriggered: false
     };
@@ -3105,14 +3144,21 @@ ${pronoun === "chị" ? "Chị" : pronoun === "anh" ? "Anh" : "Anh/Chị"} cứ 
 
 // REST Endpoint for Playground test chat
 app.post("/api/bots/:botId/playgroundChat", async (req, res) => {
-  const { text } = req.body;
+  const { text, recentMessages = [] } = req.body;
   const botId = req.params.botId;
   const allBots = await dbGetBots(bots);
   const bot = allBots.find(b => b.id === botId);
   if (!bot) return res.status(404).json({ error: "Bot not found" });
 
   try {
-    const response = await generateRAGAnswer(bot, text);
+    const safeRecentMessages = Array.isArray(recentMessages) ? recentMessages.slice(-8) : [];
+    const hasPriorBotReply = safeRecentMessages.some((msg: any) => msg?.sender === "bot");
+    const response = await generateRAGAnswer(
+      bot,
+      text,
+      undefined,
+      { shouldGreet: !hasPriorBotReply, recentMessages: safeRecentMessages }
+    );
     res.json(response);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

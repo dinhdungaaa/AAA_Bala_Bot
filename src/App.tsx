@@ -988,6 +988,8 @@ export default function App() {
       timestamp: new Date().toISOString()
     };
 
+    const recentMessages = [...playgroundMessages, userMsg].slice(-8);
+
     setPlaygroundMessages(prev => [...prev, userMsg]);
     setPlaygroundInput('');
     setIsPlaygroundTyping(true);
@@ -995,7 +997,7 @@ export default function App() {
     const res = await fetch(`/api/bots/${selectedBotId}/playgroundChat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: userText })
+      body: JSON.stringify({ text: userText, recentMessages })
     });
 
     if (res.ok) {
