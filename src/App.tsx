@@ -7,6 +7,14 @@ import {
 } from 'lucide-react';
 import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSummary, SaasCustomer, ScheduleItem, ReminderLog } from './types';
 
+const ADMIN_EMAIL = 'ox102.crypto@gmail.com';
+
+const isAdminRoute = () => {
+  if (typeof window === 'undefined') return false;
+  return window.location.pathname.replace(/\/+$/, '').endsWith('/balabot/admin') ||
+    window.location.pathname.replace(/\/+$/, '') === '/admin';
+};
+
 // Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
 const renderFormattedText = (text: string, isUser: boolean = false) => {
   if (!text) return null;
@@ -57,7 +65,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'facebook' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'facebook' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin'>(() => isAdminRoute() ? 'admin' : 'dashboard');
   const [telegramPanel, setTelegramPanel] = useState<'connection' | 'schedules' | 'train-schedules'>('connection');
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
@@ -401,7 +409,7 @@ export default function App() {
       try {
         const parsed = JSON.parse(savedUser);
         setSbUser(parsed);
-        if (parsed.email === 'ox102.crypto@gmail.com') {
+        if (parsed.email === ADMIN_EMAIL) {
           setActiveTab('admin');
         } else {
           setActiveTab('dashboard');
@@ -475,16 +483,25 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    if (isAdminRoute() && !sbUser) {
+      setActiveTab('admin');
+      setSbAuthMode('signin');
+      setSbAuthEmail(ADMIN_EMAIL);
+      setShowAuthModal(false);
+    }
+  }, [sbUser]);
+
   // Protect Admin dashboard & automatically redirect non-admin accounts
   useEffect(() => {
-    if (sbUser && sbUser.email !== 'ox102.crypto@gmail.com' && activeTab === 'admin') {
+    if (sbUser && sbUser.email !== ADMIN_EMAIL && activeTab === 'admin') {
       setActiveTab('dashboard');
     }
   }, [sbUser, activeTab]);
 
   // Fetch real SaaS users to enrich the admin directory with active data from backend
   useEffect(() => {
-    if (activeTab === 'admin' && sbUser?.email === 'ox102.crypto@gmail.com') {
+    if (activeTab === 'admin' && sbUser?.email === ADMIN_EMAIL) {
       fetch('/api/admin/customers', { headers: getScopedApiHeaders() })
         .then(res => res.json())
         .then(data => {
@@ -636,7 +653,7 @@ export default function App() {
       if (res.ok && data.success) {
         setSbUser(data.user);
         localStorage.setItem("sbUser", JSON.stringify(data.user));
-        if (data.user.email === 'ox102.crypto@gmail.com') {
+        if (data.user.email === ADMIN_EMAIL) {
           setActiveTab('admin');
         } else {
           setActiveTab('dashboard');
@@ -1678,7 +1695,7 @@ export default function App() {
             Train Lịch Nhắc (AI)
           </button>
 
-          {sbUser?.email === 'ox102.crypto@gmail.com' && (
+          {sbUser?.email === ADMIN_EMAIL && (
             <button
               onClick={() => { setActiveTab('admin'); setIsMobileMenuOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'admin' ? 'bg-blue-600/10 text-amber-500 border-l-4 border-amber-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -4999,7 +5016,7 @@ WHERE email = 'customer-email@example.com';`}
             </div>
           )}
 
-          {activeTab === 'admin' && sbUser?.email === 'ox102.crypto@gmail.com' && (
+          {activeTab === 'admin' && sbUser?.email === ADMIN_EMAIL && (
 
             <div className="space-y-6 animate-fade-in text-left">
               {/* HEADER BANNER */}

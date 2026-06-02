@@ -1,4 +1,4 @@
-const PAGES_ORIGIN = "https://antiantiai-site.pages.dev";
+const PAGES_ORIGIN = "https://aaa-balabot.pages.dev";
 const BACKEND_ORIGIN = "https://balabot-server.onrender.com";
 
 function withCors(response, isHtml = false) {
@@ -25,7 +25,9 @@ export default {
 
     let targetUrl;
     const isApi = incomingUrl.pathname.startsWith("/balabot/api/");
-    const isHtml = incomingUrl.pathname === "/balabot/" || incomingUrl.pathname === "/balabot/index.html";
+    const isHtml = incomingUrl.pathname === "/balabot/" ||
+      incomingUrl.pathname === "/balabot/index.html" ||
+      incomingUrl.pathname === "/balabot/admin";
 
     if (isApi) {
       const strippedPath = incomingUrl.pathname.slice("/balabot".length) || "/";
@@ -33,7 +35,7 @@ export default {
     } else {
       targetUrl = new URL(PAGES_ORIGIN);
       const strippedPath = incomingUrl.pathname.slice("/balabot".length) || "/";
-      if (strippedPath === "/" || strippedPath === "/index.html") {
+      if (strippedPath === "/" || strippedPath === "/index.html" || strippedPath === "/admin") {
         targetUrl.pathname = "/";
       } else {
         targetUrl.pathname = strippedPath;
