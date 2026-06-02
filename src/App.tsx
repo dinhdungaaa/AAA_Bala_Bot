@@ -57,7 +57,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'facebook' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin'>('dashboard');
   const [telegramPanel, setTelegramPanel] = useState<'connection' | 'schedules' | 'train-schedules'>('connection');
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
@@ -276,6 +276,63 @@ export default function App() {
   const [simUserFullName, setSimUserFullName] = useState('Quốc Anh Bùi');
   const [simUserUsername, setSimUserUsername] = useState('quoc_anh_9x');
 
+  // Facebook Messenger Integration States
+  const [facebookDetails, setFacebookDetails] = useState<any>(null);
+  const [isFetchingFacebook, setIsFetchingFacebook] = useState(false);
+  const [facebookActionMsg, setFacebookActionMsg] = useState<{ status: 'success' | 'error'; text: string } | null>(null);
+  const [facebookSimText, setFacebookSimText] = useState('Shop tư vấn giúp mình sản phẩm/dịch vụ phù hợp với nhu cầu hiện tại nhé.');
+  const [facebookSimUserId, setFacebookSimUserId] = useState('fb-test-user-001');
+  const [isSimulatingFacebook, setIsSimulatingFacebook] = useState(false);
+
+  const fetchFacebookDetails = async () => {
+    if (!selectedBotId) return;
+    setIsFetchingFacebook(true);
+    setFacebookActionMsg(null);
+    try {
+      const res = await fetch(`/api/bots/${selectedBotId}/facebook-webhook`);
+      const data = await res.json();
+      if (res.ok) {
+        setFacebookDetails(data);
+      } else {
+        setFacebookActionMsg({ status: 'error', text: data.error || 'Không tải được cấu hình Facebook Messenger.' });
+      }
+    } catch (err: any) {
+      setFacebookActionMsg({ status: 'error', text: 'Lỗi tải cấu hình Facebook: ' + err.message });
+    } finally {
+      setIsFetchingFacebook(false);
+    }
+  };
+
+  const handleSimulateFacebookMsg = async () => {
+    if (!selectedBotId || !facebookSimText.trim()) return;
+    setIsSimulatingFacebook(true);
+    setFacebookActionMsg(null);
+    try {
+      const res = await fetch('/api/facebook-webhook/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          botId: selectedBotId,
+          senderId: facebookSimUserId || 'fb-test-user-001',
+          text: facebookSimText
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Không gửi được tin mô phỏng Facebook.');
+      }
+      setFacebookActionMsg({ status: 'success', text: 'Đã gửi tin mô phỏng Facebook Messenger thành công.' });
+      fetch(`/api/bots/${selectedBotId}/conversations`)
+        .then(r => r.json())
+        .then(setConversations)
+        .catch(() => {});
+    } catch (err: any) {
+      setFacebookActionMsg({ status: 'error', text: err.message || 'Lỗi mô phỏng Facebook Messenger.' });
+    } finally {
+      setIsSimulatingFacebook(false);
+    }
+  };
+
   // Human operator takeover reply
   const [operatorReply, setOperatorReply] = useState('');
 
@@ -484,6 +541,9 @@ export default function App() {
 
     if (activeTab === 'telegram') {
       fetchWebhookDetails();
+    }
+    if (activeTab === 'facebook') {
+      fetchFacebookDetails();
     }
   }, [selectedBotId, activeTab]);
 
@@ -1527,6 +1587,14 @@ export default function App() {
             Tích hợp Telegram
           </button>
 
+          <button
+            onClick={() => { setActiveTab('facebook'); setIsMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'facebook' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <MessageCircle className="w-4 h-4 text-blue-500" />
+            Tích hợp Facebook
+          </button>
+
           {activeTab === 'telegram' && (
             <div className="ml-7 mr-2 mb-1 space-y-1 border-l border-slate-700/60 pl-3">
               <button
@@ -1684,6 +1752,7 @@ export default function App() {
                   {activeTab === 'kb' && 'Quản lý Dữ liệu Kho Tri Thức'}
                   {activeTab === 'playground' && 'Playground Chat Thử Nghiệm'}
                   {activeTab === 'telegram' && 'Liên kết Kế Nối Telegram Bot'}
+                  {activeTab === 'facebook' && 'Liên kết Facebook Messenger'}
                   {activeTab === 'conversations' && 'Lịch sử Hội thoại Real-time'}
                   {activeTab === 'analytics' && 'Báo cáo Đo Lường Hiệu Suất'}
                   {activeTab === 'schedules' && 'Hệ Thống Nhắc Lịch Tự Động & AI Push'}
@@ -2770,6 +2839,120 @@ export default function App() {
                   >
                     {isSimulatingMessage ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                     Gửi webhook mô phỏng sang Server
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: FACEBOOK MESSENGER INTEGRATION */}
+          {activeTab === 'facebook' && activeBot && bots.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-xs p-6 md:p-8 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800">Cấu hình Facebook Messenger</h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Kết nối bot với Meta Page Messenger qua webhook để nhận và trả lời tin nhắn khách hàng.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchFacebookDetails}
+                    disabled={isFetchingFacebook}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isFetchingFacebook ? 'animate-spin' : ''}`} />
+                    Tải cấu hình
+                  </button>
+                </div>
+
+                <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-3 text-xs leading-relaxed text-slate-700">
+                  <h4 className="font-bold text-slate-900 text-sm">Các bước kết nối trên Meta Developers</h4>
+                  <ol className="list-decimal pl-4 space-y-2">
+                    <li>Tạo hoặc mở app Meta Developers, thêm sản phẩm Messenger.</li>
+                    <li>Trong phần Webhooks, chọn Page và dán Callback URL bên dưới.</li>
+                    <li>Dùng Verify Token hiển thị bên dưới để xác thực webhook.</li>
+                    <li>Subscribe các event tin nhắn cần thiết như <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono">messages</code> và <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono">messaging_postbacks</code>.</li>
+                    <li>Cấu hình biến môi trường <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono">FACEBOOK_PAGE_ACCESS_TOKEN</code> trên server/deploy để bot gửi trả lời ra Messenger thật.</li>
+                  </ol>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Callback URL</span>
+                      <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-bold">Webhook</span>
+                    </div>
+                    <div className="font-mono text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-lg p-3 break-all select-all">
+                      {facebookDetails?.webhookUrl || 'Bấm "Tải cấu hình" để lấy URL webhook Facebook.'}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Verify Token</span>
+                      <div className="font-mono text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-lg p-3 break-all select-all">
+                        {facebookDetails?.verifyTokenHint || 'balabot-dev-verify-token'}
+                      </div>
+                    </div>
+                    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Page Access Token</span>
+                      <div className={`text-xs font-bold rounded-lg p-3 border ${facebookDetails?.configured ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                        {facebookDetails?.configured ? 'Đã cấu hình trên server' : 'Chưa cấu hình FACEBOOK_PAGE_ACCESS_TOKEN'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-600 leading-relaxed">
+                    <div className="font-bold text-slate-800 mb-1">Graph API Version</div>
+                    <span className="font-mono">{facebookDetails?.graphApiVersion || 'v25.0'}</span>
+                  </div>
+                </div>
+
+                {facebookActionMsg && (
+                  <div className={`p-3 rounded-lg text-xs font-medium flex items-center gap-2 ${facebookActionMsg.status === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                    {facebookActionMsg.status === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+                    <span>{facebookActionMsg.text}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-900 text-white p-6 rounded-xl shadow-md flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <MessageCircle className="w-5 h-5 text-blue-400" />
+                    <h3 className="font-bold text-sm uppercase tracking-wider text-white">Giả lập Facebook Messenger</h3>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed mb-4">
+                    Dùng phần này để kiểm tra bot trả lời qua luồng Facebook mà chưa cần cấu hình Meta app thật.
+                  </p>
+
+                  <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Facebook Sender ID mô phỏng</label>
+                  <input
+                    type="text"
+                    className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-blue-500 font-mono mb-4"
+                    value={facebookSimUserId}
+                    onChange={(e) => setFacebookSimUserId(e.target.value)}
+                  />
+
+                  <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Nội dung khách hỏi</label>
+                  <textarea
+                    rows={5}
+                    className="w-full bg-slate-800/80 border border-slate-700 rounded-lg p-2.5 text-xs focus:outline-none text-white font-medium"
+                    value={facebookSimText}
+                    onChange={(e) => setFacebookSimText(e.target.value)}
+                  />
+                </div>
+
+                <div className="mt-6 border-t border-slate-800 pt-4 space-y-3">
+                  <button
+                    onClick={handleSimulateFacebookMsg}
+                    disabled={isSimulatingFacebook || !facebookSimText.trim()}
+                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-transform shadow-md flex items-center justify-center gap-2"
+                  >
+                    {isSimulatingFacebook ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    Gửi tin mô phỏng Facebook
                   </button>
                 </div>
               </div>
