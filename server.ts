@@ -2465,6 +2465,60 @@ function inferCustomerEmotion(query: string): string {
   return "neutral";
 }
 
+function detectOffTopicChitChat(query: string): "romantic" | "greeting" | "thanks" | "joke" | "casual" | null {
+  const normalized = normalizeSearchText(query);
+  const compact = normalized.replace(/\s+/g, " ").trim();
+  if (!compact) return null;
+  if (/(anh yeu em|em yeu anh|chi yeu em|yeu em|yeu anh|thuong em|nho em|hon em|crush|love you|i love you)/i.test(compact)) return "romantic";
+  if (/^(hi|hello|helo|alo|chao|xin chao|hey|yo|em oi|bot oi|shop oi|ad oi)(\s|$)/i.test(compact)) return "greeting";
+  if (/(cam on|thanks|thank you|tks|thank|ok cam on|tot qua|hay qua)/i.test(compact)) return "thanks";
+  if (/(ke chuyen cuoi|noi cau vui|ke truyen vui|joke|vui len|hat cho|doc tho)/i.test(compact)) return "joke";
+  if (compact.length <= 18 && /(haha|hihi|hehe|test|thu xem|ok|oke|uh|ua|wow)/i.test(compact)) return "casual";
+  return null;
+}
+
+function buildOffTopicChitChatReply(
+  bot: BotConfig,
+  query: string,
+  pronoun: string,
+  targetName: string,
+  kind: NonNullable<ReturnType<typeof detectOffTopicChitChat>>
+): string {
+  const lead = pronoun === "Anh/Chị" ? "mình" : `${pronoun} ${targetName}`;
+  const offeringLabel = getOfferingLabel(bot);
+  const brandName = bot.name || bot.telegramBotUsername || "bên em";
+
+  if (kind === "romantic") {
+    return `Dạ nghe câu này tim em suýt bật chế độ trả lời nhanh hơn cả webhook luôn đó ${lead} ơi 😄
+
+Em xin nhận tình cảm đẹp này bằng một nụ cười thật tươi, còn nhiệm vụ chính của em vẫn là hỗ trợ ${lead} về ${offeringLabel} của ${brandName} cho thật chuẩn ạ.
+
+Giờ mình quay lại việc chính nha: ${lead} muốn em tư vấn phần nào trước?`;
+  }
+
+  if (kind === "greeting") {
+    return `Dạ em đây ${lead} ơi, em đang online và sẵn sàng hỗ trợ mình ạ.
+
+${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn hỏi về ${offeringLabel}, giá, chính sách hay cần em tư vấn lựa chọn phù hợp trước nè?`;
+  }
+
+  if (kind === "thanks") {
+    return `Dạ em vui vì hỗ trợ được ${lead} ạ.
+
+Nếu còn phần nào chưa rõ, ${lead} cứ hỏi tiếp nhé. Em vẫn đang trực ở đây, chưa xin nghỉ giải lao đâu ạ 😄`;
+  }
+
+  if (kind === "joke") {
+    return `Dạ em cũng muốn pha trò lắm, nhưng em sợ cười xong mình quên mất việc chính ạ 😄
+
+Em xin giữ mood vui vẻ rồi quay lại hỗ trợ ${lead} về ${offeringLabel} của ${brandName} nha. Mình muốn em tư vấn phần nào trước?`;
+  }
+
+  return `Dạ em nghe rồi ${lead} ơi 😄
+
+Câu này hơi ngoài phần công việc chính của em một chút, nhưng không sao, em vẫn ở đây hỗ trợ mình. ${lead} muốn hỏi tiếp về ${offeringLabel}, giá, chính sách hay cách sử dụng trước ạ?`;
+}
+
 const SEARCH_STOPWORDS = new Set([
   "a", "ạ", "oi", "ơi", "em", "anh", "chi", "chị", "minh", "mình", "ban", "bạn",
   "la", "là", "co", "có", "khong", "không", "duoc", "được", "vay", "vậy",
@@ -2792,6 +2846,15 @@ async function generateRAGAnswer(
     const detected = getGenderAndName(defaultName);
     pronoun = detected.pronoun;
     targetName = detected.name;
+  }
+
+  const chitChatKind = detectOffTopicChitChat(query);
+  if (chitChatKind) {
+    return {
+      text: postProcessBotReply(buildOffTopicChitChatReply(bot, query, pronoun, targetName, chitChatKind), replyOptions),
+      sources: [],
+      fallbackTriggered: false
+    };
   }
 
   // 1. Get knowledge chunks for this bot
