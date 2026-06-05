@@ -124,6 +124,26 @@ function getRequestConfig(req: express.Request): { url: string; key: string } | 
   return null;
 }
 
+function getSavedSupabaseConfigForEmail(email: string): { url: string; key: string } | null {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) return null;
+
+  const userConfigs = readJsonFile<Record<string, { url: string; key: string }>>(USER_CONFIGS_FILE, {});
+  const userConfig = userConfigs[normalizedEmail];
+  if (userConfig?.url && userConfig?.key) return userConfig;
+
+  return null;
+}
+
+function getAuthBodySupabaseConfig(req: express.Request): { url: string; key: string } | null {
+  const url = (req.body?.supabaseUrl || req.body?.url || "").toString().trim();
+  const key = (req.body?.supabaseKey || req.body?.key || "").toString().trim();
+  if (url && key) return { url, key };
+
+  const email = (req.body?.email || "").toString();
+  return getSavedSupabaseConfigForEmail(email);
+}
+
 app.use((req, _res, next) => {
   withSupabaseConfig(getRequestConfig(req), next);
 });
@@ -737,7 +757,8 @@ app.post("/api/supabase/auth/signup", async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ success: false, error: "Email và Password là bắt buộc." });
   }
-  const result = await dbSignUpUser(email, password, redirectTo);
+  const authConfig = getAuthBodySupabaseConfig(req);
+  const result = await withSupabaseConfig(authConfig, () => dbSignUpUser(email, password, redirectTo));
   if (result.success) {
     const freshEmail = email.toLowerCase();
     const isOwner = freshEmail === 'ox102.crypto@gmail.com';
@@ -799,7 +820,8 @@ app.post("/api/supabase/auth/signin", async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ success: false, error: "Email và Password là bắt buộc." });
   }
-  const result = await dbSignInUser(email, password);
+  const authConfig = getAuthBodySupabaseConfig(req);
+  const result = await withSupabaseConfig(authConfig, () => dbSignInUser(email, password));
   if (result.success) {
     const freshEmail = email.toLowerCase();
     const isOwner = freshEmail === 'ox102.crypto@gmail.com';

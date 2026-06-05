@@ -634,6 +634,12 @@ export default function App() {
     try {
       const endpoint = sbAuthMode === 'signup' ? '/api/supabase/auth/signup' : '/api/supabase/auth/signin';
       const payload: any = { email: sbAuthEmail, password: sbAuthPassword };
+      const savedAuthUrl = localStorage.getItem("sbUrl");
+      const savedAuthKey = localStorage.getItem("sbKey");
+      if (savedAuthUrl && savedAuthKey) {
+        payload.supabaseUrl = savedAuthUrl;
+        payload.supabaseKey = savedAuthKey;
+      }
       if (sbAuthMode === 'signup') {
         const isLocal = window.location.hostname === 'localhost' || 
                         window.location.hostname === '127.0.0.1' || 
