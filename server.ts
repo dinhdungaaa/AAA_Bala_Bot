@@ -49,7 +49,7 @@ import {
 
 import {
   startQrLogin, getQrLoginResult, getRuntimeStatus,
-  logoutZalo, listBindings, upsertBinding,
+  logoutZalo, listBindings, upsertBinding, initZaloGroupBot,
 } from "./zaloGroupBot/index.js";
 
 // Helper for type compatibility (since we'll import types in types.ts but write server)
@@ -4313,6 +4313,16 @@ async function startServer() {
     // Initialize Scheduler Engine
     await loadSchedulesFromDB();
     startSchedulerEngine();
+
+    // Khoi dong Zalo Group Bot (no-op neu ZALO_GROUP_BOT_ENABLED != true).
+    await initZaloGroupBot({
+      generateRAGAnswer,
+      postProcessBotReply,
+      getBots: () => dbGetBots(bots),
+      chatSessions,
+      saveConversation: dbSaveConversation,
+      analytics,
+    });
   });
 }
 
