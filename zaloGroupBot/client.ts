@@ -103,6 +103,7 @@ function normalizeEvent(raw: Message): ZaloIncomingEvent | null {
 
     const messageId = (data.msgId ?? data.cliMsgId ?? "").toString();
     const senderId = (data.uidFrom ?? "").toString();
+    if (selfUid && senderId === selfUid) return null;
     const senderName = (data.dName ?? "Khach hang Zalo").toString();
 
     // content is string | TAttachmentContent | TOtherContent
@@ -207,8 +208,7 @@ function scheduleReconnect() {
       if (rec?.credentials) {
         await loginWithCredentials(rec.credentials);
       }
-      // Success: backoff grows only on failure below
-      reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
+      // Success: bootApi resets reconnectDelay to 5000
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (isAuthError(e)) {
@@ -377,6 +377,7 @@ export async function startQrLogin(): Promise<{ qr: string | null; error?: strin
     return { qr: qrPayload };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
+    loginState = "error";
     return { qr: null, error: msg };
   }
 }

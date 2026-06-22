@@ -32,7 +32,7 @@ export function createZaloMessageHandler(
 
       if (!limiter.allow(event.groupId)) return { replied: false, reason: "rate_limited" };
 
-      const question = stripMention(event.text, (bot as any).name || "");
+      const question = stripMention(event.text, bot.name || "");
       if (!question) return { replied: false, reason: "empty_after_strip" };
 
       const userKey = `zalo:${event.groupId}`;
@@ -51,6 +51,7 @@ export function createZaloMessageHandler(
           messages: [],
         };
         deps.chatSessions.unshift(session);
+        deps.analytics.totalUsers += 1;
       }
 
       const hasPriorBotReply = session.messages.some((m) => m.sender === "bot");
@@ -76,7 +77,7 @@ export function createZaloMessageHandler(
       const botMsg: Message = {
         id: rid("m-zalo-bot-"),
         sender: "bot",
-        username: (bot as any).name,
+        username: bot.name,
         text: ai.text,
         timestamp: new Date().toISOString(),
         sourcesUsed: ai.sources,

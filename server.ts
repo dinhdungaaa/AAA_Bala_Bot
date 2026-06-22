@@ -2124,7 +2124,7 @@ app.post("/api/facebook-webhook/:botId", async (req, res) => {
 
 // Health check cho uptime pinger (giu Render thuc khi chay listener Zalo).
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, ts: new Date().toISOString(), zalo: getRuntimeStatus() });
+  res.json({ ok: true, ts: new Date().toISOString() });
 });
 
 // ===== Zalo Group Bot admin API (owner-only) =====
