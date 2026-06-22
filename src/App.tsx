@@ -65,7 +65,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'facebook' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin'>(() => isAdminRoute() ? 'admin' : 'dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'facebook' | 'zalo' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin'>(() => isAdminRoute() ? 'admin' : 'dashboard');
   const [telegramPanel, setTelegramPanel] = useState<'connection' | 'schedules' | 'train-schedules'>('connection');
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
@@ -294,6 +294,68 @@ export default function App() {
   const [facebookSimUserId, setFacebookSimUserId] = useState('fb-test-user-001');
   const [isSimulatingFacebook, setIsSimulatingFacebook] = useState(false);
 
+  // Zalo Group Integration States
+  const [zaloStatus, setZaloStatus] = useState<any>(null);
+  const [zaloQr, setZaloQr] = useState<string | null>(null);
+  const [zaloGroups, setZaloGroups] = useState<{ bindings: any[]; bots: any[] }>({ bindings: [], bots: [] });
+  const [zaloLoading, setZaloLoading] = useState(false);
+
+  const loadZalo = async () => {
+    setZaloLoading(true);
+    try {
+      const s = await fetch('/api/zalo/status', { headers: getScopedApiHeaders() }).then((r) => r.json());
+      setZaloStatus(s);
+      const g = await fetch('/api/zalo/groups', { headers: getScopedApiHeaders() }).then((r) => r.json());
+      setZaloGroups(g && typeof g === 'object' ? g : { bindings: [], bots: [] });
+    } catch (err) {
+      console.error('Zalo load error:', err);
+    } finally {
+      setZaloLoading(false);
+    }
+  };
+
+  const startZaloLogin = async () => {
+    try {
+      const r = await fetch('/api/zalo/login/start', { method: 'POST', headers: getScopedApiHeaders() }).then((x) => x.json());
+      const qrValue = r?.qr || null;
+      setZaloQr(typeof qrValue === 'string' && qrValue.length > 0 ? qrValue : null);
+      const poll = setInterval(async () => {
+        try {
+          const res = await fetch('/api/zalo/login/result', { headers: getScopedApiHeaders() }).then((x) => x.json());
+          if (res.state === 'success' || res.state === 'failed') {
+            clearInterval(poll);
+            setZaloQr(null);
+            await loadZalo();
+          }
+        } catch (_) {}
+      }, 2000);
+    } catch (err) {
+      console.error('Zalo login start error:', err);
+    }
+  };
+
+  const logoutZalo = async () => {
+    try {
+      await fetch('/api/zalo/logout', { method: 'POST', headers: getScopedApiHeaders() });
+      await loadZalo();
+    } catch (err) {
+      console.error('Zalo logout error:', err);
+    }
+  };
+
+  const saveZaloBinding = async (groupId: string, botId: string, enabled: boolean, groupName?: string) => {
+    try {
+      await fetch(`/api/zalo/groups/${encodeURIComponent(groupId)}/binding`, {
+        method: 'POST',
+        headers: { ...getScopedApiHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({ botId, enabled, groupName }),
+      });
+      await loadZalo();
+    } catch (err) {
+      console.error('Zalo binding save error:', err);
+    }
+  };
+
   const fetchFacebookDetails = async () => {
     if (!selectedBotId) return;
     setIsFetchingFacebook(true);
@@ -510,6 +572,13 @@ export default function App() {
           }
         })
         .catch(err => console.error("Error fetching SaaS customers:", err));
+    }
+  }, [activeTab, sbUser]);
+
+  // Load Zalo status and groups when Zalo tab opens
+  useEffect(() => {
+    if (activeTab === 'zalo' && sbUser?.email === ADMIN_EMAIL) {
+      loadZalo();
     }
   }, [activeTab, sbUser]);
 
@@ -1622,6 +1691,16 @@ export default function App() {
             Tích hợp Facebook
           </button>
 
+          {sbUser?.email === ADMIN_EMAIL && (
+            <button
+              onClick={() => { setActiveTab('zalo'); setIsMobileMenuOpen(false); }}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'zalo' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            >
+              <MessageCircle className="w-4 h-4 text-green-400" />
+              Zalo Group Bot
+            </button>
+          )}
+
           {activeTab === 'telegram' && (
             <div className="ml-7 mr-2 mb-1 space-y-1 border-l border-slate-700/60 pl-3">
               <button
@@ -1780,6 +1859,7 @@ export default function App() {
                   {activeTab === 'playground' && 'Playground Chat Thử Nghiệm'}
                   {activeTab === 'telegram' && 'Liên kết Kế Nối Telegram Bot'}
                   {activeTab === 'facebook' && 'Liên kết Facebook Messenger'}
+                  {activeTab === 'zalo' && 'Zalo Group Bot'}
                   {activeTab === 'conversations' && 'Lịch sử Hội thoại Real-time'}
                   {activeTab === 'analytics' && 'Báo cáo Đo Lường Hiệu Suất'}
                   {activeTab === 'schedules' && 'Hệ Thống Nhắc Lịch Tự Động & AI Push'}
@@ -2981,6 +3061,122 @@ export default function App() {
                     {isSimulatingFacebook ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                     Gửi tin mô phỏng Facebook
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: ZALO GROUP BOT */}
+          {activeTab === 'zalo' && sbUser?.email === ADMIN_EMAIL && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-xs p-6 md:p-8 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800">Zalo Group Bot (không chính thức)</h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Bot trả lời trong nhóm Zalo khi được @nhắc hoặc reply. Dùng nick phụ, có rủi ro khóa nick.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={loadZalo}
+                    disabled={zaloLoading}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${zaloLoading ? 'animate-spin' : ''}`} />
+                    Làm mới
+                  </button>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-800">Trạng thái:</span>
+                    <span className={`px-2 py-0.5 rounded font-bold ${zaloStatus?.loginState === 'active' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {zaloStatus?.loginState || '?'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-800">Listener:</span>
+                    <span>{String(zaloStatus?.listenerConnected ?? '?')}</span>
+                  </div>
+                  {zaloStatus?.lastError && (
+                    <div className="mt-2 p-2 rounded bg-red-50 border border-red-200 text-red-700 font-medium">
+                      Lỗi: {zaloStatus.lastError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-3 flex-wrap">
+                  {zaloStatus?.loginState !== 'active' && (
+                    <button
+                      onClick={startZaloLogin}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-2"
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                      Đăng nhập Zalo (quét QR)
+                    </button>
+                  )}
+                  {zaloStatus?.loginState === 'active' && (
+                    <button
+                      onClick={logoutZalo}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold flex items-center gap-2"
+                    >
+                      Đăng xuất
+                    </button>
+                  )}
+                </div>
+
+                {typeof zaloQr === 'string' && zaloQr.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-slate-600 font-medium">Quét QR bằng app Zalo để đăng nhập. Đang chờ xác nhận...</p>
+                    <img src={zaloQr} alt="Quét QR bằng app Zalo" style={{ width: 220 }} className="rounded-lg border border-slate-200" />
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <h3 className="font-bold text-slate-800 text-sm">Gán bot cho từng nhóm</h3>
+                  {(!zaloGroups.bindings || zaloGroups.bindings.length === 0) ? (
+                    <p className="text-xs text-slate-400">Chưa có nhóm nào. Đăng nhập Zalo và bot sẽ tự phát hiện nhóm khi có tin nhắn.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {zaloGroups.bindings.map((b: any) => (
+                        <div key={b.group_id} className="flex flex-wrap items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+                          <span className="font-medium text-slate-700 flex-1 min-w-0 truncate">{b.group_name || b.group_id}</span>
+                          <select
+                            defaultValue={b.bot_id}
+                            onChange={(e) => saveZaloBinding(b.group_id, e.target.value, b.enabled, b.group_name)}
+                            className="bg-white border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none focus:border-green-500"
+                          >
+                            {(zaloGroups.bots || []).map((bot: any) => (
+                              <option key={bot.id} value={bot.id}>{bot.name}</option>
+                            ))}
+                          </select>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              defaultChecked={b.enabled}
+                              onChange={(e) => saveZaloBinding(b.group_id, b.bot_id, e.target.checked, b.group_name)}
+                              className="accent-green-600"
+                            />
+                            <span className="text-slate-600">Bật</span>
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-slate-900 text-white p-6 rounded-xl shadow-md flex flex-col gap-4">
+                <div className="flex items-center gap-2">
+                  <MessageCircle className="w-5 h-5 text-green-400" />
+                  <h3 className="font-bold text-sm uppercase tracking-wider text-white">Hướng dẫn Zalo Group</h3>
+                </div>
+                <div className="text-xs text-slate-300 leading-relaxed space-y-2">
+                  <p>1. Đăng nhập bằng QR — quét bằng app Zalo chính thức.</p>
+                  <p>2. Sau khi đăng nhập, bot sẽ lắng nghe tin nhắn nhóm khi được @nhắc hoặc ai đó reply vào tin nhắn của bot.</p>
+                  <p>3. Gán bot cho từng nhóm trong danh sách bên trái để chọn bot trả lời phù hợp.</p>
+                  <p className="text-amber-300 font-medium">Lưu ý: Zalo không có API chính thức. Dùng nick phụ để tránh rủi ro khóa tài khoản.</p>
                 </div>
               </div>
             </div>
