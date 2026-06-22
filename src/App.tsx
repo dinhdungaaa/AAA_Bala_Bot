@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard, Bot, GraduationCap, Database, Play, Send, Sliders,
   History, BarChart3, Settings, CreditCard, Plus, Trash2, CheckCircle2,
@@ -299,6 +299,7 @@ export default function App() {
   const [zaloQr, setZaloQr] = useState<string | null>(null);
   const [zaloGroups, setZaloGroups] = useState<{ bindings: any[]; bots: any[] }>({ bindings: [], bots: [] });
   const [zaloLoading, setZaloLoading] = useState(false);
+  const zaloPollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadZalo = async () => {
     setZaloLoading(true);
@@ -319,11 +320,13 @@ export default function App() {
       const r = await fetch('/api/zalo/login/start', { method: 'POST', headers: getScopedApiHeaders() }).then((x) => x.json());
       const qrValue = r?.qr || null;
       setZaloQr(typeof qrValue === 'string' && qrValue.length > 0 ? qrValue : null);
-      const poll = setInterval(async () => {
+      if (zaloPollerRef.current) clearInterval(zaloPollerRef.current);
+      zaloPollerRef.current = setInterval(async () => {
         try {
           const res = await fetch('/api/zalo/login/result', { headers: getScopedApiHeaders() }).then((x) => x.json());
           if (res.state === 'success' || res.state === 'failed') {
-            clearInterval(poll);
+            clearInterval(zaloPollerRef.current!);
+            zaloPollerRef.current = null;
             setZaloQr(null);
             await loadZalo();
           }
@@ -575,10 +578,13 @@ export default function App() {
     }
   }, [activeTab, sbUser]);
 
-  // Load Zalo status and groups when Zalo tab opens
+  // Load Zalo status and groups when Zalo tab opens; clear poll when leaving
   useEffect(() => {
     if (activeTab === 'zalo' && sbUser?.email === ADMIN_EMAIL) {
       loadZalo();
+    } else if (activeTab !== 'zalo' && zaloPollerRef.current) {
+      clearInterval(zaloPollerRef.current);
+      zaloPollerRef.current = null;
     }
   }, [activeTab, sbUser]);
 
@@ -3143,7 +3149,7 @@ export default function App() {
                         <div key={b.group_id} className="flex flex-wrap items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
                           <span className="font-medium text-slate-700 flex-1 min-w-0 truncate">{b.group_name || b.group_id}</span>
                           <select
-                            defaultValue={b.bot_id}
+                            value={b.bot_id}
                             onChange={(e) => saveZaloBinding(b.group_id, e.target.value, b.enabled, b.group_name)}
                             className="bg-white border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none focus:border-green-500"
                           >
@@ -3154,7 +3160,7 @@ export default function App() {
                           <label className="flex items-center gap-1.5 cursor-pointer">
                             <input
                               type="checkbox"
-                              defaultChecked={b.enabled}
+                              checked={b.enabled}
                               onChange={(e) => saveZaloBinding(b.group_id, b.bot_id, e.target.checked, b.group_name)}
                               className="accent-green-600"
                             />
