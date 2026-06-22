@@ -7,6 +7,7 @@ import { Zalo, ThreadType } from "zca-js";
 import type { Message, GroupMessage } from "zca-js";
 import type { LoginQRCallbackEvent } from "zca-js";
 import { LoginQRCallbackEventType } from "zca-js";
+import { ZaloApiError } from "zca-js";
 import type {
   ZaloDeps, ZaloIncomingEvent, ZaloRuntimeStatus, ZaloSessionRecord,
 } from "./types.js";
@@ -166,6 +167,8 @@ async function startListening(handler: (e: ZaloIncomingEvent) => Promise<unknown
 
     // retryOnClose: false — we handle reconnect ourselves with backoff
     api.listener.start({ retryOnClose: false });
+    // I1: set active state AFTER start() returns — a synchronous throw from start()
+    // must NOT leave loginState as "active".
     listenerConnected = true;
     loginState = "active";
     console.log("[Zalo Client] listener started");
@@ -182,6 +185,19 @@ async function startListening(handler: (e: ZaloIncomingEvent) => Promise<unknown
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = 5000;
 
+/** Returns true if the error looks like an authentication/credentials failure. */
+function isAuthError(e: unknown): boolean {
+  if (e instanceof ZaloApiError) {
+    // ZaloApiError.code: Zalo's -101 / -216 are common auth rejection codes.
+    // Treat any negative code as a potential auth issue when the message also matches.
+    const authCodes = new Set([-101, -216, -1006, -1004]);
+    if (e.code !== null && authCodes.has(e.code)) return true;
+  }
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  const authKeywords = ["login", "auth", "unauthorized", "expired", "credential", "cookie", "invalid session", "session"];
+  return authKeywords.some((kw) => msg.includes(kw));
+}
+
 function scheduleReconnect() {
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(async () => {
@@ -191,11 +207,29 @@ function scheduleReconnect() {
       if (rec?.credentials) {
         await loginWithCredentials(rec.credentials);
       }
+      // Success: backoff grows only on failure below
+      reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.error("[Zalo Client] reconnect failed:", msg);
+      if (isAuthError(e)) {
+        // C1: Auth failure — stop retrying to avoid account lockout.
+        console.error("[Zalo Client] reconnect aborted (auth failure — needs re-login):", msg);
+        loginState = "needs_login";
+        lastError = msg;
+        await saveSession({
+          id: ACCOUNT_LABEL,
+          account_label: ACCOUNT_LABEL,
+          credentials: null,
+          status: "needs_login",
+          last_error: msg,
+        } as ZaloSessionRecord).catch(() => { /* persist best-effort */ });
+        // Do NOT re-queue — returning here stops the retry loop.
+        return;
+      }
+      // Non-auth (network/transient) — log and grow backoff; caller will re-queue next time.
+      console.error("[Zalo Client] reconnect failed (transient):", msg);
+      reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
     }
-    reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
   }, reconnectDelay);
 }
 
@@ -204,11 +238,29 @@ function scheduleReconnect() {
 async function bootApi(loggedInApi: unknown) {
   api = loggedInApi;
   try {
-    // getContext() returns ContextSession with uid, imei, userAgent
-    const ctx = api.getContext?.() || {};
-    selfUid = (ctx.uid ?? null)?.toString() || selfUid;
-    // ContextSession has no displayName — use uid as fallback identifier
-    selfName = ctx.uid?.toString() || selfName;
+    // Attempt 1: getOwnId() — synchronous, most reliable source
+    const ownId: string | undefined = api.getOwnId?.();
+    if (ownId) {
+      selfUid = ownId;
+    }
+    // Attempt 2: getContext().uid
+    if (!selfUid) {
+      const ctx = api.getContext?.() || {};
+      if (ctx.uid) selfUid = ctx.uid.toString();
+    }
+    // Attempt 3: fetchAccountInfo().profile.uid (async, fallback)
+    if (!selfUid) {
+      try {
+        const info = await api.fetchAccountInfo?.();
+        const profileUid = info?.profile?.uid ?? info?.profile?.userId;
+        if (profileUid) selfUid = profileUid.toString();
+      } catch { /* ignore — network may not be ready */ }
+    }
+    if (!selfUid) {
+      console.warn("[Zalo Client] selfUid could not be resolved — mention-detection will be degraded (@mentions may be missed)");
+    }
+    // Use selfUid as name fallback since ContextSession has no displayName
+    selfName = selfUid ?? selfName;
   } catch { /* optional enrichment */ }
   reconnectDelay = 5000;
   await startListening(createZaloMessageHandler(buildDeps()));
@@ -255,6 +307,10 @@ export async function initZaloGroupBot(deps: InjectedDeps): Promise<void> {
 export async function startQrLogin(): Promise<{ qr: string | null; error?: string }> {
   if (process.env.ZALO_GROUP_BOT_ENABLED !== "true") {
     return { qr: null, error: "ZALO_GROUP_BOT_ENABLED chua bat" };
+  }
+  // m1: Guard concurrent QR logins — return existing QR payload if already logging in.
+  if (loginState === "logging_in") {
+    return { qr: qrPayload };
   }
   try {
     loginState = "logging_in";
@@ -340,6 +396,12 @@ export function getRuntimeStatus(): ZaloRuntimeStatus {
 
 export async function logoutZalo(): Promise<void> {
   try { api?.listener?.stop?.(); } catch { /* ignore */ }
+  // m2: Reset backoff and clear any pending reconnect on explicit logout.
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  reconnectDelay = 5000;
   api = null;
   selfUid = null;
   selfName = null;
