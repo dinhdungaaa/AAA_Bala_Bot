@@ -47,6 +47,11 @@ import {
   dbGetUserConfig
 } from "./supabaseService.js";
 
+import {
+  startQrLogin, getQrLoginResult, getRuntimeStatus,
+  logoutZalo, listBindings, upsertBinding,
+} from "./zaloGroupBot/index.js";
+
 // Helper for type compatibility (since we'll import types in types.ts but write server)
 const app = express();
 const PORT = 3000;
@@ -2114,6 +2119,73 @@ app.post("/api/facebook-webhook/:botId", async (req, res) => {
     }
   } catch (err) {
     console.error("[Facebook Webhook] Error in live processing flow:", err);
+  }
+});
+
+// Health check cho uptime pinger (giu Render thuc khi chay listener Zalo).
+app.get("/health", (_req, res) => {
+  res.json({ ok: true, ts: new Date().toISOString(), zalo: getRuntimeStatus() });
+});
+
+// ===== Zalo Group Bot admin API (owner-only) =====
+app.get("/api/zalo/status", (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  res.json(getRuntimeStatus());
+});
+
+app.post("/api/zalo/login/start", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const r = await startQrLogin();
+  res.json(r);
+});
+
+app.get("/api/zalo/login/result", (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  res.json(getQrLoginResult());
+});
+
+app.post("/api/zalo/logout", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  await logoutZalo();
+  res.json({ ok: true });
+});
+
+app.get("/api/zalo/groups", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const bindings = await listBindings();
+  const allBots = await dbGetBots(bots);
+  res.json({ bindings, bots: allBots.map((b) => ({ id: b.id, name: b.name })) });
+});
+
+app.post("/api/zalo/groups/:groupId/binding", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const { botId, enabled, groupName } = req.body || {};
+  if (!botId) return res.status(400).json({ error: "Thieu botId" }) as any;
+  await upsertBinding({
+    group_id: req.params.groupId,
+    group_name: groupName,
+    bot_id: botId,
+    enabled: enabled !== false,
+  });
+  res.json({ ok: true });
+});
+
+// Test duong RAG ma khong can Zalo that.
+app.post("/api/zalo/simulate", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const { botId, text, senderName } = req.body || {};
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find((b) => b.id === botId);
+  if (!bot) return res.status(404).json({ error: "Bot not found" }) as any;
+  try {
+    const ai = await generateRAGAnswer(
+      bot, String(text || ""),
+      { fullName: senderName || "Khach test", username: senderName || "tester", id: "zalo-sim" },
+      { shouldGreet: true, recentMessages: [] }
+    );
+    res.json({ reply: postProcessBotReply(ai.text, { shouldGreet: true }), sources: ai.sources });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Zalo simulation failed" });
   }
 });
 
