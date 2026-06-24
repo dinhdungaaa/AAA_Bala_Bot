@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import { embedText, embedBatch, hashText } from "./rag/embeddings.js";
+import { embedText, hashText } from "./rag/embeddings.js";
 import { rankBySimilarity } from "./rag/retriever.js";
 import { synthesizeAnswer } from "./rag/synthesis.js";
 import { TOP_K, SIM_THRESHOLD } from "./rag/constants.js";
@@ -2935,6 +2935,7 @@ app.post("/api/rag/reembed", async (req, res) => {
 });
 
 app.post("/api/bots/:botId/rag-eval", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
   const botId = req.params.botId;
   const { testCases = [] } = req.body as {
     testCases?: Array<{

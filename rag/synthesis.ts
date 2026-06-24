@@ -50,5 +50,7 @@ export async function synthesizeAnswer(
     contents: query,
     config: { systemInstruction, temperature: 0.4 },
   } as any);
-  return (res?.text || "").trim();
+  const text = (res?.text || "").trim();
+  if (!text) throw new Error("empty synthesis response");
+  return text;
 }
