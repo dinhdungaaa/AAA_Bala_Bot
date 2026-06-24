@@ -24,6 +24,7 @@ export interface BotConfig {
   workingHours: string;
   status: 'active' | 'inactive' | 'training' | 'needs_token';
   createdAt: string;
+  answerStyle?: 'sales' | 'reference';
 }
 
 export interface KnowledgeSource {
@@ -50,6 +51,8 @@ export interface KnowledgeChunk {
   category: 'product' | 'policy' | 'pricing' | 'shipping' | 'warranty' | 'hdsd' | 'faq';
   tags: string[];
   isActive: boolean;
+  embedding?: number[];
+  embeddingHash?: string;
   metadata?: {
     topic?: string;
     dayNumber?: number;
