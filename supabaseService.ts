@@ -8,8 +8,8 @@ const scopedClients = new Map<string, SupabaseClient>();
 
 // Keep dynamic configurations in memory if the user overrides them from UI
 let dynamicConfig = {
-  url: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  key: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || ""
+  url: (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim(),
+  key: (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "").trim()
 };
 
 export function updateDynamicConfig(url: string, key: string) {
@@ -25,8 +25,8 @@ export function withSupabaseConfig<T>(config: { url: string; key: string } | nul
 
 export function getSupabaseConfig() {
   const requestConfig = requestConfigStorage.getStore();
-  const url = requestConfig?.url || dynamicConfig.url || process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const key = requestConfig?.key || dynamicConfig.key || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "";
+  const url = (requestConfig?.url || dynamicConfig.url || process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
+  const key = (requestConfig?.key || dynamicConfig.key || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "").trim();
   return {
     url,
     key,
