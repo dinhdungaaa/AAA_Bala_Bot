@@ -5,6 +5,9 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { embedText, embedBatch, hashText } from "./rag/embeddings.js";
+import { rankBySimilarity } from "./rag/retriever.js";
+import { synthesizeAnswer } from "./rag/synthesis.js";
+import { TOP_K, SIM_THRESHOLD } from "./rag/constants.js";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult } from "./src/types.js";
 import {
   getSupabaseConfig,
@@ -2392,20 +2395,6 @@ function metadataToTags(meta: ChunkMetadata): string[] {
   return tags;
 }
 
-function getChunkMetadata(chunk: KnowledgeChunk): ChunkMetadata {
-  const tags = chunk.tags || [];
-  const dayTag = getTagValue(tags, "day");
-  const priorityTag = getTagValue(tags, "priority");
-  const inferred = inferChunkMetadata(chunk.content, chunk.title);
-  return {
-    ...inferred,
-    topic: getTagValue(tags, "topic") || inferred.topic,
-    dayNumber: dayTag ? Number(dayTag) : inferred.dayNumber,
-    coursePhase: (getTagValue(tags, "phase") as ChunkMetadata["coursePhase"]) || inferred.coursePhase,
-    priority: priorityTag ? Number(priorityTag) : inferred.priority
-  };
-}
-
 function buildKnowledgeChunksForSource(source: KnowledgeSource, baseTags: string[] = []): KnowledgeChunk[] {
   const text = (source.fullText || "").replace(/\r\n/g, "\n").trim();
   if (!text) return [];
@@ -2470,24 +2459,6 @@ function normalizeSearchText(text: string): string {
 function isDurationQuestion(query: string): boolean {
   const normalized = normalizeSearchText(query);
   return /(bao nhieu ngay|may ngay|bao lau|thoi luong|do dai|hoc trong bao lau|hoc bao nhieu|duration|how long)/i.test(normalized);
-}
-
-function extractDurationAnswer(text: string): string | null {
-  const source = cleanKnowledgeText(text);
-  const patterns = [
-    /kh[oó]a\s*h[oọ]c\s*(?:kéo dài|trong|dài)?\s*(\d{1,3})\s*(ngày|day|days|tuần|tháng)/i,
-    /(\d{1,3})\s*(ngày|day|days|tuần|tháng)\s*(?:xây dựng|học|thực chiến|đào tạo|challenge|course)?/i,
-    /thời\s*lượng[^.\n:]*[:\-]?\s*(\d{1,3})\s*(ngày|day|days|tuần|tháng)/i,
-    /độ\s*dài[^.\n:]*[:\-]?\s*(\d{1,3})\s*(ngày|day|days|tuần|tháng)/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = source.match(pattern);
-    if (match) {
-      return `${match[1]} ${match[2].toLowerCase().replace("days", "ngày").replace("day", "ngày")}`;
-    }
-  }
-  return null;
 }
 
 function extractCourseDurationSummary(text: string): { mainDuration?: string; followUpPlan?: string } {
@@ -2649,74 +2620,6 @@ function pickGroundedBusinessPoints(sourceText: string, queryTopic = "general", 
     .slice(0, maxPoints);
 
   return selected.length ? selected : sentences.slice(0, maxPoints);
-}
-
-function buildGenericGroundedAnswer(
-  bot: BotConfig,
-  query: string,
-  sourceText: string,
-  lead: string,
-  queryProfile: QueryProfile
-): string {
-  const offeringLabel = getOfferingLabel(bot);
-  const brandName = bot.name || "bên em";
-  const points = pickGroundedBusinessPoints(sourceText, queryProfile.topic, 3);
-  const naturalPoints = points.map(makeNaturalSentence).filter(Boolean);
-
-  const leadCap = lead.charAt(0).toUpperCase() + lead.slice(1);
-  let opening = `Dạ ${lead} ơi, em tóm tắt phần này cho mình dễ hiểu nhé.`;
-  let nextStep = `${leadCap} muốn em nói kỹ hơn phần nào trước ạ?`;
-
-  if (queryProfile.topic === "identity") {
-    const subject = extractIdentitySubject(queryProfile.raw);
-    const firstPoint = naturalPoints[0] || sourceText.split(/[.\n]+/).map(makeNaturalSentence).find(Boolean);
-    if (firstPoint) {
-      const identityText = firstPoint.includes(" - ")
-        ? firstPoint.replace(/\s+-\s+/, " được gắn với ")
-        : firstPoint;
-      return `Dạ ${lead} ơi, trong dữ liệu hiện tại, ${identityText}.
-
-Em chưa thấy thêm phần giới thiệu chi tiết hơn về vai trò, tiểu sử hoặc câu chuyện của ${subject}. Nếu mình muốn, em có thể giúp tóm tắt tiếp những gì tài liệu đang nhắc về ${subject} ạ.`;
-    }
-    return `Dạ ${lead} ơi, hiện tại em chưa có đủ thông tin rõ ràng để giới thiệu chính xác ${subject}.
-
-Mình có thể nạp thêm phần tiểu sử, vai trò hoặc mô tả ngắn về ${subject}, sau đó em sẽ trả lời tự nhiên và đầy đủ hơn ạ.`;
-  }
-
-  if (queryProfile.topic === "pricing") {
-    opening = `Dạ ${lead} ơi, em gửi mình phần giá/chi phí đang có trong dữ liệu của ${brandName} nhé.`;
-    nextStep = `${leadCap} cho em biết nhu cầu hoặc gói mình đang quan tâm để em đối chiếu đúng phần giá hơn ạ?`;
-  } else if (queryProfile.topic === "shipping") {
-    opening = `Dạ ${lead} ơi, phần giao hàng/vận chuyển hiện đang được hiểu như sau ạ.`;
-    nextStep = `${leadCap} cho em biết khu vực nhận hàng để em kiểm tra hướng phù hợp hơn nhé?`;
-  } else if (queryProfile.topic === "policy") {
-    opening = `Dạ ${lead} ơi, chính sách hiện tại có các điểm chính sau ạ.`;
-    nextStep = `${leadCap} đang cần kiểm tra chính sách cho trường hợp cụ thể nào để em hỗ trợ sát hơn ạ?`;
-  } else if (queryProfile.topic === "howto") {
-    opening = `Dạ ${lead} ơi, cách thực hiện có thể đi theo các ý chính này ạ.`;
-    nextStep = `${leadCap} đang vướng ở bước nào để em hướng dẫn tiếp cho đúng nhé?`;
-  } else if (queryProfile.topic === "comparison") {
-    opening = `Dạ ${lead} ơi, nếu so sánh để chọn phương án phù hợp thì mình có thể nhìn theo các điểm này ạ.`;
-    nextStep = `${leadCap} ưu tiên giá, tính năng hay mức phù hợp với nhu cầu để em gợi ý sát hơn ạ?`;
-  } else if (queryProfile.intent === "complaint") {
-    opening = `Dạ ${lead} ơi, em hiểu vấn đề này cần xử lý rõ ràng. Trước mắt mình có thể kiểm tra theo các điểm sau ạ.`;
-    nextStep = `${leadCap} gửi thêm giúp em tình huống cụ thể hoặc mã đơn/thông tin liên quan để em hỗ trợ tiếp nhé?`;
-  } else if (queryProfile.intent === "sales" || queryProfile.topic === "offering") {
-    opening = `Dạ ${lead} ơi, ${offeringLabel} của ${brandName} có thể hiểu đơn giản như sau ạ.`;
-    nextStep = `${leadCap} đang cần ${offeringLabel} cho nhu cầu nào để em tư vấn đúng lựa chọn hơn ạ?`;
-  }
-
-  const bodyBlock = naturalPoints.length === 0
-    ? `${brandName} hiện có thông tin liên quan đến ${offeringLabel}, nhưng em cần thêm dữ liệu cụ thể hơn để tư vấn thật chính xác. ${leadCap} có thể nói rõ nhu cầu hoặc trường hợp đang gặp để em kiểm tra tiếp cho đúng ạ.`
-    : naturalPoints.length === 1
-      ? naturalPoints[0]
-      : naturalPoints.slice(0, 3).map((point, index) => `${index + 1}. ${point}`).join("\n\n");
-
-  return `${opening}
-
-${bodyBlock}
-
-${nextStep}`;
 }
 
 const VI_UPPERCASE_TO_LOWERCASE: Record<string, string> = {
@@ -2882,317 +2785,6 @@ Em xin giữ mood vui vẻ rồi quay lại hỗ trợ ${lead} về ${offeringLa
 Câu này hơi ngoài phần công việc chính của em một chút, nhưng không sao, em vẫn ở đây hỗ trợ mình. ${lead} muốn hỏi tiếp về ${offeringLabel}, giá, chính sách hay cách sử dụng trước ạ?`;
 }
 
-const SEARCH_STOPWORDS = new Set([
-  "a", "ạ", "oi", "ơi", "em", "anh", "chi", "chị", "minh", "mình", "ban", "bạn",
-  "la", "là", "co", "có", "khong", "không", "duoc", "được", "vay", "vậy",
-  "cho", "toi", "tôi", "toi", "cua", "của", "ben", "bên", "nay", "này",
-  "do", "đó", "thi", "thì", "ve", "về", "gi", "gì", "nao", "nào", "bao",
-  "nhieu", "nhiêu", "may", "mấy"
-]);
-
-type QueryProfile = {
-  raw: string;
-  normalized: string;
-  tokens: string[];
-  bigrams: string[];
-  intent: string;
-  emotion: string;
-  topic: string;
-  expectedPhase: "main" | "followup" | "bonus" | "unknown";
-  durationQuestion: boolean;
-  priceQuestion: boolean;
-  requestedCourseDay: number | null;
-  subqueries: string[];
-};
-
-function tokenizeSearchText(text: string): string[] {
-  return normalizeSearchText(text)
-    .split(/[^a-z0-9]+/)
-    .map(token => token.trim())
-    .filter(token => token.length >= 2 && !SEARCH_STOPWORDS.has(token));
-}
-
-function getBigrams(tokens: string[]): string[] {
-  const bigrams: string[] = [];
-  for (let i = 0; i < tokens.length - 1; i += 1) {
-    bigrams.push(`${tokens[i]} ${tokens[i + 1]}`);
-  }
-  return bigrams;
-}
-
-function buildQueryProfile(query: string): QueryProfile {
-  const normalized = normalizeSearchText(query);
-  const tokens = tokenizeSearchText(query);
-  const requestedCourseDay = extractRequestedCourseDay(query);
-  const durationQuestion = isDurationQuestion(query);
-  let topic = "general";
-  if (durationQuestion) topic = "duration";
-  else if (requestedCourseDay || /(lo trinh|lich hoc|lich hen|lich trinh|ngay hoc|hoc gi|noi dung ngay|tung ngay|schedule|timeline)/i.test(normalized)) topic = "timeline";
-  else if (/(gia|hoc phi|chi phi|bao nhieu tien|bao gia|bang gia|price|cost|khuyen mai|uu dai|combo|goi)/i.test(normalized)) topic = "pricing";
-  else if (/(ship|giao hang|van chuyen|noi thanh|ngoai tinh|delivery|shipping|thoi gian giao|phi ship)/i.test(normalized)) topic = "shipping";
-  else if (/(bao hanh|doi tra|hoan tien|chinh sach|cam ket|policy|warranty|refund|return)/i.test(normalized)) topic = "policy";
-  else if (/(huong dan|cach dung|su dung|bao quan|lap dat|kich hoat|ket noi|setup|how to)/i.test(normalized)) topic = "howto";
-  else if (/(con hang|het hang|ton kho|available|availability|stock)/i.test(normalized)) topic = "availability";
-  else if (/(la ai|ai vay|ai day|who is|nguoi nao|nhan vat|founder|ceo|tac gia|mentor)/i.test(normalized)) topic = "identity";
-  else if (/(phu hop|ai nen|danh cho ai|doi tuong|avatar|khach hang nao|nen chon)/i.test(normalized)) topic = "audience";
-  else if (/(ket qua|dau ra|nhan duoc|ung dung|thuc chien|loi ich|co gi|noi dung|benefit|result)/i.test(normalized)) topic = "outcome";
-  else if (/(so sanh|khac gi|khac nhau|nen chon|compare|option)/i.test(normalized)) topic = "comparison";
-  else if (/(san pham|dich vu|tinh nang|goi nao|product|service|feature)/i.test(normalized)) topic = "offering";
-
-  let expectedPhase: QueryProfile["expectedPhase"] = "unknown";
-  if (/(sau khoa|tiep theo|30 ngay|ngay\s*15\s*[-–]\s*44|brand playbook)/i.test(normalized)) {
-    expectedPhase = "followup";
-  } else if (durationQuestion || /(khoa hoc|hoc bao lau|hoc may ngay|ngay\s*1|14 ngay|15 ngay)/i.test(normalized)) {
-    expectedPhase = "main";
-  }
-
-  const subqueries = normalizeChunkTags([
-    query,
-    `${query} ${topic}`,
-    requestedCourseDay ? `ngày ${requestedCourseDay} lộ trình học nội dung bài học` : "",
-    durationQuestion ? "thời lượng thời gian xử lý kéo dài bao lâu" : "",
-    topic === "pricing" ? "giá chi phí báo giá bảng giá ưu đãi thanh toán" : "",
-    topic === "shipping" ? "giao hàng vận chuyển phí ship thời gian giao" : "",
-    topic === "policy" ? "chính sách bảo hành đổi trả hoàn tiền cam kết" : "",
-    topic === "howto" ? "hướng dẫn sử dụng cách dùng cài đặt bảo quản" : "",
-    topic === "identity" ? "là ai vai trò tiểu sử founder mentor chuyên gia người sáng lập" : "",
-    topic === "offering" ? "sản phẩm dịch vụ tính năng gói nội dung chính" : ""
-  ]);
-
-  return {
-    raw: query,
-    normalized,
-    tokens,
-    bigrams: getBigrams(tokens),
-    intent: inferSupportIntent(query),
-    emotion: inferCustomerEmotion(query),
-    topic,
-    expectedPhase,
-    durationQuestion,
-    priceQuestion: /(gia|phi|bao nhieu tien|chi phi|cost|price)/i.test(normalized),
-    requestedCourseDay,
-    subqueries
-  };
-}
-
-function scoreTextRetrieval(profile: QueryProfile, title: string, content: string, metadata = ""): number {
-  const normalizedTitle = normalizeSearchText(title);
-  const normalizedContent = normalizeSearchText(content);
-  const normalizedMeta = normalizeSearchText(metadata);
-  const combined = `${normalizedTitle} ${normalizedContent} ${normalizedMeta}`;
-  const pseudoChunk: KnowledgeChunk = {
-    id: "",
-    botId: "",
-    sourceId: "",
-    title,
-    content,
-    category: "faq",
-    tags: metadata.split(/\s+/).filter(Boolean),
-    isActive: true
-  };
-  const chunkMeta = getChunkMetadata(pseudoChunk);
-  let score = 0;
-
-  if (profile.normalized.length > 4) {
-    if (normalizedTitle.includes(profile.normalized)) score += 5;
-    if (normalizedContent.includes(profile.normalized)) score += 3;
-  }
-
-  for (const token of profile.tokens) {
-    const tokenWeight = token.length >= 6 ? 1.2 : 1;
-    if (normalizedTitle.split(/\s+/).includes(token)) score += 1.4 * tokenWeight;
-    if (normalizedContent.includes(token)) score += 0.45 * tokenWeight;
-    if (normalizedMeta.includes(token)) score += 0.8 * tokenWeight;
-  }
-
-  for (const bigram of profile.bigrams) {
-    if (normalizedTitle.includes(bigram)) score += 2;
-    if (normalizedContent.includes(bigram)) score += 1.2;
-  }
-
-  if (chunkMeta.topic === profile.topic) score += 4;
-  if (profile.expectedPhase !== "unknown" && chunkMeta.coursePhase === profile.expectedPhase) score += 3;
-  if (profile.expectedPhase !== "unknown" && chunkMeta.coursePhase !== "unknown" && chunkMeta.coursePhase !== profile.expectedPhase) score -= 2.5;
-
-  if (profile.durationQuestion) {
-    const originalCombined = `${title} ${content} ${metadata}`;
-    if (extractDurationAnswer(originalCombined)) score += 8;
-    if (/(thời\s*lượng|độ\s*dài|kéo\s*dài|bao\s*lâu|duration|how long)/i.test(originalCombined)) score += 3;
-    if (chunkMeta.topic !== "duration" && chunkMeta.coursePhase === "followup") score -= 3;
-  }
-
-  if (profile.requestedCourseDay) {
-    const originalCombined = `${title} ${content} ${metadata}`;
-    if (extractDayScheduleAnswer(originalCombined, profile.requestedCourseDay)) score += 8;
-    if (new RegExp(`ngày\\s*${profile.requestedCourseDay}\\b|day\\s*${profile.requestedCourseDay}\\b`, "i").test(originalCombined)) score += 4;
-    if (chunkMeta.dayNumber === profile.requestedCourseDay) score += 6;
-    if (chunkMeta.dayNumber && chunkMeta.dayNumber !== profile.requestedCourseDay) score -= 1.5;
-  }
-
-  if (profile.priceQuestion && /(\d+[\.,]?\d*)\s*(k|000|vnđ|vnd|đ|usd|\$)|giá|học phí|chi phí/i.test(content)) {
-    score += 4;
-  }
-
-  if (profile.intent === "policy" && /(policy|chính sách|đổi trả|bảo hành|vận chuyển|shipping|warranty)/i.test(`${title} ${content} ${metadata}`)) {
-    score += 3;
-  }
-
-  if (profile.intent === "complaint" && /(lỗi|hỏng|đổi trả|hoàn tiền|bảo hành|khiếu nại|support|hỗ trợ)/i.test(`${title} ${content}`)) {
-    score += 3;
-  }
-
-  if (Number.isFinite(chunkMeta.priority)) score += Math.min(2, (chunkMeta.priority || 0) / 10);
-  return Math.max(0, score);
-}
-
-function buildNaturalFallbackAnswer(
-  bot: BotConfig,
-  query: string,
-  activeChunks: Array<{ chunk: KnowledgeChunk; score: number }>,
-  pronoun: string,
-  targetName: string,
-  queryProfile = buildQueryProfile(query)
-): string {
-  const brandName = bot.name || bot.telegramBotUsername || "bên em";
-  const lead = getSafeCustomerLead(pronoun, targetName);
-  const queryWords = query.toLowerCase().split(/[\s,.;:!?()"'`]+/).filter(word => word.length >= 3);
-  const durationQuestion = isDurationQuestion(query);
-
-  const sourceText = activeChunks
-    .map(item => cleanKnowledgeText(item.chunk.content))
-    .filter(Boolean)
-    .join(". ");
-  const educationContext = isEducationContext(bot, query, sourceText);
-
-  const requestedDay = extractRequestedCourseDay(query);
-  if (educationContext && requestedDay) {
-    const dayAnswer = extractDayScheduleAnswer(sourceText, requestedDay);
-    if (dayAnswer) {
-      return `Dạ ${lead} ơi, ngày ${requestedDay} tập trung vào phần: ${dayAnswer}.
-
-Hiểu đơn giản, đây là phần giúp mình chuyển từ học sang triển khai thực tế, để có kế hoạch rõ hơn cho các bước tiếp theo.
-
-${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em nói tiếp ngày ${requestedDay + 1} hoặc tóm tắt cả lộ trình theo từng ngày không ạ?`;
-    }
-  }
-
-  const durationSummary = extractCourseDurationSummary(sourceText);
-  const asksDurationConflict = durationQuestion && /(30|ba muoi|muoi lam|15|chac|khong em|thay)/i.test(normalizeSearchText(query));
-  if (educationContext && asksDurationConflict && (durationSummary.mainDuration || durationSummary.followUpPlan)) {
-    const mainDuration = durationSummary.mainDuration || extractDurationAnswer(sourceText) || "thời lượng chính trong tài liệu";
-    const followUp = durationSummary.followUpPlan || "kế hoạch triển khai tiếp theo";
-    return `Dạ đúng rồi ${lead} ơi, mình đang thấy hai mốc khác nhau nên dễ bị nhầm ạ.
-
-Phần khóa học chính là ${mainDuration}.
-
-Còn ${followUp} là phần kế hoạch/triển khai sau giai đoạn học chính, không phải thời lượng học chính.
-
-Nếu ${lead} hỏi “học bao lâu” thì câu trả lời nên hiểu là ${mainDuration}. Còn nếu hỏi “sau khóa học làm tiếp gì” thì mới nói tới phần ${followUp}.`;
-  }
-
-  const sentences = sourceText
-    .split(/(?<=[.!?。])\s+|\n+/)
-    .map(sentence => sentence.trim())
-    .filter(sentence => sentence.length > 18);
-
-  if (durationQuestion) {
-    const duration = extractDurationAnswer(sourceText);
-    if (duration) {
-      if (!educationContext) {
-        return `Dạ ${lead} ơi, thời gian hiện có trong dữ liệu là ${duration} ạ.
-
-Em hiểu đây là mốc thời gian liên quan đến phần mình đang hỏi. Nếu ${lead} cho em biết thêm trường hợp cụ thể, em sẽ đối chiếu kỹ hơn để tránh nhầm với các mốc khác trong tài liệu nhé.`;
-      }
-      return `Dạ ${lead} ơi, khóa học này kéo dài ${duration} ạ.
-
-Trong thời gian đó, nội dung học đi theo hướng thực chiến để mình từng bước nắm cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc.
-
-${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em nói thêm lộ trình học trong ${duration} này gồm những phần nào không ạ?`;
-    }
-  }
-
-  const selected = sentences
-    .map(sentence => {
-      const lower = sentence.toLowerCase();
-      const score = queryWords.reduce((total, word) => total + (lower.includes(word) ? 1 : 0), 0);
-      return { sentence, score };
-    })
-    .sort((a, b) => b.score - a.score || a.sentence.length - b.sentence.length)
-    .filter(item => item.score > 0)
-    .slice(0, 4)
-    .map(item => item.sentence);
-
-  const basePoints = selected.length > 0 ? selected : sentences.slice(0, 4);
-  const isCourseQuestion = /kh[oó]a|course|h[oọ]c|train|đ[aà]o t[aạ]o/i.test(query);
-  const isPriceQuestion = /gi[aá]|bao nhi[eê]u|ph[ií]|cost|price/i.test(query);
-  const intent = inferSupportIntent(query);
-  const emotion = inferCustomerEmotion(query);
-  const shouldUseCourseComposer = educationContext && (isCourseQuestion || durationQuestion || !!requestedDay);
-
-  if (!shouldUseCourseComposer) {
-    return buildGenericGroundedAnswer(bot, query, sourceText, lead, queryProfile);
-  }
-
-  if (isCourseQuestion && educationContext && !durationQuestion && !requestedDay) {
-    const duration = extractDurationAnswer(sourceText);
-    const naturalPoints = pickNaturalCoursePoints(sourceText, 3);
-    const pointBlock = naturalPoints.length
-      ? naturalPoints.map((point, index) => `${index + 1}. ${point}`).join("\n\n")
-      : [
-        "1. Khóa học đi theo hướng thực chiến, giúp mình biết cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc.",
-        "2. Nội dung được triển khai theo từng bước để mình dễ nắm hướng đi và áp dụng vào mục tiêu thực tế.",
-        "3. Phần học phù hợp với người muốn làm việc rõ quy trình hơn, không chỉ nghe lý thuyết."
-      ].join("\n\n");
-
-    const durationLine = duration ? `\n\nThời lượng khóa học chính là ${duration}.` : "";
-    const nextQuestion = intent === "sales"
-      ? `${lead.charAt(0).toUpperCase() + lead.slice(1)} đang muốn học để làm content, bán hàng hay tự động hóa công việc để em tư vấn đúng hướng hơn ạ?`
-      : `${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em tóm tắt lộ trình theo từng ngày hay nói kỹ phần kết quả sau khi học trước ạ?`;
-
-    return `Dạ ${lead} ơi, khóa học của ${brandName} tập trung vào hướng thực chiến, giúp mình ứng dụng AI vào công việc thay vì chỉ học lý thuyết suông.${durationLine}
-
-Nội dung nổi bật là:
-
-${pointBlock}
-
-${nextQuestion}`;
-  }
-
-  let opening = `Dạ ${lead} ơi, thông tin hiện tại là phần này tập trung vào các điểm chính sau ạ.`;
-  if (intent === "complaint" || emotion === "frustrated" || emotion === "angry") {
-    opening = `Dạ ${lead} ơi, em hiểu vấn đề này có thể làm mình khó chịu. Trường hợp này mình có thể xử lý theo các ý chính sau ạ.`;
-  } else if (isCourseQuestion && educationContext) {
-    opening = `Dạ ${lead} ơi, khóa học của ${brandName} thiên về hướng thực chiến: giúp mình biết cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc hằng ngày, chứ không chỉ học lý thuyết suông.`;
-  } else if (isPriceQuestion) {
-    opening = `Dạ ${lead} ơi, phần giá hoặc chi phí sẽ phụ thuộc vào chương trình/gói đang áp dụng. Em gửi mình các điểm quan trọng trước nha.`;
-  }
-
-  const pointBlock = basePoints
-    .map(humanizeKnowledgePoint)
-    .filter(point => !isInstructionLikeSentence(point))
-    .slice(0, 3)
-    .filter(Boolean)
-    .map((point, index) => `${index + 1}. ${point}`)
-    .join("\n\n");
-  const bodyBlock = pointBlock || "1. Khóa học tập trung vào tư duy triển khai thực tế, giúp mình biến kiến thức thành nội dung, quy trình hoặc hệ thống có thể áp dụng ngay.\n\n2. Phần học đi theo hướng cầm tay chỉ việc, phù hợp với người muốn dùng AI để làm việc nhanh hơn và rõ hướng hơn.";
-
-  const nextStep = intent === "sales"
-    ? `${lead.charAt(0).toUpperCase() + lead.slice(1)} cho em biết mục tiêu chính của mình là học để làm content, bán hàng, xây bot hay tự động hóa công việc để em gợi ý hướng phù hợp nhất ạ?`
-    : intent === "complaint"
-      ? `${lead.charAt(0).toUpperCase() + lead.slice(1)} gửi thêm giúp em tình huống cụ thể mình đang gặp để em hỗ trợ kiểm tra tiếp cho đúng nhé?`
-      : `${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em tư vấn sâu hơn theo hướng nào trước ạ?`;
-
-  return `${opening}
-
-Các phần chính gồm:
-
-${bodyBlock}
-
-Nếu nói ngắn gọn, phần này phù hợp để ${lead} nắm được hướng đi, biết nên bắt đầu từ đâu và có thể áp dụng vào mục tiêu thực tế của mình.
-
-${nextStep}`;
-}
-
 // Tao embedding cho mot chunk (an toan: loi -> bo qua, khong chan luong nap).
 async function attachChunkEmbedding(chunk: KnowledgeChunk): Promise<KnowledgeChunk> {
   const ai = getAIClient();
@@ -3242,253 +2834,58 @@ async function generateRAGAnswer(
 
   // 1. Get knowledge chunks for this bot
   const botChunks = await dbGetChunks(bot.id, knowledgeChunks.filter(c => c.botId === bot.id && c.isActive));
-  const botFAQs = await dbGetFAQs(bot.id, faqList.filter(f => f.botId === bot.id));
-  const queryProfile = buildQueryProfile(query);
-  const detectedIntent = queryProfile.intent;
-  const detectedEmotion = queryProfile.emotion;
-  const durationQuestion = queryProfile.durationQuestion;
-  
-  // 2. Multi-signal retrieval: normalized tokens, phrases, intent boosts, and metadata.
-  const retrievalProfiles = queryProfile.subqueries.map(buildQueryProfile);
-  const matchedChunks = botChunks.map(chunk => {
-    const metadata = `${chunk.category || ""} ${(chunk.tags || []).join(" ")}`;
-    const score = Math.max(...retrievalProfiles.map(profile => scoreTextRetrieval(profile, chunk.title, chunk.content, metadata)));
-    return { chunk, score };
-  })
-  .filter(item => item.score >= 0.8)
-  .sort((a, b) => b.score - a.score)
-  .slice(0, 10);
 
-  // Determine maximum match quality
-  const maxScore = matchedChunks.length > 0 ? matchedChunks[0].score : 0;
-  // Consider match trustworthy only if retrieval has meaningful semantic/token evidence.
-  const isGoodMatch = matchedChunks.length > 0 && maxScore >= (durationQuestion ? 2.5 : 1.2);
-  const activeChunks = isGoodMatch ? matchedChunks : [];
-  const matchedFAQs = botFAQs.map(faq => {
-    const score = Math.max(...retrievalProfiles.map(profile => scoreTextRetrieval(profile, faq.question, faq.answer, faq.category || "faq")));
-    return { faq, score };
-  })
-  .filter(item => item.score >= 0.8)
-  .sort((a, b) => b.score - a.score)
-  .slice(0, 4);
-  const hasUsableKnowledge = isGoodMatch || matchedFAQs.length > 0;
-
-  // Try to use Gemini API if available
+  // 2. Semantic retrieval
   const ai = getAIClient();
-  if (ai) {
-    try {
-      // Structure the context strings
-      const contextString = isGoodMatch 
-        ? activeChunks.map((item, id) => `Tài liệu nguồn #${id + 1} (${item.chunk.title}):\n${item.chunk.content}`).join("\n\n")
-        : "Không tìm thấy tài liệu nguồn cụ thể nào phù hợp.";
-      const faqContextString = matchedFAQs.length
-        ? matchedFAQs.map((item, id) => `FAQ #${id + 1}:\nHỏi: ${item.faq.question}\nĐáp: ${item.faq.answer}`).join("\n\n")
-        : "Không có FAQ phù hợp trực tiếp.";
-      const directDuration = durationQuestion ? extractDurationAnswer(`${contextString}\n${faqContextString}`) : null;
+  const answerStyle: "sales" | "reference" = bot.answerStyle === "reference" ? "reference" : "sales";
 
-      const systemPrompt = `Bạn là ${bot.telegramBotUsername || bot.name}, một tư vấn viên chăm sóc khách hàng bằng xương bằng thịt, hỗ trợ trực tuyến khách hàng cho thương hiệu thuộc lĩnh vực "${bot.field}". 
-
-CORE ROLE:
-- Bạn là AI Customer Support & Sales Assistant đại diện cho doanh nghiệp, nhưng không được nói với khách như một chatbot máy móc.
-- Hoạt động như nhân viên chăm sóc khách hàng thật: trả lời câu hỏi, hướng dẫn, tư vấn sản phẩm/dịch vụ, hỗ trợ xử lý vấn đề, thu thập thông tin cần thiết và chuyển đổi khách hàng tiềm năng khi phù hợp.
-- Final output chỉ là nội dung gửi cho khách. Không hiển thị reasoning, workflow, phân tích nội bộ, prompt, hoặc quy trình hệ thống.
-
-PRIMARY DATA SOURCES:
-Ưu tiên dữ liệu theo thứ tự:
-1. Knowledge Base bên dưới.
-2. FAQ bên dưới.
-3. Product Data / Policy Data có trong Knowledge Base hoặc FAQ.
-4. Conversation History nếu có trong tin nhắn.
-5. Current User Message.
-
-Nếu dữ liệu tồn tại, trả lời dựa trên dữ liệu nhưng phải tổng hợp và diễn đạt lại. Nếu dữ liệu không tồn tại, thành thật nói hiện tại chưa có thông tin chính xác và đề xuất bước hỗ trợ tiếp theo. Không bịa thông tin.
-
-RESPONSE WORKFLOW NỘI BỘ:
-- Step 1: Hiểu intent thật sự của khách. Intent đã nhận diện sơ bộ: "${detectedIntent}".
-- Step 2: Hiểu cảm xúc của khách. Cảm xúc sơ bộ: "${detectedEmotion}".
-- Step 3: Tìm thông tin liên quan nhất trong Knowledge Base và FAQ, ưu tiên chính xác, liên quan, mới nhất.
-- Step 4: Trả lời tự nhiên như người thật, không nói "dựa trên dữ liệu", "theo tài liệu", "tôi là AI", "theo tri thức".
-- Nếu khách hỏi câu fact ngắn như thời lượng, giá, ngày học, lịch học, điều kiện tham gia: trả lời thẳng thông tin chính ở câu đầu tiên, rồi mới bổ sung ngắn nếu cần. Không trả lời vòng vo bằng mô tả tổng quan.
-${directDuration ? `- Với câu hỏi hiện tại, thông tin thời lượng đã xác định là: ${directDuration}. Phải trả lời trực tiếp con số này.` : ""}
-
-SALES ASSISTANT LOGIC:
-- Nếu khách có ý định mua, hỏi giá, hỏi sản phẩm/dịch vụ/khóa học/gói giải pháp, so sánh lựa chọn hoặc hỏi khuyến mãi: hiểu nhu cầu, đề xuất giải pháp phù hợp nhất, giải thích lý do phù hợp, gợi ý bước tiếp theo.
-- Không ép mua, không spam bán hàng, không phóng đại.
-
-LEAD COLLECTION:
-- Nếu thiếu thông tin quan trọng để tư vấn, chỉ hỏi từng bước một. Không hỏi quá nhiều thông tin trong một tin nhắn.
-- Ưu tiên hỏi nhu cầu hoặc mục tiêu trước; chỉ hỏi tên/số điện thoại/email khi cần chuyển tư vấn hoặc chốt bước tiếp theo.
-
-COMPLAINT HANDLING:
-- Nếu khách khó chịu, báo lỗi hoặc khiếu nại: thể hiện thấu hiểu, tập trung xử lý, không tranh luận, không đổ lỗi.
-- Có thể dùng câu như "Mình hiểu vấn đề bạn đang gặp" hoặc "Để mình hỗ trợ kiểm tra ngay" nhưng không lặp máy móc.
-
-UNKNOWN ANSWERS:
-- Nếu không tìm thấy thông tin: không bịa, không suy đoán. Trả lời ngắn gọn rằng hiện tại mình chưa có thông tin chính xác về nội dung này và hỏi thêm thông tin cần thiết để kiểm tra kỹ hơn.
-
-PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
-- Tone giọng chủ đạo: ${bot.tone} (Dựa vào tone này để điều chỉnh cách nói thích hợp).
-- Thể hiện sự nhiệt tình, ấm áp, chu đáo tuyệt đối. 
-- BẮT BUỘC xưng hô "Em" (hoặc từ phù hợp với thương hiệu). Cách gọi khách an toàn hiện tại là "${customerLead}". Nếu cách gọi này là "mình", tuyệt đối không tự ghép thêm tên/emoji/ký hiệu sau chữ anh, chị hoặc anh/chị.
-- Chỉ gọi theo tên khi tên người dùng đã được lọc thành chữ hợp lệ. Không bao giờ gọi khách bằng emoji, sticker, ký hiệu trang trí, username kỹ thuật, ID, hoặc token không giống tên người thật.
-- Trạng thái phiên hiện tại: ${isFirstInteraction ? "đây là lượt trả lời đầu tiên của bot trong phiên, có thể chào ngắn một lần nếu tự nhiên." : "bot đã từng trả lời trong phiên này, tuyệt đối KHÔNG chào lại, không mở đầu bằng 'Dạ em chào', 'Xin chào', 'Em chào', hoặc câu chào tương tự."}
-- Luôn sử dụng từ ngữ nói tự nhiên, trôi chảy, có từ kính ngữ cảm thán nhẹ nhàng ở đầu và cuối câu. Nếu không phải lượt đầu, mở thẳng vào câu trả lời bằng "Dạ", "Vâng ạ", hoặc thông tin chính, không dùng câu chào lại.
-- Tránh tuyệt đối lối hành văn rập khuôn, copy nguyên văn tài liệu nguồn, hoặc phản hồi cộc lốc như một công cụ tra cứu. Hãy diễn đạt lại thông tin một cách mượt mà, logic và sinh động như một chuyên viên giàu kinh nghiệm.
-- Trước khi trả lời, hãy tự phân tích tài liệu trong đầu: khách đang hỏi gì, tài liệu có những ý nào liên quan, ý nào quan trọng nhất, rồi mới tổng hợp thành câu trả lời mới bằng lời của bạn.
-- Tuyệt đối không trích xuất nguyên văn, không đưa tiêu đề chunk, mã mục, tên mục, cụm "Mục 27", "Tài liệu nguồn", "theo tri thức", "danh mục huấn luyện", hoặc bất kỳ dòng nào giống copy từ tài liệu. Khách chỉ cần nghe lời tư vấn đã được hiểu và diễn giải lại.
-- Nếu tài liệu là ghi chú sản phẩm/dịch vụ/khóa học dạng gạch đầu dòng, hãy chuyển thành lời tư vấn tự nhiên: nội dung đó giúp được gì, phù hợp với ai, điểm quan trọng là gì, khách nên làm bước tiếp theo nào.
-- Ở cuối câu trả lời, luôn hỏi thêm một câu mở để giữ tương tác ấm áp (Ví dụ: "Dạ không biết thông tin trên đã giúp ích được cho ${customerLead} chưa ạ?" hoặc "${customerLead} cần em hỗ trợ giải đáp thêm thông tin gì nữa không cứ bảo em nha!").
-
-ĐỊNH DẠNG VĂN BẢN & BIỂU TƯỢNG (BẮT BUỘC):
-- TUYỆT ĐỐI KHÔNG dùng bất kỳ dấu hoa thị nào (* hoặc **) hoặc bất kỳ ký tự định dạng markdown nào để bôi đậm, in nghiêng hoặc đánh dấu trong văn bản trả lời. Hãy viết chữ ở dạng thuần văn bản, tự nhiên, không chứa các ký tự * hoặc **.
-- HẠN CHẾ TỐI ĐA việc sử dụng emoji (biểu tượng cảm xúc). Không dùng quá 1 emoji trong toàn bộ câu trả lời, hoặc tốt nhất là không dùng emoji nào để đảm bảo tính chuyên nghiệp và sạch sẽ cho văn bản.
-- BẮT BUỘC PHẢI CHỦ ĐỘNG XUỐNG DÒNG VÀ TẠO DÒNG TRỐNG (ngắt đoạn bằng việc xuống dòng 2 lần, tức là chèn \n\n) để tạo khoảng thờ rộng rãi, thông thoáng cho tin nhắn. Mỗi đoạn văn chỉ viết siêu ngắn, gồm khoảng 1 đến 2 câu ngắn.
-- Khi liệt kê các ý (dùng gạch đầu dòng - hoặc số thứ tự 1, 2, 3), BẮT BUỘC phải xuống dòng thực tế cho mỗi ý, tuyệt đối không viết dính liền tiếp nối nhau. Giữa các gạch đầu dòng liệt kê, hãy phân cách bằng một dòng trống hẳn hoi để nhìn giao diện tin nhắn thông thoáng, gọn gàng, không bị rối mắt.
-
-Ví dụ cấu trúc tin nhắn đạt chuẩn:
-${isFirstInteraction ? `Dạ em chào ${customerLead} ạ! Rất vui được đồng hành cùng ${customerLead} ngày hôm nay nha.` : `Dạ ${customerLead} ơi, phần này em trả lời ngắn gọn như sau ạ.`}
-
-Hiện tại bên em đang có phần thông tin phù hợp với nhu cầu của ${customerLead}:
-
-- Giúp ${customerLead} nắm nhanh điểm chính và hiểu phần nào phù hợp với nhu cầu hiện tại.
-
-- Nếu cần triển khai tiếp, em có thể hỏi thêm một thông tin quan trọng rồi tư vấn bước tiếp theo cho sát hơn.
-
-Dạ không biết thông tin trên đã rõ ràng chưa hay ${customerLead} cần em hỗ trợ giải đáp thêm phần nào khác nữa không ạ?
-
-Ngôn ngữ trả lời bắt buộc: ${bot.language === 'vi' ? 'Tiếng Việt' : 'English'}.
-
-Nguyên tắc bắt buộc:
-1. Bạn CHỈ được phép tư vấn dựa trên thông tin thực tế từ "TÀI LIỆU NGUỒN" dưới đây. 
-2. Nếu câu hỏi không có thông tin rõ ràng hoặc không được đề cập trong TÀI LIỆU NGUỒN, hoặc tài liệu nguồn không chứa câu trả lời trực tiếp cho câu hỏi, bạn TUYỆT ĐỐI không được tự suy diễn, bịa ra thông tin, hay bám víu trích xuất mù quáng thông tin tài liệu không liên quan. 
-Thay vào đó, bạn phải đưa ra phản hồi không biết thông minh: xin lỗi lịch sự, nêu rõ thông tin này tạm thời chưa được cập nhật đầy đủ trong tài liệu tri thức đào tạo của em, tuy nhiên em đã tự động lưu lại và ghi nhận câu hỏi này để báo cáo ban quản trị tiến hành cập nhật thêm vào tri thức hệ thống cho em sớm nhất. Sau đó khuyên họ liên hệ hotline/Zalo của bên em để được tư vấn kĩ hơn.
-3. Bán hàng & Báo giá: ${bot.allowPricing ? 'CHO PHÉP cung cấp đơn giá, chính sách khuyến mãi khuyến nghị có ghi trong tài liệu.' : 'Tuyệt đối KHÔNG ĐƯỢC báo giá lẻ, khéo léo nói rằng giá sản phẩm có thể thay đổi tùy chương trình và hướng dẫn khách liên hệ hotline/Zalo để được báo giá chính xác nhất.'}
-4. Tư vấn kỹ thuật sản phẩm: ${bot.allowProductConsulting ? 'CHO PHÉP giải thích chi tiết, cặn kẽ về sản phẩm của thương hiệu.' : 'Chỉ giới thiệu tổng quan, không đi quá sâu vào các thông số kỹ thuật phức tạp.'}
-5. Các chủ đề bị cấm trả lời tuyệt đối: "${bot.restrictedTopics}". Nếu khách vi phạm hoặc hỏi lạc đề này, hãy khéo léo hướng họ về sản phẩm và dịch vụ cốt lõi của thương hiệu một cách tế nhị.
-
-TÀI LIỆU NGUỒN CHI TIẾT:
-${contextString}
-
-FAQ LIÊN QUAN:
-${faqContextString}
-
-Thông tin liên hệ thêm khi cần thiết:
-- SĐT: ${bot.fallbackPhone}
-- Web: ${bot.fallbackWebsite}
-- Zalo: ${bot.fallbackZalo}
-
-Hãy trình bày bố cục thông tin đẹp mắt, rõ ràng, dễ đọc, ngắt dòng khoa học, chuẩn phong cách nhắn tin trên Telegram.`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: query,
-        config: {
-          systemInstruction: systemPrompt,
-          temperature: 0.3, // Low temperature for high precision referencing
-        }
-      });
-
-      const responseText = response.text || "";
-      const isFallback = !hasUsableKnowledge || 
-                         responseText.includes(bot.fallbackMessage.substring(0, 15)) || 
-                         responseText.toLowerCase().includes("em chưa có thông tin") || 
-                         responseText.toLowerCase().includes("chưa có sẵn trong dữ liệu") ||
-                         responseText.toLowerCase().includes("không tìm thấy tài liệu") ||
-                         responseText.toLowerCase().includes("ghi nhận");
-
-      if (isFallback) {
-        // Report unanswered question to update knowledge base
-        const cleanQuery = query.trim();
-        if (cleanQuery && cleanQuery.length > 2) {
-          const existingQuestion = analytics.unansweredQuestions.find(q => q.question.toLowerCase() === cleanQuery.toLowerCase());
-          if (existingQuestion) {
-            existingQuestion.count += 1;
-            existingQuestion.timestamp = new Date().toISOString();
-          } else {
-            analytics.unansweredQuestions.unshift({
-              question: cleanQuery,
-              count: 1,
-              timestamp: new Date().toISOString()
-            });
-          }
-        }
-      }
-
-      return {
-        text: postProcessBotReply(responseText, replyOptions),
-        sources: [
-          ...(isGoodMatch ? activeChunks.map(m => ({ id: m.chunk.id, name: m.chunk.title, score: Math.min(0.99, 0.4 + m.score) })) : []),
-          ...matchedFAQs.map(m => ({ id: m.faq.id, name: `FAQ: ${m.faq.question}`, score: Math.min(0.99, 0.4 + m.score) }))
-        ],
-        fallbackTriggered: isFallback
-      };
-    } catch (err: any) {
-      console.error("Gemini API Error in RAG:", err);
-      // Fallback in case of call limits or network issue
-    }
-  }
-
-  // --- LOCAL FALLBACK SIMULATOR (In case AI is offline / credential not configured) ---
-  console.log("Using Local Simulation Engine for Query: ", query);
-  
-  if (!isGoodMatch && matchedFAQs.length > 0) {
-    const lead = getSafeCustomerLead(pronoun, targetName);
-    const topFaq = matchedFAQs[0].faq;
+  if (!ai) {
+    // No API key -> safe fallback
     return {
-      text: postProcessBotReply(`Dạ ${lead} ơi, thông tin hiện tại là ${cleanKnowledgeText(topFaq.answer)}
-
-${lead.charAt(0).toUpperCase() + lead.slice(1)} cần em giải thích kỹ hơn phần nào không ạ?`, replyOptions),
-      sources: matchedFAQs.map(m => ({ id: m.faq.id, name: `FAQ: ${m.faq.question}`, score: Math.min(0.98, 0.5 + m.score) })),
-      fallbackTriggered: false
-    };
-  }
-
-  if (!isGoodMatch) {
-    // Report unanswered question to update knowledge base
-    const cleanQuery = query.trim();
-    if (cleanQuery && cleanQuery.length > 2) {
-      const existingQuestion = analytics.unansweredQuestions.find(q => q.question.toLowerCase() === cleanQuery.toLowerCase());
-      if (existingQuestion) {
-        existingQuestion.count += 1;
-        existingQuestion.timestamp = new Date().toISOString();
-      } else {
-        analytics.unansweredQuestions.unshift({
-          question: cleanQuery,
-          count: 1,
-          timestamp: new Date().toISOString()
-        });
-      }
-    }
-
-    let smartFallbackText = "";
-    if (bot.tone === "friendly") {
-      const fallbackOpening = isFirstInteraction
-        ? `Dạ em chào ${customerLead} ạ!`
-        : `Dạ ${customerLead} ơi,`;
-      smartFallbackText = `${fallbackOpening} Hiện tại thông tin chi tiết về câu hỏi "${query}" chưa có sẵn hoàn chỉnh trong dữ liệu tri thức của em rồi nha. Em đã ghi nhận câu hỏi này để gửi cho ban quản trị tiến hành cập nhật thêm vào tri thức hệ thống cho em sớm nhất ạ.
-
-${customerLead.charAt(0).toUpperCase() + customerLead.slice(1)} cứ yên tâm nhé! Lúc này, nếu cần phản hồi hỗ trợ khẩn cấp ngay, ${customerLead} liên lạc trực tiếp hotline SĐT ${bot.fallbackPhone} hoặc qua Zalo ${bot.fallbackZalo} giúp em nha! ❤️`;
-    } else {
-      smartFallbackText = `Kính gửi ${customerLead}, hiện tại thông tin về câu hỏi "${query}" chưa có sẵn đầy đủ trong danh mục đào tạo của hệ thống. Chúng tôi đã ghi nhận nội dung câu hỏi để báo cáo ban quản trị tiến hành cập nhật thêm thông tin vào tri thức hệ thống sớm nhất.
-
-Để nhận thông tin hỗ trợ chính xác lập tiếp, kính mời ${customerLead} liên hệ trực tiếp qua Hotline ${bot.fallbackPhone} hoặc kết nối tài khoản Zalo ${bot.fallbackZalo} để chuyên viên chăm sóc ngay ạ.`;
-    }
-
-    return {
-      text: postProcessBotReply(smartFallbackText, replyOptions),
+      text: postProcessBotReply(bot.fallbackMessage || "Dạ em xin phép kết nối nhân viên hỗ trợ mình ngay ạ.", replyOptions),
       sources: [],
-      fallbackTriggered: true
+      fallbackTriggered: true,
     };
   }
 
-  // Auto-compose response string locally based on matched chunk data
-  const replyText = buildNaturalFallbackAnswer(bot, query, activeChunks, pronoun, targetName, queryProfile);
+  let topChunks: Array<{ chunk: KnowledgeChunk; score: number }> = [];
+  try {
+    const qVec = await embedText(ai, query);
+    topChunks = rankBySimilarity(qVec, botChunks, TOP_K);
+  } catch (e: any) {
+    console.warn("[RAG] retrieve failed:", e?.message || e);
+  }
 
-  return {
-    text: postProcessBotReply(replyText, replyOptions),
-    sources: activeChunks.map(m => ({ id: m.chunk.id, name: m.chunk.title, score: Math.min(0.98, 0.5 + m.score) })),
-    fallbackTriggered: false
-  };
+  const maxScore = topChunks[0]?.score ?? 0;
+  const grounded = maxScore >= SIM_THRESHOLD ? topChunks : [];
+
+  // 3. Insufficient evidence -> low-conf synthesis + fallback flag
+  if (grounded.length === 0) {
+    const lowConf = await synthesizeAnswer(ai, bot, query, [], { answerStyle })
+      .catch(() => bot.fallbackMessage || "Dạ thông tin này em chưa có trong tài liệu, em xin phép chuyển nhân viên hỗ trợ mình ạ.");
+    return {
+      text: postProcessBotReply(lowConf, replyOptions),
+      sources: [],
+      fallbackTriggered: true,
+    };
+  }
+
+  // 4. Grounded synthesis
+  try {
+    const answer = await synthesizeAnswer(ai, bot, query, grounded, { answerStyle });
+    return {
+      text: postProcessBotReply(answer, replyOptions),
+      sources: grounded.map(g => ({ id: g.chunk.id, name: g.chunk.title, score: Math.min(0.99, g.score) })),
+      fallbackTriggered: false,
+    };
+  } catch (e: any) {
+    console.error("[RAG] synthesis failed:", e?.message || e);
+    return {
+      text: postProcessBotReply(bot.fallbackMessage || "Dạ em xin phép kết nối nhân viên hỗ trợ mình ngay ạ.", replyOptions),
+      sources: [],
+      fallbackTriggered: true,
+    };
+  }
 }
 
 // REST Endpoint for Playground test chat
