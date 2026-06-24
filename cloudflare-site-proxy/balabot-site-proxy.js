@@ -1,5 +1,5 @@
 const PAGES_ORIGIN = "https://aaa-balabot.pages.dev";
-const BACKEND_ORIGIN = "https://balabot-server.onrender.com";
+const BACKEND_ORIGIN = "https://aaabalabot-production.up.railway.app";
 
 function withCors(response, isHtml = false) {
   const headers = new Headers(response.headers);
