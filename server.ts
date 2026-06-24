@@ -675,7 +675,14 @@ app.delete("/api/admin/customers/:id", (req, res) => {
 app.get("/api/supabase/config", async (req, res) => {
   const config = getSupabaseConfig();
   const status = await testConnection();
-  res.json({ config, status });
+  // SECURITY: never expose the raw Supabase key (service_role) to anonymous/
+  // non-owner callers. Only the owner (authenticated via x-balabot-user-email)
+  // gets the raw key to pre-fill the admin panel; everyone else gets a masked view.
+  const isOwner = getRequestUserEmail(req) === ADMIN_EMAIL;
+  const safeConfig = isOwner
+    ? config
+    : { url: config.url, key: "", keyMasked: config.keyMasked, isConfigured: config.isConfigured };
+  res.json({ config: safeConfig, status });
 });
 
 app.post("/api/supabase/config", async (req, res) => {
