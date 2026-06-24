@@ -54,7 +54,7 @@ import {
 
 // Helper for type compatibility (since we'll import types in types.ts but write server)
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const processedTelegramUpdateIds = new Set<string>();
 
 function getPublicBaseUrl(req: express.Request, explicitOrigin?: string) {
