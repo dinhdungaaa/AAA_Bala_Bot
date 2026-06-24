@@ -2,7 +2,9 @@
 # Chay duoc tren bat ky host container nao: Railway, Fly.io, Koyeb, VPS (docker).
 # Listener zca-js can tien trinh Node luon-bat -> dung host khong "ngu".
 
-FROM node:20-slim
+# Node 22+ required: @supabase/supabase-js needs native WebSocket (createClient
+# throws on Node 20 without the "ws" package). Node 22 has global WebSocket.
+FROM node:22-slim
 
 WORKDIR /app
 

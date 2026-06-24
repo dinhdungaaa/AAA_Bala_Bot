@@ -5,9 +5,6 @@ import { AsyncLocalStorage } from 'async_hooks';
 let _supabaseClient: SupabaseClient | null = null;
 const requestConfigStorage = new AsyncLocalStorage<{ url: string; key: string }>();
 const scopedClients = new Map<string, SupabaseClient>();
-// TEMP DIAGNOSTIC: capture why the global Supabase client fails to init.
-let lastSupabaseInitError: string | null = null;
-export function getLastSupabaseInitError() { return lastSupabaseInitError; }
 
 // Keep dynamic configurations in memory if the user overrides them from UI
 let dynamicConfig = {
@@ -61,7 +58,6 @@ export function getSupabaseClient(): SupabaseClient | null {
   if (_supabaseClient) return _supabaseClient;
   const config = getSupabaseConfig();
   if (!config.url || !config.key) {
-    lastSupabaseInitError = `no-config-at-init url=${!!config.url} key=${!!config.key}`;
     return null;
   }
   try {
@@ -70,10 +66,8 @@ export function getSupabaseClient(): SupabaseClient | null {
         persistSession: false
       }
     });
-    lastSupabaseInitError = null;
     return _supabaseClient;
   } catch (e: any) {
-    lastSupabaseInitError = `createClient threw: ${e?.message || String(e)}`;
     console.error("Failed to initialize Supabase client:", e);
     return null;
   }
@@ -87,7 +81,7 @@ export async function testConnection(): Promise<{
 }> {
   const client = getSupabaseClient();
   if (!client) {
-    return { connected: false, message: `Chưa cấu hình SUPABASE_URL hoặc API Key. [diag: ${lastSupabaseInitError || "client-null"}]`, missingTables: [] };
+    return { connected: false, message: "Chưa cấu hình SUPABASE_URL hoặc API Key.", missingTables: [] };
   }
 
   const tablesToCheck = ['bots', 'knowledge_sources', 'knowledge_chunks', 'chat_sessions', 'faq_items'];
