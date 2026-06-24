@@ -1,6 +1,6 @@
-// Model embedding re/mien phi cua Gemini.
-export const EMBED_MODEL = "text-embedding-004";
-// Model sinh: flash re. VERIFY id hop le khi implement (xem Task 5 Step 0).
+// Model embedding cua Gemini (verified OK: gemini-embedding-001, 3072 dims).
+export const EMBED_MODEL = "gemini-embedding-001";
+// Model sinh (verified OK).
 export const GEN_MODEL = "gemini-2.5-flash";
 // So doan truy hoi toi da dua vao prompt.
 export const TOP_K = 5;
