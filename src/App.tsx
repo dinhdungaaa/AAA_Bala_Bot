@@ -2226,6 +2226,18 @@ export default function App() {
                       </select>
                     </div>
                   </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Phong cách trả lời (RAG)</label>
+                    <select
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={activeBot.answerStyle || 'sales'}
+                      onChange={(e) => handleUpdateBotSettings({ answerStyle: e.target.value as 'sales' | 'reference' })}
+                    >
+                      <option value="sales">Bán hàng (thân thiện, có CTA)</option>
+                      <option value="reference">Tra cứu (trung lập, súc tích)</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
