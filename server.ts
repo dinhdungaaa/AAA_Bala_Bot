@@ -4,6 +4,7 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { embedText, embedBatch, hashText } from "./rag/embeddings.js";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult } from "./src/types.js";
 import {
   getSupabaseConfig,
@@ -981,6 +982,7 @@ Nội dung chính của tài liệu ${baseName}:
 
     for (const newChunk of generatedChunks) {
       knowledgeChunks.push(newChunk);
+      await attachChunkEmbedding(newChunk);
       await dbSaveChunk(newChunk);
     }
 
@@ -1200,6 +1202,7 @@ app.post("/api/bots/:botId/sources", async (req, res) => {
 
       for (const newChunk of generatedChunks) {
         knowledgeChunks.push(newChunk);
+        await attachChunkEmbedding(newChunk);
         await dbSaveChunk(newChunk);
       }
     } catch (bgErr) {
@@ -1332,6 +1335,7 @@ app.post("/api/bots/:botId/faqs", async (req, res) => {
     isActive: true
   };
   knowledgeChunks.push(newChunk);
+  await attachChunkEmbedding(newChunk);
   await dbSaveChunk(newChunk);
 
   res.status(201).json(newFaq);
@@ -3189,6 +3193,22 @@ Nếu nói ngắn gọn, phần này phù hợp để ${lead} nắm được hư
 ${nextStep}`;
 }
 
+// Tao embedding cho mot chunk (an toan: loi -> bo qua, khong chan luong nap).
+async function attachChunkEmbedding(chunk: KnowledgeChunk): Promise<KnowledgeChunk> {
+  const ai = getAIClient();
+  if (!ai) return chunk;
+  const text = `${chunk.title}\n${chunk.content}`.trim();
+  const h = hashText(text);
+  if (chunk.embedding && chunk.embeddingHash === h) return chunk; // khong doi -> bo qua
+  try {
+    chunk.embedding = await embedText(ai, text);
+    chunk.embeddingHash = h;
+  } catch (e: any) {
+    console.warn("[RAG] embed chunk failed:", e?.message || e);
+  }
+  return chunk;
+}
+
 // Core RAG matching & AI generation call
 async function generateRAGAnswer(
   bot: BotConfig, 
@@ -3492,6 +3512,29 @@ app.post("/api/bots/:botId/playgroundChat", async (req, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+app.post("/api/rag/reembed", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const ai = getAIClient();
+  if (!ai) return res.status(400).json({ error: "GEMINI_API_KEY chưa cấu hình" });
+  const botId = (req.body?.botId as string) || "";
+  let all = await dbGetChunks(botId, knowledgeChunks.filter(c => !botId || c.botId === botId));
+  all = all.filter(c => c.isActive);
+  let done = 0, skipped = 0, failed = 0;
+  for (const c of all) {
+    const text = `${c.title}\n${c.content}`.trim();
+    const h = hashText(text);
+    if (c.embedding && c.embeddingHash === h) { skipped++; continue; }
+    try {
+      const vec = await embedText(ai, text);
+      await dbUpdateChunk(c.id, { embedding: vec, embeddingHash: h } as any);
+      const mem = knowledgeChunks.find(x => x.id === c.id);
+      if (mem) { mem.embedding = vec; mem.embeddingHash = h; }
+      done++;
+    } catch (e: any) { failed++; console.warn("[RAG reembed] failed chunk", c.id, e?.message); }
+  }
+  res.json({ total: all.length, done, skipped, failed });
 });
 
 app.post("/api/bots/:botId/rag-eval", async (req, res) => {
