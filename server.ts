@@ -2981,6 +2981,23 @@ app.post("/api/bots/:botId/rag-eval", async (req, res) => {
   });
 });
 
+app.post("/api/rag/eval", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const cases: Array<{ botId: string; question: string; mustInclude?: string[] }> = req.body?.cases || [];
+  const allBots = await dbGetBots(bots);
+  const results = [];
+  for (const c of cases) {
+    const bot = allBots.find(b => b.id === c.botId);
+    if (!bot) { results.push({ ...c, ok: false, reason: "bot_not_found" }); continue; }
+    const ans = await generateRAGAnswer(bot, c.question, { fullName: "Eval" }, { shouldGreet: false, recentMessages: [] });
+    const text = (ans.text || "").toLowerCase();
+    const hit = (c.mustInclude || []).every(s => text.includes(s.toLowerCase()));
+    results.push({ question: c.question, ok: hit, fallback: ans.fallbackTriggered, reply: ans.text, sources: ans.sources?.length || 0 });
+  }
+  const passed = results.filter(r => r.ok).length;
+  res.json({ total: results.length, passed, results });
+});
+
 function verifyExternalApiSecret(req: express.Request) {
   const configuredSecret = process.env.BOTPRESS_API_SECRET;
   if (!configuredSecret) return true;
