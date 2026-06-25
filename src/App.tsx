@@ -110,7 +110,7 @@ export default function App() {
   const [freePdfTraining, setFreePdfTraining] = useState<boolean>(true);
   const [freeRealtimeTakeover, setFreeRealtimeTakeover] = useState<boolean>(true);
   const [freeAnalytics, setFreeAnalytics] = useState<boolean>(true);
-  const [customPlanNotes, setCustomPlanNotes] = useState<string>("Đặc quyền cam kết: Miễn phí trọn đời tối đa cho các đại lý bán sỉ nông sản sạch Việt Nam.");
+  const [customPlanNotes, setCustomPlanNotes] = useState<string>("Đặc quyền cam kết: Ưu đãi trọn đời dành cho các đối tác doanh nghiệp triển khai quy mô lớn.");
 
   // States for user subscription management/simulator
   const [simulatedCustomers, setSimulatedCustomers] = useState<SaasCustomer[]>([
@@ -208,7 +208,7 @@ export default function App() {
 
   // Playground States
   const [playgroundMessages, setPlaygroundMessages] = useState<Message[]>([
-    { id: 'p1', sender: 'bot', username: 'BalaBot', text: 'Xin chào! Em đã nạp dữ liệu huấn luyện của doanh nghiệp. Anh/chị có thể đặt câu hỏi thử nghiệm để xem em phản hồi theo nguồn lưu trữ như thế nào nhé! 🌟', timestamp: new Date().toISOString() }
+    { id: 'p1', sender: 'bot', username: 'BalaBot', text: 'Xin chào! Trợ lý đã nạp xong dữ liệu tri thức của doanh nghiệp. Quý khách có thể đặt câu hỏi thử nghiệm để kiểm tra cách trợ lý phản hồi dựa trên nguồn tài liệu.', timestamp: new Date().toISOString() }
   ]);
   const [playgroundInput, setPlaygroundInput] = useState('');
   const [isPlaygroundTyping, setIsPlaygroundTyping] = useState(false);
@@ -281,7 +281,7 @@ export default function App() {
   };
 
   // Telegram incoming client simulator
-  const [simMessageText, setSimMessageText] = useState('Bên mình súp lơ xanh chuẩn VietGAP hôm nay giá bao nhiêu á shop ơi?');
+  const [simMessageText, setSimMessageText] = useState('Cho tôi hỏi sản phẩm/dịch vụ bên mình hiện báo giá như thế nào ạ?');
   const [isSimulatingMessage, setIsSimulatingMessage] = useState(false);
   const [simUserFullName, setSimUserFullName] = useState('Quốc Anh Bùi');
   const [simUserUsername, setSimUserUsername] = useState('quoc_anh_9x');
@@ -691,7 +691,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          alert('Đã xóa tập tin khỏi Supabase Storage thành công! ✨');
+          alert('Đã xóa tập tin khỏi Supabase Storage thành công.');
           fetchSbStorageFiles();
         } else {
           alert('Không thể xóa tập tin.');
@@ -804,8 +804,8 @@ export default function App() {
         }
 
         alert(sbAuthMode === 'signup' 
-          ? 'Đăng ký tài khoản hệ thống Supabase Auth thành công! Bạn có thể sử dụng tài khoản vừa tạo để đăng nhập. 🎉' 
-          : 'Đăng nhập vào hệ thống Supabase Auth thành công! Khóa phiên đã cài đặt. 🔑'
+          ? 'Đăng ký tài khoản Supabase Auth thành công. Bạn có thể dùng tài khoản vừa tạo để đăng nhập.'
+          : 'Đăng nhập hệ thống Supabase Auth thành công. Khóa phiên đã được cài đặt.'
         );
         setSbAuthEmail('');
         setSbAuthPassword('');
@@ -813,7 +813,7 @@ export default function App() {
       } else {
         let errMsg = data.error || 'Có lỗi xảy ra trong quá trình xác thực.';
         if (errMsg.toLowerCase().includes('email not confirmed')) {
-          errMsg = '⚠️ Email chưa được xác nhận! Vui lòng kiểm tra hộp thư đến (và mục Spam) của email ledinhdung752589@gmail.com để nhấp vào liên kết xác nhận từ Supabase của bạn. \n\n💡 Mẹo cấu hình: Bạn có thể truy cập vào Supabase Dashboard của dự án -> Authentication -> Providers -> Email, sau đó tắt (uncheck) mục "Confirm email" rồi lưu lại. Khi đó, tài khoản sẽ đăng nhập được ngay lập tức mà không cần xác nhận qua Email!';
+          errMsg = 'Tài khoản chưa được xác nhận email. Hệ thống sẽ tự động xác nhận trong lần đăng nhập tiếp theo — vui lòng thử đăng nhập lại. Nếu vẫn lỗi, liên hệ quản trị viên để được hỗ trợ.';
         }
         setSbAuthError(errMsg);
       }
@@ -829,7 +829,7 @@ export default function App() {
     localStorage.removeItem("sbUser");
     localStorage.removeItem("sbUrl");
     localStorage.removeItem("sbKey");
-    alert('Đăng xuất tài khoản Supabase Auth thành công. 👋');
+    alert('Đăng xuất tài khoản Supabase Auth thành công.');
   };
 
   const handleSaveSupabaseConfig = async (e: React.FormEvent) => {
@@ -863,7 +863,7 @@ export default function App() {
       const data = await res.json();
       setSbSyncResult(data);
       if (data.success) {
-        alert('Đồng bộ dữ liệu mẫu lên database Supabase thành công! ✨');
+        alert('Đồng bộ dữ liệu lên database Supabase thành công.');
         // reload bots if synced
         const botUrl = sbUser?.id ? `/api/bots?userId=${sbUser.id}` : '/api/bots';
         fetch(botUrl)
@@ -963,8 +963,8 @@ export default function App() {
           fileType = selectedFile.type;
           fileDataStr = await fileToBase64(selectedFile);
         } else {
-          // default demo content
-          const textContent = `BẢNG GIÁ SẢN PHẨM KHÁCH HÀNG THƯƠNG MAI VÀ BẢO HÀNH CHUYÊN SÂU:\n- Giao hàng hỏa tốc trong 2 tiếng.\n- Súp lơ xanh organic VietGAP đạt dinh dưỡng tăng cường: Giá 55.000đ/kg.\n- Toàn bộ rau sạch đóng bọc PE kín được vận chuyển giữ vệ sinh tuyệt đối.\n- SĐT đổi trả khiếu nại chất lượng: 0987654321 trong ngày.`;
+          // Nội dung mẫu trung lập (khi người dùng chưa chọn tệp)
+          const textContent = `TÀI LIỆU TRI THỨC MẪU – CHÍNH SÁCH & DỊCH VỤ:\n- Thời gian phản hồi hỗ trợ: trong vòng 24 giờ làm việc.\n- Sản phẩm/Dịch vụ tiêu chuẩn: báo giá theo từng gói, vui lòng liên hệ để nhận tư vấn chi tiết.\n- Chính sách bảo hành/đổi trả: áp dụng theo quy định công bố trên hợp đồng dịch vụ.\n- Kênh liên hệ hỗ trợ: hotline và email chăm sóc khách hàng của doanh nghiệp.`;
           fileDataStr = btoa(unescape(encodeURIComponent(textContent)));
         }
 
@@ -1308,7 +1308,7 @@ export default function App() {
                   {/* User Message */}
                   <div className="flex flex-col items-end space-y-1">
                     <div className="bg-slate-800 text-slate-100 p-3 rounded-2xl rounded-tr-none max-w-[85%]">
-                      Shop ơi súp lơ xanh chuẩn VietGAP hôm nay nhiêu thế? Bên mình ship nhanh không?
+                      Chào shop, tôi muốn tìm hiểu báo giá và thời gian giao của gói dịch vụ tiêu chuẩn ạ?
                     </div>
                     <span className="text-[10px] text-slate-500 pr-1">14:02 · Khách hàng</span>
                   </div>
@@ -1316,14 +1316,14 @@ export default function App() {
                   {/* AI Response */}
                   <div className="flex flex-col items-start space-y-1">
                     <div className="bg-emerald-950/60 border border-emerald-500/20 text-slate-200 p-3 rounded-2xl rounded-tl-none max-w-[85%] leading-relaxed">
-                      Dạ em chào anh/chị ạ! Hôm nay súp lơ xanh VietGAP bên AAA Farm vẫn giữ giá cực tốt 45.000đ/kg tươi ngon vừa cắt tại vườn nha. 🥦
+                      Dạ kính chào Quý khách. Gói dịch vụ tiêu chuẩn hiện có mức giá ưu đãi, đã bao gồm hỗ trợ triển khai theo nhu cầu của doanh nghiệp.
                       <br /><br />
-                      Bên em ship cực nhanh trong 2H nội thành HCM để đảm bảo rau luôn xanh non nhất ạ. Anh/chị lấy mấy kg để em lên đơn giao ngay nhé? ❤️
+                      Thời gian phản hồi trong vòng 24 giờ làm việc. Quý khách vui lòng cho biết quy mô sử dụng để bộ phận tư vấn báo giá chi tiết ạ.
                     </div>
                     <div className="flex items-center gap-2 text-[10px] text-slate-500 pl-1">
                       <span>14:02 · Trực Tuyến AI</span>
                       <span className="bg-emerald-950/80 text-emerald-400 px-1.5 py-0.2 rounded border border-emerald-500/30 text-[9px] font-mono">
-                        Khớp tri thức: Bảng_Gia_VietGAP.pdf
+                        Khớp tri thức: Bang_Gia_Dich_Vu.pdf
                       </span>
                     </div>
                   </div>
@@ -1572,7 +1572,7 @@ export default function App() {
 
             <div className="pt-6 border-t border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-4">
               <div className="text-xs text-slate-400">
-                🚀 Sẵn sàng đưa dịch vụ chăm sóc khách hàng của bạn lên một tầm cao mới hoàn toàn tự động?
+                Sẵn sàng đưa dịch vụ chăm sóc khách hàng của bạn lên một tầm cao mới hoàn toàn tự động?
               </div>
               <a
                 href="#auth-portal"
@@ -1964,13 +1964,13 @@ export default function App() {
                 <Bot className="w-8 h-8 animate-pulse" />
               </div>
               <div className="space-y-2">
-                <h3 className="text-xl font-extrabold text-slate-800 tracking-tight">Chào mừng bạn gia nhập AAA BalaBot! 🚀</h3>
+                <h3 className="text-xl font-extrabold text-slate-800 tracking-tight">Chào mừng bạn đến với AAA BalaBot</h3>
                 <p className="text-sm text-slate-500 leading-relaxed font-normal">
                   Tài khoản mới đăng nhập của bạn hiện chưa có Bot nào hoạt động. Chúng tôi đã chuẩn bị sẵn một không gian làm sạch trực tuyến để bạn tự tay huấn luyện và kết nối Bot của riêng mình.
                 </p>
               </div>
               <div className="bg-slate-50 p-5 rounded-2xl text-left border border-slate-200/60 border-dashed space-y-3">
-                <span className="text-xs font-bold text-slate-705 block uppercase tracking-wider">💡 Các bước để bắt đầu:</span>
+                <span className="text-xs font-bold text-slate-705 block uppercase tracking-wider">Các bước để bắt đầu:</span>
                 <ul className="text-xs text-slate-650 list-decimal list-inside space-y-2 leading-relaxed">
                   <li>Nhấp nút <strong className="text-blue-600">"Tạo Bot Mới"</strong> ở góc trên bên phải</li>
                   <li>Cấu hình thông tin cơ bản và chọn tone giọng phù hợp</li>
@@ -2389,7 +2389,7 @@ export default function App() {
                           <label className="text-xs font-semibold text-slate-700 block mb-1">Tiêu đề đoạn tài liệu</label>
                           <input
                             type="text"
-                            placeholder="Ví dụ: Quy cách đóng gói súp lơ đặc trưng"
+                            placeholder="Ví dụ: Quy trình bảo hành và chính sách đổi trả"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none"
                             value={manualTextTitle}
                             onChange={(e) => setManualTextTitle(e.target.value)}
@@ -2414,7 +2414,7 @@ export default function App() {
                           <label className="text-xs font-semibold text-slate-700 block mb-1">Khách thường hỏi câu gì?</label>
                           <input
                             type="text"
-                            placeholder="Ví dụ: Shop có ship ra Hà Nội hay tỉnh lẻ lân cận không?"
+                            placeholder="Ví dụ: Bên mình có hỗ trợ triển khai cho khách ở tỉnh thành khác không?"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             value={faqQ}
                             onChange={(e) => setFaqQ(e.target.value)}
@@ -2424,7 +2424,7 @@ export default function App() {
                           <label className="text-xs font-semibold text-slate-700 block mb-1">Câu trả lời chính thức của Doanh nghiệp</label>
                           <textarea
                             rows={4}
-                            placeholder="Dạ, hiện tại rau sạch tươi tươi hái vườn AAA Farm chỉ nhận giao hỏa tốc bằng grab nội thành thôi ạ..."
+                            placeholder="Dạ, hiện tại bên em hỗ trợ triển khai trên toàn quốc; tùy khu vực sẽ có phương án phù hợp ạ..."
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             value={faqA}
                             onChange={(e) => setFaqA(e.target.value)}
@@ -2439,7 +2439,7 @@ export default function App() {
                         <div className="flex gap-2">
                           <input
                             type="url"
-                            placeholder="https://aaafarm.vn/cau-hoi-thuong-gap"
+                            placeholder="https://congty.vn/cau-hoi-thuong-gap"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none"
                             value={webUrl}
                             onChange={(e) => setWebUrl(e.target.value)}
@@ -2597,7 +2597,7 @@ export default function App() {
                   <button
                     onClick={() => {
                       setPlaygroundMessages([
-                        { id: 'p1', sender: 'bot', username: activeBot?.name || 'BalaBot', text: 'Hội thoại sandbox đã reset. Bạn có thể chat bắt đầu lại nha! ✨', timestamp: new Date().toISOString() }
+                        { id: 'p1', sender: 'bot', username: activeBot?.name || 'BalaBot', text: 'Hội thoại sandbox đã được làm mới. Bạn có thể bắt đầu lại cuộc trò chuyện.', timestamp: new Date().toISOString() }
                       ]);
                       setLastCitation([]);
                     }}
@@ -2643,7 +2643,7 @@ export default function App() {
                   <input
                     type="text"
                     disabled={isPlaygroundTyping}
-                    placeholder="Ví dụ: Cà chua organic bao nhiêu 1 kg á shop, giao quận 1 freeship thế nào?"
+                    placeholder="Ví dụ: Gói dịch vụ tiêu chuẩn báo giá thế nào, thời gian triển khai bao lâu?"
                     className="flex-1 bg-white border border-slate-250 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                     value={playgroundInput}
                     onChange={(e) => setPlaygroundInput(e.target.value)}
@@ -2681,7 +2681,7 @@ export default function App() {
                                 <span className="truncate max-w-[155px]">{citation.name}</span>
                                 <span className="font-mono text-blue-600">{(citation.score * 100).toFixed(0)}% Match</span>
                               </div>
-                              <span className="text-[10px] bg-blue-200/65 px-1 py-0.5 rounded text-blue-800 uppercase font-bold tracking-tight">VietGAP Verified</span>
+                              <span className="text-[10px] bg-blue-200/65 px-1 py-0.5 rounded text-blue-800 uppercase font-bold tracking-tight">Đã xác minh</span>
                             </div>
                           ))}
                         </div>
@@ -2752,7 +2752,7 @@ export default function App() {
                   <h4 className="font-bold text-slate-900 text-sm">Hướng dẫn các bước lấy Token qua BotFather:</h4>
                   <ol className="list-decimal pl-4 space-y-2">
                     <li>Mở app Telegram, tìm kiếm tài khoản hệ thống chính chủ của Telegram: <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold hover:underline">@BotFather</a>.</li>
-                    <li>Gửi tin nhắn <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono font-semibold">/newbot</code>, sau đó nhập Tên của Bot và Username của Bot theo hướng dẫn (ví dụ kết thúc bằng chữ "bot", VD: aaafarm_bot).</li>
+                    <li>Gửi tin nhắn <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono font-semibold">/newbot</code>, sau đó nhập Tên của Bot và Username của Bot theo hướng dẫn (ví dụ kết thúc bằng chữ "bot", VD: yourcompany_bot).</li>
                     <li>Copy chuỗi mã HTTP API Token (chuỗi ký tự dài chứa dấu hai chấm, VD: <code className="bg-slate-200 px-1 py-0.5 rounded">7123456789:AFF_...</code>) rồi nhập vào Form bên dưới.</li>
                   </ol>
                 </div>
@@ -2768,7 +2768,7 @@ export default function App() {
                         </span>
                         <input
                           type="text"
-                          placeholder="Ví dụ: 7123456789:AAF_ExampleToken_BalaBotAAA"
+                          placeholder="Ví dụ: 7123456789:AAExampleToken_YourCompanyBot"
                           className="pl-9 pr-4 py-2.5 w-full bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                           value={inputToken}
                           onChange={(e) => setInputToken(e.target.value)}
@@ -2888,8 +2888,8 @@ export default function App() {
                       {/* Setup action buttons with current live address */}
                       <div className="space-y-2.5">
                         <div className="text-xs text-slate-500 leading-relaxed bg-blue-50/60 p-3 rounded-lg border border-blue-100">
-                          <p className="font-bold text-blue-900 mb-1 font-sans">💡 Hướng dẫn vận hành:</p>
-                          Telegram yêu cầu đường dẫn Webhook phải <strong>công khai (Public URL)</strong>. Do domain dev hiện tại (<code className="text-rose-600 font-mono">ais-dev-...</code>) được bảo mật bằng chế dộ xác thực của Google AI Studio gửi lỗi <code className="text-rose-600 font-bold">302 Found</code>, hệ thống đã <strong>tự động tối ưu hóa và chuyển đổi sang domain preview công khai (<code className="text-green-600 font-mono">ais-pre-...</code>)</strong> để nhận tin trực tiếp từ Telegram:
+                          <p className="font-bold text-blue-900 mb-1 font-sans">Hướng dẫn vận hành:</p>
+                          Telegram yêu cầu đường dẫn Webhook phải <strong>công khai (Public URL)</strong>. Hệ thống sẽ tự đăng ký Webhook theo tên miền hiện tại của bạn để nhận tin nhắn trực tiếp từ Telegram:
                           <strong className="block text-slate-700 font-mono mt-1 select-all">
                             {(() => {
                               let origin = window.location.origin;
@@ -3519,7 +3519,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="text-xs text-slate-500 border-l border-slate-200 pl-4">
-                      <p>✨ <strong>Xác thực phiên</strong>: Email/Password Auth hoạt động</p>
+                      <p><strong>Xác thực phiên</strong>: Email/Password Auth hoạt động</p>
                       <p className="mt-1">✅ <strong>Quyền hạn</strong>: Toàn quyền truy cập bảng tri thức và kho Storage</p>
                     </div>
                   </div>
@@ -3527,7 +3527,7 @@ export default function App() {
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
                     <div className="lg:col-span-5 space-y-3">
                       <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 text-xs text-slate-600 leading-relaxed space-y-2">
-                        <p className="font-semibold text-slate-850">💡 Cách thức kiểm thử Supabase Auth:</p>
+                        <p className="font-semibold text-slate-850">Cách thức kiểm thử Supabase Auth:</p>
                         <ol className="list-decimal pl-4 space-y-1 text-slate-500 text-[11px]">
                           <li>Bật nhà cung cấp dịch vụ <strong>Email</strong> trên bảng điều khiển Supabase Dashboard &gt; Auth &gt; Providers.</li>
                           <li>Nhập Email và Mật khẩu tự chọn của bạn sau đây để thực hiện Đăng ký / Đăng nhập trực tiếp.</li>
@@ -3780,7 +3780,7 @@ export default function App() {
                     <div className="border border-indigo-100 bg-indigo-50/40 p-3 rounded-xl mb-4">
                       <span className="text-[10px] text-indigo-700 font-extrabold uppercase tracking-wide block mb-1">Dữ liệu sẵn có để nạp:</span>
                       <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 font-medium font-sans">
-                        <div>🤖 Bots: {bots.length} bản ghi</div>
+                        <div>Bots: {bots.length} bản ghi</div>
                         <div>📁 Sources: {sources.length} file</div>
                         <div>🧩 Chunks: {sources.length * 2} mẩu</div>
                         <div>💬 Lịch sử: {conversations.length} cuộc hội thoại</div>
@@ -3950,7 +3950,7 @@ export default function App() {
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText(sbSchema);
-                      alert('Đã sao chép kịch bản SQL vào mục Clipboard của bạn! ✨ Hãy dán xải SQL Editor.');
+                      alert('Đã sao chép kịch bản SQL vào Clipboard. Vui lòng dán vào SQL Editor.');
                     }}
                     className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
@@ -3982,7 +3982,7 @@ export default function App() {
                   </span>
                   <h2 className="text-xl md:text-3xl font-extrabold tracking-normal">Quản Lý Gói Cước & Tài Nguyên Trợ Lý</h2>
                   <p className="text-slate-300 text-xs md:text-sm mt-2 leading-relaxed max-w-2xl">
-                    Cập nhật hạn mức hệ thống, xem thông số sử dụng tài nguyên đồng bộ thời gian thực và nâng cấp tài khoản BalaBot của bạn để bứt phá hiệu năng kinh doanh nông sản & bán lẻ.
+                    Cập nhật hạn mức hệ thống, xem thông số sử dụng tài nguyên đồng bộ thời gian thực và nâng cấp tài khoản BalaBot của bạn để tối ưu hiệu quả vận hành và chăm sóc khách hàng.
                   </p>
                 </div>
               </div>
@@ -4003,7 +4003,7 @@ export default function App() {
                       </span>
                     </div>
                     <p className="text-xs text-slate-550 leading-relaxed">
-                      Lựa chọn hoàn hảo để bắt đầu ứng dụng AI trợ lực bán sỉ, tự động trả từ khóa nông sản.
+                      Lựa chọn phù hợp để bắt đầu ứng dụng AI tự động hóa tư vấn và chăm sóc khách hàng.
                     </p>
                   </div>
                   
@@ -4119,7 +4119,7 @@ export default function App() {
                         <Check className="w-7 h-7" />
                       </div>
                       <div>
-                        <h4 className="font-extrabold text-base text-white">🎉 Kích Hoạt Quyền Lợi Gói Pro Thành Công!</h4>
+                        <h4 className="font-extrabold text-base text-white">Kích Hoạt Quyền Lợi Gói Pro Thành Công</h4>
                         <p className="text-xs text-slate-350 mt-1 max-w-lg mx-auto">
                           Hệ thống đã tự động nâng cấp thiết lập tài khoản của bạn. Mọi ranh giới của gói miễn phí đã được gỡ bỏ ngay lập tức thời gian thực.
                         </p>
@@ -4165,7 +4165,7 @@ export default function App() {
                         </ul>
 
                         <div className="bg-indigo-950/50 p-3.5 rounded-xl border border-indigo-900/40 text-[11px] text-slate-350 leading-relaxed text-left">
-                          <span className="font-extrabold text-white block mb-0.5">💡 Thông báo mô phỏng luồng thanh toán:</span>
+                          <span className="font-extrabold text-white block mb-0.5">Thông báo mô phỏng luồng thanh toán:</span>
                           Không sài tiền thật để kích hoạt. Bạn chỉ cần điền nhanh thẻ Visa mô phỏng dưới đây hoặc bấm xác nhận để hệ thống chuyển đổi quyền hạn lập tức!
                         </div>
                       </div>
@@ -4350,7 +4350,7 @@ export default function App() {
                   {/* CARD 2: PRO PLAN FOR HEAVY GROWTH */}
                   <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5 flex flex-col justify-between text-left hover:shadow-md transition-shadow relative overflow-hidden group">
                     <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[9px] font-extrabold px-3 py-1 rounded-bl uppercase tracking-widest font-sans group-hover:bg-indigo-700 transition-colors">
-                      🚀 HOÀN HẢO CHO BÁN SỈ
+                      PHÙ HỢP CHO DOANH NGHIỆP
                     </div>
 
                     <div>
@@ -4557,7 +4557,7 @@ export default function App() {
                         />
                         <div className="flex justify-between text-[9px] text-slate-400 font-semibold font-sans">
                           <span>200 (Hạn chế cũ)</span>
-                          <span className="text-emerald-600 font-extrabold">🚀 Hiện tại: {freeQueriesLimit.toLocaleString()} tin</span>
+                          <span className="text-emerald-600 font-extrabold">Hiện tại: {freeQueriesLimit.toLocaleString()} tin</span>
                           <span>10.000</span>
                         </div>
                       </div>
@@ -4667,7 +4667,7 @@ export default function App() {
                             setFreePdfTraining(true);
                             setFreeRealtimeTakeover(true);
                             setFreeAnalytics(true);
-                            setCustomPlanNotes("Đặc quyền cam kết: Miễn phí trọn đời tối đa cho các đại lý bán sỉ nông sản sạch Việt Nam.");
+                            setCustomPlanNotes("Đặc quyền cam kết: Ưu đãi trọn đời dành cho các đối tác doanh nghiệp triển khai quy mô lớn.");
                             alert("Đã khôi phục các mức mô phỏng về chuẩn: 1.000 tin nhắn sỉ / tháng và 1 bot hoạt động!");
                           }}
                           className="flex-1 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg text-[11px] font-bold text-slate-600 transition-colors cursor-pointer text-center font-sans"
@@ -4676,7 +4676,7 @@ export default function App() {
                         </button>
                         <button
                           onClick={() => {
-                            alert("🎉 Đồng bộ hóa cấu hình monetization thành công! Toàn bộ trải nghiệm khách hàng sẽ chạy thời gian thực theo cấu trúc mới.");
+                            alert("Đồng bộ hóa cấu hình monetization thành công. Toàn bộ trải nghiệm khách hàng sẽ cập nhật theo cấu trúc mới.");
                           }}
                           className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-bold transition-colors cursor-pointer text-center font-sans animate-pulse"
                         >
@@ -4774,7 +4774,7 @@ export default function App() {
                                     setNewCustomerName('');
                                     setNewCustomerEmail('');
                                     setNewCustomerPhone('');
-                                    alert(`✨ Khởi tạo thành công khách hàng mới: ${addedCust.name} (${addedCust.tier.toUpperCase()})!`);
+                                    alert(`Khởi tạo thành công khách hàng mới: ${addedCust.name} (${addedCust.tier.toUpperCase()}).`);
                                   })
                                   .catch(err => {
                                     console.error("Lỗi khởi tạo khách hàng:", err);
@@ -4888,7 +4888,7 @@ export default function App() {
                       {/* PHYSICAL METHOD STATEMENT WITH REAL SUPABASE INSTRUCTIONS */}
                       <div className="bg-blue-50/50 border border-blue-150 rounded-xl p-4.5 space-y-2 text-left">
                         <span className="font-extrabold text-blue-800 text-xs uppercase tracking-wide block font-sans">
-                          💡 HƯỚNG DẪN THỰC TẾ TRÊN SUPABASE CLOUD (KHI MUỐN NÂNG CẤP THẬT)
+                          HƯỚNG DẪN THỰC TẾ TRÊN SUPABASE CLOUD (KHI MUỐN NÂNG CẤP THẬT)
                         </span>
                         <p className="text-[11.5px] text-slate-600 leading-relaxed">
                           Trong môi trường vận hành thực tế (Production), dữ liệu khách hàng sẽ được liên kết trực tiếp với Supabase. Khi khách hàng mua gói, bạn có thể phân gói bằng 2 phương pháp thủ công:
@@ -5434,7 +5434,7 @@ WHERE email = 'customer-email@example.com';`}
                                 setNewCustomerPhone('');
                                 setNewCustomerPassword('');
                                 setNewCustomerTier('free');
-                                alert(`💡 Đã tạo thành công khách hàng mới: ${addedCust.name}! Đã ghi nhận mô-đun SQL profiles.`);
+                                alert(`Đã tạo thành công khách hàng mới: ${addedCust.name}. Đã ghi nhận vào module SQL profiles.`);
                               })
                               .catch(err => {
                                 console.error("Lỗi tạo khách hàng phụ:", err);
@@ -5888,7 +5888,7 @@ WHERE email = 'customer-email@example.com';`}
               </button>
 
               <div className="text-[9.5px] text-slate-400 bg-slate-50/50 border border-slate-100 rounded-lg p-3 leading-relaxed text-center">
-                💡 Nhập email chính chủ để đồng bộ hóa và quản trị hệ thống bot tri thức của riêng bạn.
+                Nhập email chính chủ để đồng bộ hóa và quản trị hệ thống bot tri thức của riêng bạn.
               </div>
             </form>
           </div>

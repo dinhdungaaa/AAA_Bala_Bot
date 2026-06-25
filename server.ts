@@ -227,61 +227,11 @@ function normalizeCustomerRecord(customer: Partial<SaasCustomer> & { id?: string
   };
 }
 
-let bots: BotConfig[] = [
-  {
-    id: "bot-aaa-farm",
-    name: "AAA Farm - Rau Quả Sạch Organic",
-    description: "Bot Telegram tư vấn bán nông sản sạch và giải đáp chính sách ship hàng của hộ nông nghiệp công nghệ cao AAA Farm.",
-    field: "Bán lẻ nông sản & Thực phẩm sạch",
-    language: "vi",
-    tone: "friendly",
-    allowPricing: true,
-    allowProductConsulting: true,
-    escalationTrigger: "fallback_limit",
-    telegramToken: "7123456789:AAF_ExampleToken_BalaBotAAA",
-    telegramStatus: "connected",
-    telegramBotUsername: "AAAFarm_BalaBot",
-    telegramWebhookActive: true,
-    welcomeMessage: "Dạ! Nông sản sạch AAA Farm xin chào anh/chị. Em là BalaBot tự động chăm sóc 24/7. Anh/chị đang cần tìm mua rau quả sạch, kiểm tra bảng giá hay chính sách giao hàng ạ? 🥦🍅",
-    fallbackMessage: "Dạ, câu này hơi chuyên sâu chưa nằm trong kiến thức được train của em ạ. Em đã lưu lại nghi vấn và tạo tag chuyển cho nhân viên liên hệ lại anh/chị ngay nhé. Hotline backup: 098.765.4321.",
-    fallbackEmail: "support@aaafarm.vn",
-    fallbackPhone: "0987654321",
-    fallbackZalo: "https://zalo.me/aaafarm",
-    fallbackWebsite: "https://aaafarm.vn",
-    limitToKnowledge: true,
-    restrictedTopics: "Chính trị, tôn giáo, so sánh tiêu cực đối thủ, lôi kéo khách hàng sang kênh tư nhân bên ngoài khác.",
-    workingHours: "08:00 - 21:00",
-    status: "active",
-    createdAt: "2026-05-10T08:00:00Z"
-  },
-  {
-    id: "bot-sample-2",
-    name: "AAA Tech - Tư vấn Khoá Học Coding",
-    description: "Bot hỗ trợ kỹ thuật và tuyển sinh tuyển đào tạo nghề lập trình Full-stack React & Node.js.",
-    field: "Giáo dục & Công nghệ",
-    language: "vi",
-    tone: "professional",
-    allowPricing: true,
-    allowProductConsulting: true,
-    escalationTrigger: "explicit",
-    telegramToken: "",
-    telegramStatus: "not_connected",
-    telegramWebhookActive: false,
-    welcomeMessage: "Chào mừng quý khách đến với Học viện Công nghệ AAA. Tôi là trợ lý ảo hỗ trợ tư vấn lộ trình học lập trình 2026. Anh/chị cần tư vấn khóa ngắn hạn hay dài hạn?",
-    fallbackMessage: "Xin phép anh/chị, hệ thống sẽ kết nối với giảng viên đào tạo để phân tích trực tiếp. Vui lòng nhắn thêm SĐT để bộ phận tuyển sinh liên hệ qua Zalo ạ.",
-    fallbackEmail: "contact@aaatech.vn",
-    fallbackPhone: "0912123456",
-    fallbackZalo: "https://zalo.me/aaatech",
-    fallbackWebsite: "https://aaatech.edu.vn",
-    limitToKnowledge: true,
-    restrictedTopics: "Chế nhạo học viên, hứa hẹn bao đỗ 100% sai sự thật, công kích kỹ thuật của ngôn ngữ lập trình khác.",
-    workingHours: "09:00 - 18:00",
-    status: "needs_token",
-    createdAt: "2026-05-20T03:30:00Z"
-  }
-];
+// Khởi tạo rỗng — dữ liệu thật được nạp từ Supabase. Không seed bot demo.
+let bots: BotConfig[] = [];
 
-let knowledgeSources: KnowledgeSource[] = [
+let knowledgeSources: KnowledgeSource[] = [];
+/* demo seed removed
   {
     id: "src-1",
     botId: "bot-aaa-farm",
@@ -337,22 +287,12 @@ let knowledgeSources: KnowledgeSource[] = [
     urlCount: 1,
     createdAt: "2026-05-12T14:40:00Z"
   }
-];
+]; */
 
-let knowledgeChunks: KnowledgeChunk[] = [
-  { id: "chk-1", botId: "bot-aaa-farm", sourceId: "src-1", title: "Cà chua organic", content: "Cà chua organic AAA Farm có giá 45.000 VNĐ / kg. Sạch chuẩn VietGAP, quả to, chín tự nhiên mọng nước, thịt bột dồi dào dinh dưỡng tuyệt đối cho gia đình.", category: "pricing", tags: ["cà chua", "organic", "vietgap", "bảng giá"], isActive: true },
-  { id: "chk-2", botId: "bot-aaa-farm", sourceId: "src-1", title: "Thơm mật Đà Lạt", content: "Thơm mật Đà Lạt AAA Farm giá 60.000 VNĐ / quả. Ngọt sắc tự nhiên, thơm lừng đậm đà, thu hoạch trực tiếp tại trang trại với cân nặng từ 1.2kg - 1.5kg/quả.", category: "pricing", tags: ["thơm mật", "dứa thơm", "bảng giá"], isActive: true },
-  { id: "chk-3", botId: "bot-aaa-farm", sourceId: "src-1", title: "Xà lách thủy canh", content: "Xà lách thủy canh giòn sạch giá 35.000 VNĐ / túi 300g gồm xà lách mỡ và lô lô xanh. Trồng trong nhà màng công nghệ cao, rửa sạch ăn ngay an toàn ăn salad.", category: "pricing", tags: ["xà lách", "salad", "bảng giá"], isActive: true },
-  { id: "chk-4", botId: "bot-aaa-farm", sourceId: "src-1", title: "Thịt ba chỉ heo sạch", content: "Thịt ba chỉ heo quê sạch có giá 180.000 VNĐ / kg. Heo nuôi hoàn toàn bằng ngũ cốc cám gạo ngô bã đậu, thịt săn chắc thơm ngậy, không bị ra nước hôi khi chế biến.", category: "product", tags: ["thịt heo", "bảng giá", "fresh"], isActive: true },
-  { id: "chk-5", botId: "bot-aaa-farm", sourceId: "src-1", title: "Trứng gà đồi tự nhiên", content: "Trứng gà đồi béo ngậy có giá 48.000 VNĐ / vỉ 10 quả. Gà thả đồi tự do ăn ngô thực phẩm sạch bổ dưỡng, lòng đỏ vàng đậm đặc biệt.", category: "pricing", tags: ["trứng gà", "fresh", "bảng giá"], isActive: true },
-  { id: "chk-6", botId: "bot-aaa-farm", sourceId: "src-2", title: "Giao hàng nội thành", content: "Giao hàng trực tiếp hỏa tốc trong ngày trong nội thành TP. Hồ Chí Minh và Hà Nội bằng Grab/Ahamove để rau quả luôn tươi mát.", category: "shipping", tags: ["vận chuyển", "grab", "hỏa tốc"], isActive: true },
-  { id: "chk-7", botId: "bot-aaa-farm", sourceId: "src-2", title: "Phí ship & Ưu đãi Freeship", content: "Phí ship đồng giá nội thành 25.000 VNĐ cho đơn dưới 300.000 VNĐ. Đặc biệt MIỄN PHÍ VẬN CHUYỂN (FREESHIP) 100% cho mọi đơn từ 300.000 VNĐ trở lên trong nội thành.", category: "shipping", tags: ["freeship", "ưu đãi", "phí ship"], isActive: true },
-  { id: "chk-8", botId: "bot-aaa-farm", sourceId: "src-2", title: "Đổi trả miễn phí rau hỏng", content: "AAA Farm hoàn tiền hoặc giao bù sản phẩm mới miễn phí 100% cho các quả/rau bị hỏng dập nát trong vòng 24h từ lúc giao. Chỉ cần gửi hình ảnh/video khui hộp.", category: "policy", tags: ["đổi trả", "hoàn tiền", "chính sách"], isActive: true },
-  { id: "chk-9", botId: "bot-aaa-farm", sourceId: "src-3", title: "Bảo quản rau lá xanh", content: "Rau lá xanh (rau muống, cải, xà lách) không rửa nước trước khi cho tủ lạnh. Bọc màng đục lỗ bảo quản ngăn mát 4-8 độ C giúp tươi ngon tới 5-7 ngày.", category: "hdsd", tags: ["hướng dẫn", "bảo quản", "rau xanh"], isActive: true },
-  { id: "chk-10", botId: "bot-aaa-farm", sourceId: "src-3", title: "Bảo quản cà chua mọng", content: "Cà chua không nên để tủ lạnh sớm vì bị mất bột dẻo ngọt. Hãy xếp cà chua cuống lên trên tại nhiệt độ phòng tủ bếp khô thoáng.", category: "hdsd", tags: ["cà chua", "bảo quản", "mẹo"], isActive: true }
-];
+let knowledgeChunks: KnowledgeChunk[] = [];
 
-let chatSessions: ChatSession[] = [
+let chatSessions: ChatSession[] = [];
+/* demo seed removed
   {
     id: "sess-1",
     botId: "bot-aaa-farm",
@@ -401,47 +341,22 @@ let chatSessions: ChatSession[] = [
       { id: "m3-2", sender: "bot", username: "AAAFarm_BalaBot", text: "Dạ hiện tại súp lơ xanh tươi sạch của AAA Farm chủ yếu giao hỏa tốc trực tiếp tại nội thành TP.HCM và Hà Nội trong ngày để đảm bảo rau mát tươi ăn dòn ngọt nhất ạ. Với ship ngoại tỉnh Hải Phòng, bên em có gửi xe đông lạnh cho các đơn sỉ lớn hoặc chuyển phát nhanh được cho các dòng đồ khô sấy dẻo, nước đóng chai. Anh có muốn em chuyển thắc mắc này cho nhân viên để liên hệ gửi chành xe thích hợp không ạ?", timestamp: "2026-05-24T18:31:00Z", sourcesUsed: [{ id: "chk-6", name: "Giao hàng nội thành", score: 0.85 }] }
     ]
   }
-];
+]; */
 
-let faqList: FAQItem[] = [
-  { id: "faq-1", botId: "bot-aaa-farm", question: "Rau có chuẩn hữu cơ/VietGAP thật không?", answer: "Dạ mọi sản phẩm rau củ tại AAA Farm đều trồng theo hướng hữu cơ quy mô lớn tại nông trại công nghệ cao và liên kết chuẩn VietGAP, được giám sát nhật ký cây trồng chặt chẽ không dư lượng hóa chất trừ sâu độc hại, đạt an toàn vệ sinh thực phẩm nên anh chị tuyệt đối yên tâm nha.", category: "product", useCount: 38 },
-  { id: "faq-2", botId: "bot-aaa-farm", question: "Có ship tỉnh ngoài TP.HCM/Hà Nội không?", answer: "Dạ nông tươi dễ héo dập nên bên em ưu tiên giao hỏa tốc bằng Shipper nội thành trong ngày để đảm bảo chất lượng ngon nhất. Với tỉnh lẻ lân cận, bên em chỉ áp dụng sỉ số lượng lớn gửi xe đông lạnh chuyên chở hoa quả hoặc bán trái cây đóng hộp khô thôi ạ.", category: "shipping", useCount: 19 },
-  { id: "faq-3", botId: "bot-aaa-farm", question: "Tôi muốn mua số lượng sỉ có chiết khấu không?", answer: "Dạ có ạ! Từ đơn trên 50kg hoặc mở đại lý nhượng quyền phân phối nông sản, AAA Farm có chiết khấu cực kỳ tốt từ 15-30% theo từng loại hàng cùng hỗ trợ vận chuyển xe tải. Quý khách vui lòng liên lạc SĐT sỉ Hotline: 098.765.4321.", category: "pricing", useCount: 22 }
-];
+let faqList: FAQItem[] = [];
 
+// Bộ đếm thật, khởi tạo 0. Không số liệu demo.
 let analytics: AnalyticsSummary = {
-  totalUsers: 142,
-  totalMessages: 618,
-  dialogsCount: 88,
-  successRate: 91.2,
-  escalationRate: 8.8,
-  messageTrend: [
-    { date: "05/19", userMessages: 28, botMessages: 27 },
-    { date: "05/20", userMessages: 35, botMessages: 33 },
-    { date: "05/21", userMessages: 42, botMessages: 39 },
-    { date: "05/22", userMessages: 38, botMessages: 36 },
-    { date: "05/23", userMessages: 51, botMessages: 49 },
-    { date: "05/24", userMessages: 65, botMessages: 60 },
-    { date: "05/25", userMessages: 48, botMessages: 45 }
-  ],
-  popularQuestions: [
-    { question: "Cà chua organic giá bao nhiêu?", count: 42, category: "pricing" },
-    { question: "Freeship đơn hàng bao nhiêu?", count: 35, category: "shipping" },
-    { question: "Thịt ba chỉ heo sạch giá bao nhiêu vậy?", count: 28, category: "product" },
-    { question: "Giao hàng quận 2 mất bao lâu?", count: 21, category: "shipping" },
-    { question: "Xà lách thủy canh ăn sống được luôn không?", count: 18, category: "hdsd" }
-  ],
-  unansweredQuestions: [
-    { question: "Bên mình có bán rau rừng mầm súp lơ baby nhập khẩu đắt tiền không em?", count: 4, timestamp: "2026-05-25T08:14:00Z" },
-    { question: "Có dâu tây Bạch Tuyết chín rộ hôm nay không?", count: 3, timestamp: "2026-05-25T09:00:20Z" },
-    { question: "Shop có bán hạt giống rau xà lách tự trồng ở ban công không?", count: 3, timestamp: "2026-05-24T15:22:00Z" }
-  ],
-  feedbackStats: { helpful: 84, total: 92 },
-  knowledgeGaps: [
-    { topic: "Dâu tây Đà Lạt / Bạch Tuyết", missingCount: 7, suggestion: "Khách hỏi dâu tây bạch tuyết chín mùa. Hãy cập nhật bảng giá hoặc phản hồi trạng thái hết hàng của dâu tây." },
-    { topic: "Hạt giống mầm tự gieo", missingCount: 5, suggestion: "Có nhiều khách hỏi mua hạt giống và phân bón vi lượng tự trồng. Nên thêm FAQ giải thích nông trại không bán hạt giống thương mại." },
-    { topic: "Giao hàng ngoại tỉnh hỏa tốc bưu điện", missingCount: 4, suggestion: "Nhiều lượt thắc mắc ở Hải Phòng/Đà Nẵng. Hãy làm rõ thông tin giới hạn vận chuyển hoa quả tươi ngoại tỉnh." }
-  ]
+  totalUsers: 0,
+  totalMessages: 0,
+  dialogsCount: 0,
+  successRate: 100,
+  escalationRate: 0,
+  messageTrend: [],
+  popularQuestions: [],
+  unansweredQuestions: [],
+  feedbackStats: { helpful: 0, total: 0 },
+  knowledgeGaps: []
 };
 
 // API ENDPOINTS
@@ -1503,8 +1418,8 @@ app.get("/api/analytics/:botId", async (req, res) => {
   
   // Calculate unique Telegram users
   const uniqueUsers = new Set(botConvs.map(s => s.telegramUserId));
-  // If fallback to main demo bot and 0 messages, keep original beautiful demo indicators
-  const isDemoFarm = botId === "bot-aaa-farm";
+  // Không còn bot demo — luôn dùng số liệu thật (0/empty khi chưa có dữ liệu).
+  const isDemoFarm = false;
   
   const totalUsers = isDemoFarm 
     ? Math.max(uniqueUsers.size || 0, 142) 
@@ -1667,8 +1582,8 @@ app.post("/api/check-token", async (req, res) => {
     if (token.startsWith("7123456789:") || token.includes("BalaBot")) {
       return res.json({
         valid: true,
-        botUsername: "AAAFarm_BalaBot",
-        botName: "AAA Farm Support"
+        botUsername: "BalaBot_Demo",
+        botName: "BalaBot Demo"
       });
     }
     res.json({ valid: false, error: "Token không hợp lệ theo phản hồi từ Telegram API Server." });
@@ -3041,7 +2956,7 @@ app.post("/api/integrations/botpress/reply", async (req, res) => {
   }
 
   const {
-    botId = "bot-aaa-farm",
+    botId = "",
     text,
     userId,
     username,
