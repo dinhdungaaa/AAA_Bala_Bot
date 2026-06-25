@@ -4,6 +4,10 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { embedText, hashText } from "./rag/embeddings.js";
+import { rankBySimilarity, buildEmbedQuery } from "./rag/retriever.js";
+import { synthesizeAnswer } from "./rag/synthesis.js";
+import { TOP_K, SIM_THRESHOLD } from "./rag/constants.js";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult } from "./src/types.js";
 import {
   getSupabaseConfig,
@@ -47,10 +51,14 @@ import {
   dbGetUserConfig
 } from "./supabaseService.js";
 
+import {
+  startQrLogin, getQrLoginResult, getRuntimeStatus,
+  logoutZalo, listBindings, upsertBinding, initZaloGroupBot,
+} from "./zaloGroupBot/index.js";
 
 // Helper for type compatibility (since we'll import types in types.ts but write server)
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const processedTelegramUpdateIds = new Set<string>();
 
 function getPublicBaseUrl(req: express.Request, explicitOrigin?: string) {
@@ -671,7 +679,14 @@ app.delete("/api/admin/customers/:id", (req, res) => {
 app.get("/api/supabase/config", async (req, res) => {
   const config = getSupabaseConfig();
   const status = await testConnection();
-  res.json({ config, status });
+  // SECURITY: never expose the raw Supabase key (service_role) to anonymous/
+  // non-owner callers. Only the owner (authenticated via x-balabot-user-email)
+  // gets the raw key to pre-fill the admin panel; everyone else gets a masked view.
+  const isOwner = getRequestUserEmail(req) === ADMIN_EMAIL;
+  const safeConfig = isOwner
+    ? config
+    : { url: config.url, key: "", keyMasked: config.keyMasked, isConfigured: config.isConfigured };
+  res.json({ config: safeConfig, status });
 });
 
 app.post("/api/supabase/config", async (req, res) => {
@@ -970,6 +985,7 @@ Nội dung chính của tài liệu ${baseName}:
 
     for (const newChunk of generatedChunks) {
       knowledgeChunks.push(newChunk);
+      await attachChunkEmbedding(newChunk);
       await dbSaveChunk(newChunk);
     }
 
@@ -1189,6 +1205,7 @@ app.post("/api/bots/:botId/sources", async (req, res) => {
 
       for (const newChunk of generatedChunks) {
         knowledgeChunks.push(newChunk);
+        await attachChunkEmbedding(newChunk);
         await dbSaveChunk(newChunk);
       }
     } catch (bgErr) {
@@ -1321,6 +1338,7 @@ app.post("/api/bots/:botId/faqs", async (req, res) => {
     isActive: true
   };
   knowledgeChunks.push(newChunk);
+  await attachChunkEmbedding(newChunk);
   await dbSaveChunk(newChunk);
 
   res.status(201).json(newFaq);
@@ -1736,10 +1754,7 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
       const pr = detected.pronoun;
       const nm = detected.name;
       let customWelcome = bot.welcomeMessage || "Dạ, em kính chào anh chị ạ. Em có thể hỗ trợ gì cho mình hôm nay ạ?";
-      // Replace variations of "anh/chị" naturally
-      customWelcome = customWelcome.replace(/anh\/chị/g, `${pr} ${nm}`);
-      customWelcome = customWelcome.replace(/anh chị/g, `${pr} ${nm}`);
-      customWelcome = customWelcome.replace(/Anh\/Chị/g, `${pr === "chị" ? "Chị" : pr === "anh" ? "Anh" : "Anh/Chị"} ${nm}`);
+      customWelcome = personalizeWelcomeMessage(customWelcome, pr, nm);
       responseText = postProcessBotReply(customWelcome, { shouldGreet: true });
     } else {
       // Fetch dynamic answer using vector tri thức
@@ -1857,10 +1872,7 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
     const pr = detected.pronoun;
     const nm = detected.name;
     let customWelcome = bot.welcomeMessage || "Dạ, em kính chào anh chị ạ. Em có thể hỗ trợ gì cho mình hôm nay ạ?";
-    // Replace variations of "anh/chị" naturally
-    customWelcome = customWelcome.replace(/anh\/chị/g, `${pr} ${nm}`);
-    customWelcome = customWelcome.replace(/anh chị/g, `${pr} ${nm}`);
-    customWelcome = customWelcome.replace(/Anh\/Chị/g, `${pr === "chị" ? "Chị" : pr === "anh" ? "Anh" : "Anh/Chị"} ${nm}`);
+    customWelcome = personalizeWelcomeMessage(customWelcome, pr, nm);
     aiAnswer = {
       text: postProcessBotReply(customWelcome, { shouldGreet: true }),
       sources: [],
@@ -2005,9 +2017,7 @@ async function processFacebookIncomingMessage(bot: BotConfig, event: any, option
     const pr = detected.pronoun;
     const nm = detected.name;
     let customWelcome = bot.welcomeMessage || "Dạ, em kính chào anh/chị ạ. Em có thể hỗ trợ gì cho mình hôm nay ạ?";
-    customWelcome = customWelcome.replace(/anh\/chị/g, `${pr} ${nm}`);
-    customWelcome = customWelcome.replace(/anh chị/g, `${pr} ${nm}`);
-    customWelcome = customWelcome.replace(/Anh\/Chị/g, `${pr === "chị" ? "Chị" : pr === "anh" ? "Anh" : "Anh/Chị"} ${nm}`);
+    customWelcome = personalizeWelcomeMessage(customWelcome, pr, nm);
     aiAnswer = {
       text: postProcessBotReply(customWelcome, { shouldGreet: true }),
       sources: [],
@@ -2126,14 +2136,129 @@ app.post("/api/facebook-webhook/:botId", async (req, res) => {
   }
 });
 
+// Health check cho uptime pinger (giu Render thuc khi chay listener Zalo).
+app.get("/health", (_req, res) => {
+  res.json({ ok: true, ts: new Date().toISOString() });
+});
+
+// ===== Zalo Group Bot admin API (owner-only) =====
+app.get("/api/zalo/status", (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  res.json(getRuntimeStatus());
+});
+
+app.post("/api/zalo/login/start", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const r = await startQrLogin();
+  res.json(r);
+});
+
+app.get("/api/zalo/login/result", (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  res.json(getQrLoginResult());
+});
+
+app.post("/api/zalo/logout", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  await logoutZalo();
+  res.json({ ok: true });
+});
+
+app.get("/api/zalo/groups", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const bindings = await listBindings();
+  const allBots = await dbGetBots(bots);
+  res.json({ bindings, bots: allBots.map((b) => ({ id: b.id, name: b.name })) });
+});
+
+app.post("/api/zalo/groups/:groupId/binding", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const { botId, enabled, groupName } = req.body || {};
+  if (!botId) return res.status(400).json({ error: "Thieu botId" }) as any;
+  await upsertBinding({
+    group_id: req.params.groupId,
+    group_name: groupName,
+    bot_id: botId,
+    enabled: enabled !== false,
+  });
+  res.json({ ok: true });
+});
+
+// Test duong RAG ma khong can Zalo that.
+app.post("/api/zalo/simulate", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const { botId, text, senderName } = req.body || {};
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find((b) => b.id === botId);
+  if (!bot) return res.status(404).json({ error: "Bot not found" }) as any;
+  try {
+    const ai = await generateRAGAnswer(
+      bot, String(text || ""),
+      { fullName: senderName || "Khach test", username: senderName || "tester", id: "zalo-sim" },
+      { shouldGreet: true, recentMessages: [] }
+    );
+    res.json({ reply: postProcessBotReply(ai.text, { shouldGreet: true }), sources: ai.sources });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Zalo simulation failed" });
+  }
+});
+
+const DEFAULT_CUSTOMER_PRONOUN = "Anh/Chị";
+const DEFAULT_CUSTOMER_NAME = "Khách Hàng";
+
+function stripDecorativeNameCharacters(value: string): string {
+  return String(value || "")
+    .normalize("NFC")
+    .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier}\p{Emoji_Component}\uFE0F]/gu, " ")
+    .replace(/[^\p{L}\p{M}\p{N}\s.'-]/gu, " ")
+    .replace(/[_@#]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isUsableCustomerNameToken(token: string): boolean {
+  const cleaned = stripDecorativeNameCharacters(token);
+  if (!cleaned || !/[\p{L}]/u.test(cleaned)) return false;
+  if (/^(bot|user|test|guest|anonymous|facebook|botpress|telegram|khach|khách|hang|hàng)$/iu.test(cleaned)) return false;
+  return cleaned.length >= 2 || /^[A-Za-zÀ-ỹĐđ]$/u.test(cleaned);
+}
+
+function getSafeCustomerLead(pronoun: string, name: string): string {
+  return pronoun === DEFAULT_CUSTOMER_PRONOUN || name === DEFAULT_CUSTOMER_NAME
+    ? "mình"
+    : `${pronoun} ${name}`;
+}
+
+function getSafeCustomerLeadForSentenceStart(pronoun: string, name: string): string {
+  const lead = getSafeCustomerLead(pronoun, name);
+  return lead === "mình" ? "Mình" : `${pronoun === "chị" ? "Chị" : "Anh"} ${name}`;
+}
+
+function personalizeWelcomeMessage(message: string, pronoun: string, name: string): string {
+  const lead = getSafeCustomerLead(pronoun, name);
+  const leadStart = getSafeCustomerLeadForSentenceStart(pronoun, name);
+  return message
+    .replace(/anh\/chị/g, lead)
+    .replace(/anh chị/g, lead)
+    .replace(/Anh\/Chị/g, leadStart)
+    .replace(/Anh chị/g, leadStart);
+}
+
+function removeEmojiNameAddressing(text: string): string {
+  return (text || "")
+    .replace(/\b(anh|chị|Anh|Chị|anh\/chị|Anh\/Chị)\s+[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier}\p{Emoji_Component}\uFE0F]+(?=\s|[,.!?;:]|$)/gu, "mình")
+    .replace(/\b(anh|chị|Anh|Chị)\s+(?=(ơi|ạ|nha|nhé)\b)/gu, "mình ");
+}
 
 // Helper to detect Vietnamese gender and extract first name
 function getGenderAndName(fullName: string, _username?: string, _messageText?: string): { pronoun: string; name: string } {
-  if (!fullName) return { pronoun: "Anh/Chị", name: "Khách Hàng" };
-  const parts = fullName.trim().split(/\s+/);
-  const cleanParts = parts.filter(p => p.length > 0);
+  if (!fullName) return { pronoun: DEFAULT_CUSTOMER_PRONOUN, name: DEFAULT_CUSTOMER_NAME };
+  const parts = stripDecorativeNameCharacters(fullName).split(/\s+/);
+  const cleanParts = parts
+    .map(p => stripDecorativeNameCharacters(p))
+    .filter(isUsableCustomerNameToken);
   if (cleanParts.length === 0) {
-    return { pronoun: "Anh/Chị", name: "Khách Hàng" };
+    return { pronoun: DEFAULT_CUSTOMER_PRONOUN, name: DEFAULT_CUSTOMER_NAME };
   }
   
   // Last word is generally the user's first/given name in Vietnamese
@@ -2198,7 +2323,7 @@ function getGenderAndName(fullName: string, _username?: string, _messageText?: s
     return { pronoun: "anh", name };
   }
 
-  return { pronoun: "Anh/Chị", name };
+  return { pronoun: DEFAULT_CUSTOMER_PRONOUN, name };
 }
 
 function cleanKnowledgeText(text: string): string {
@@ -2270,20 +2395,6 @@ function metadataToTags(meta: ChunkMetadata): string[] {
   return tags;
 }
 
-function getChunkMetadata(chunk: KnowledgeChunk): ChunkMetadata {
-  const tags = chunk.tags || [];
-  const dayTag = getTagValue(tags, "day");
-  const priorityTag = getTagValue(tags, "priority");
-  const inferred = inferChunkMetadata(chunk.content, chunk.title);
-  return {
-    ...inferred,
-    topic: getTagValue(tags, "topic") || inferred.topic,
-    dayNumber: dayTag ? Number(dayTag) : inferred.dayNumber,
-    coursePhase: (getTagValue(tags, "phase") as ChunkMetadata["coursePhase"]) || inferred.coursePhase,
-    priority: priorityTag ? Number(priorityTag) : inferred.priority
-  };
-}
-
 function buildKnowledgeChunksForSource(source: KnowledgeSource, baseTags: string[] = []): KnowledgeChunk[] {
   const text = (source.fullText || "").replace(/\r\n/g, "\n").trim();
   if (!text) return [];
@@ -2348,24 +2459,6 @@ function normalizeSearchText(text: string): string {
 function isDurationQuestion(query: string): boolean {
   const normalized = normalizeSearchText(query);
   return /(bao nhieu ngay|may ngay|bao lau|thoi luong|do dai|hoc trong bao lau|hoc bao nhieu|duration|how long)/i.test(normalized);
-}
-
-function extractDurationAnswer(text: string): string | null {
-  const source = cleanKnowledgeText(text);
-  const patterns = [
-    /kh[oó]a\s*h[oọ]c\s*(?:kéo dài|trong|dài)?\s*(\d{1,3})\s*(ngày|day|days|tuần|tháng)/i,
-    /(\d{1,3})\s*(ngày|day|days|tuần|tháng)\s*(?:xây dựng|học|thực chiến|đào tạo|challenge|course)?/i,
-    /thời\s*lượng[^.\n:]*[:\-]?\s*(\d{1,3})\s*(ngày|day|days|tuần|tháng)/i,
-    /độ\s*dài[^.\n:]*[:\-]?\s*(\d{1,3})\s*(ngày|day|days|tuần|tháng)/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = source.match(pattern);
-    if (match) {
-      return `${match[1]} ${match[2].toLowerCase().replace("days", "ngày").replace("day", "ngày")}`;
-    }
-  }
-  return null;
 }
 
 function extractCourseDurationSummary(text: string): { mainDuration?: string; followUpPlan?: string } {
@@ -2529,74 +2622,6 @@ function pickGroundedBusinessPoints(sourceText: string, queryTopic = "general", 
   return selected.length ? selected : sentences.slice(0, maxPoints);
 }
 
-function buildGenericGroundedAnswer(
-  bot: BotConfig,
-  query: string,
-  sourceText: string,
-  lead: string,
-  queryProfile: QueryProfile
-): string {
-  const offeringLabel = getOfferingLabel(bot);
-  const brandName = bot.name || "bên em";
-  const points = pickGroundedBusinessPoints(sourceText, queryProfile.topic, 3);
-  const naturalPoints = points.map(makeNaturalSentence).filter(Boolean);
-
-  const leadCap = lead.charAt(0).toUpperCase() + lead.slice(1);
-  let opening = `Dạ ${lead} ơi, em tóm tắt phần này cho mình dễ hiểu nhé.`;
-  let nextStep = `${leadCap} muốn em nói kỹ hơn phần nào trước ạ?`;
-
-  if (queryProfile.topic === "identity") {
-    const subject = extractIdentitySubject(queryProfile.raw);
-    const firstPoint = naturalPoints[0] || sourceText.split(/[.\n]+/).map(makeNaturalSentence).find(Boolean);
-    if (firstPoint) {
-      const identityText = firstPoint.includes(" - ")
-        ? firstPoint.replace(/\s+-\s+/, " được gắn với ")
-        : firstPoint;
-      return `Dạ ${lead} ơi, trong dữ liệu hiện tại, ${identityText}.
-
-Em chưa thấy thêm phần giới thiệu chi tiết hơn về vai trò, tiểu sử hoặc câu chuyện của ${subject}. Nếu mình muốn, em có thể giúp tóm tắt tiếp những gì tài liệu đang nhắc về ${subject} ạ.`;
-    }
-    return `Dạ ${lead} ơi, hiện tại em chưa có đủ thông tin rõ ràng để giới thiệu chính xác ${subject}.
-
-Mình có thể nạp thêm phần tiểu sử, vai trò hoặc mô tả ngắn về ${subject}, sau đó em sẽ trả lời tự nhiên và đầy đủ hơn ạ.`;
-  }
-
-  if (queryProfile.topic === "pricing") {
-    opening = `Dạ ${lead} ơi, em gửi mình phần giá/chi phí đang có trong dữ liệu của ${brandName} nhé.`;
-    nextStep = `${leadCap} cho em biết nhu cầu hoặc gói mình đang quan tâm để em đối chiếu đúng phần giá hơn ạ?`;
-  } else if (queryProfile.topic === "shipping") {
-    opening = `Dạ ${lead} ơi, phần giao hàng/vận chuyển hiện đang được hiểu như sau ạ.`;
-    nextStep = `${leadCap} cho em biết khu vực nhận hàng để em kiểm tra hướng phù hợp hơn nhé?`;
-  } else if (queryProfile.topic === "policy") {
-    opening = `Dạ ${lead} ơi, chính sách hiện tại có các điểm chính sau ạ.`;
-    nextStep = `${leadCap} đang cần kiểm tra chính sách cho trường hợp cụ thể nào để em hỗ trợ sát hơn ạ?`;
-  } else if (queryProfile.topic === "howto") {
-    opening = `Dạ ${lead} ơi, cách thực hiện có thể đi theo các ý chính này ạ.`;
-    nextStep = `${leadCap} đang vướng ở bước nào để em hướng dẫn tiếp cho đúng nhé?`;
-  } else if (queryProfile.topic === "comparison") {
-    opening = `Dạ ${lead} ơi, nếu so sánh để chọn phương án phù hợp thì mình có thể nhìn theo các điểm này ạ.`;
-    nextStep = `${leadCap} ưu tiên giá, tính năng hay mức phù hợp với nhu cầu để em gợi ý sát hơn ạ?`;
-  } else if (queryProfile.intent === "complaint") {
-    opening = `Dạ ${lead} ơi, em hiểu vấn đề này cần xử lý rõ ràng. Trước mắt mình có thể kiểm tra theo các điểm sau ạ.`;
-    nextStep = `${leadCap} gửi thêm giúp em tình huống cụ thể hoặc mã đơn/thông tin liên quan để em hỗ trợ tiếp nhé?`;
-  } else if (queryProfile.intent === "sales" || queryProfile.topic === "offering") {
-    opening = `Dạ ${lead} ơi, ${offeringLabel} của ${brandName} có thể hiểu đơn giản như sau ạ.`;
-    nextStep = `${leadCap} đang cần ${offeringLabel} cho nhu cầu nào để em tư vấn đúng lựa chọn hơn ạ?`;
-  }
-
-  const bodyBlock = naturalPoints.length === 0
-    ? `${brandName} hiện có thông tin liên quan đến ${offeringLabel}, nhưng em cần thêm dữ liệu cụ thể hơn để tư vấn thật chính xác. ${leadCap} có thể nói rõ nhu cầu hoặc trường hợp đang gặp để em kiểm tra tiếp cho đúng ạ.`
-    : naturalPoints.length === 1
-      ? naturalPoints[0]
-      : naturalPoints.slice(0, 3).map((point, index) => `${index + 1}. ${point}`).join("\n\n");
-
-  return `${opening}
-
-${bodyBlock}
-
-${nextStep}`;
-}
-
 const VI_UPPERCASE_TO_LOWERCASE: Record<string, string> = {
   "Á": "á", "À": "à", "Ả": "ả", "Ã": "ã", "Ạ": "ạ",
   "Ắ": "ắ", "Ằ": "ằ", "Ẳ": "ẳ", "Ẵ": "ẵ", "Ặ": "ặ", "Ă": "ă",
@@ -2632,6 +2657,7 @@ function cleanBotReplyText(text: string): string {
     .trim();
 
   cleaned = cleanMixedVietnameseCase(cleaned);
+  cleaned = removeEmojiNameAddressing(cleaned);
   cleaned = cleaned
     .replace(/\bhọc\s+suông\b/gi, "học lý thuyết suông")
     .replace(/\bkế\s+hoạch\b/gi, "kế hoạch");
@@ -2639,8 +2665,28 @@ function cleanBotReplyText(text: string): string {
   return cleaned;
 }
 
-function postProcessBotReply(text: string, _options?: { shouldGreet?: boolean; recentMessages?: Message[] }): string {
-  return cleanBotReplyText(text);
+function removeRepeatedGreeting(text: string): string {
+  let cleaned = text || "";
+  const greetingPatterns = [
+    /^Dạ\s+em\s+(?:xin\s+)?(?:kính\s+)?chào(?:\s+(?:mình|anh\/chị|anh|chị))?(?:\s+[^\s,.!?]+){0,3}\s*(?:ơi|ạ)?[,.!?]?\s*/i,
+    /^Em\s+(?:xin\s+)?(?:kính\s+)?chào(?:\s+(?:mình|anh\/chị|anh|chị))?(?:\s+[^\s,.!?]+){0,3}\s*(?:ơi|ạ)?[,.!?]?\s*/i,
+    /^(?:Xin\s+)?chào(?:\s+(?:mình|anh\/chị|anh|chị))?(?:\s+[^\s,.!?]+){0,3}\s*(?:ơi|ạ)?[,.!?]?\s*/i
+  ];
+
+  for (const pattern of greetingPatterns) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+
+  return cleaned.trimStart();
+}
+
+function postProcessBotReply(text: string, options?: { shouldGreet?: boolean; recentMessages?: Message[] }): string {
+  let cleaned = cleanBotReplyText(text);
+  const hasPriorBotReply = (options?.recentMessages || []).some(msg => msg.sender === "bot");
+  if (options?.shouldGreet === false || hasPriorBotReply) {
+    cleaned = removeRepeatedGreeting(cleaned);
+  }
+  return cleaned;
 }
 
 function inferSupportIntent(query: string): string {
@@ -2682,7 +2728,7 @@ function buildOffTopicChitChatReply(
   kind: NonNullable<ReturnType<typeof detectOffTopicChitChat>>,
   isFirstInteraction = true
 ): string {
-  const lead = pronoun === "Anh/Chị" ? "mình" : `${pronoun} ${targetName}`;
+  const lead = getSafeCustomerLead(pronoun, targetName);
   const offeringLabel = getOfferingLabel(bot);
   const brandName = bot.name || bot.telegramBotUsername || "bên em";
 
@@ -2739,315 +2785,20 @@ Em xin giữ mood vui vẻ rồi quay lại hỗ trợ ${lead} về ${offeringLa
 Câu này hơi ngoài phần công việc chính của em một chút, nhưng không sao, em vẫn ở đây hỗ trợ mình. ${lead} muốn hỏi tiếp về ${offeringLabel}, giá, chính sách hay cách sử dụng trước ạ?`;
 }
 
-const SEARCH_STOPWORDS = new Set([
-  "a", "ạ", "oi", "ơi", "em", "anh", "chi", "chị", "minh", "mình", "ban", "bạn",
-  "la", "là", "co", "có", "khong", "không", "duoc", "được", "vay", "vậy",
-  "cho", "toi", "tôi", "toi", "cua", "của", "ben", "bên", "nay", "này",
-  "do", "đó", "thi", "thì", "ve", "về", "gi", "gì", "nao", "nào", "bao",
-  "nhieu", "nhiêu", "may", "mấy"
-]);
-
-type QueryProfile = {
-  raw: string;
-  normalized: string;
-  tokens: string[];
-  bigrams: string[];
-  intent: string;
-  emotion: string;
-  topic: string;
-  expectedPhase: "main" | "followup" | "bonus" | "unknown";
-  durationQuestion: boolean;
-  priceQuestion: boolean;
-  requestedCourseDay: number | null;
-  subqueries: string[];
-};
-
-function tokenizeSearchText(text: string): string[] {
-  return normalizeSearchText(text)
-    .split(/[^a-z0-9]+/)
-    .map(token => token.trim())
-    .filter(token => token.length >= 2 && !SEARCH_STOPWORDS.has(token));
-}
-
-function getBigrams(tokens: string[]): string[] {
-  const bigrams: string[] = [];
-  for (let i = 0; i < tokens.length - 1; i += 1) {
-    bigrams.push(`${tokens[i]} ${tokens[i + 1]}`);
+// Tao embedding cho mot chunk (an toan: loi -> bo qua, khong chan luong nap).
+async function attachChunkEmbedding(chunk: KnowledgeChunk): Promise<KnowledgeChunk> {
+  const ai = getAIClient();
+  if (!ai) return chunk;
+  const text = `${chunk.title}\n${chunk.content}`.trim();
+  const h = hashText(text);
+  if (chunk.embedding && chunk.embeddingHash === h) return chunk; // khong doi -> bo qua
+  try {
+    chunk.embedding = await embedText(ai, text);
+    chunk.embeddingHash = h;
+  } catch (e: any) {
+    console.warn("[RAG] embed chunk failed:", e?.message || e);
   }
-  return bigrams;
-}
-
-function buildQueryProfile(query: string): QueryProfile {
-  const normalized = normalizeSearchText(query);
-  const tokens = tokenizeSearchText(query);
-  const requestedCourseDay = extractRequestedCourseDay(query);
-  const durationQuestion = isDurationQuestion(query);
-  let topic = "general";
-  if (durationQuestion) topic = "duration";
-  else if (requestedCourseDay || /(lo trinh|lich hoc|lich hen|lich trinh|ngay hoc|hoc gi|noi dung ngay|tung ngay|schedule|timeline)/i.test(normalized)) topic = "timeline";
-  else if (/(gia|hoc phi|chi phi|bao nhieu tien|bao gia|bang gia|price|cost|khuyen mai|uu dai|combo|goi)/i.test(normalized)) topic = "pricing";
-  else if (/(ship|giao hang|van chuyen|noi thanh|ngoai tinh|delivery|shipping|thoi gian giao|phi ship)/i.test(normalized)) topic = "shipping";
-  else if (/(bao hanh|doi tra|hoan tien|chinh sach|cam ket|policy|warranty|refund|return)/i.test(normalized)) topic = "policy";
-  else if (/(huong dan|cach dung|su dung|bao quan|lap dat|kich hoat|ket noi|setup|how to)/i.test(normalized)) topic = "howto";
-  else if (/(con hang|het hang|ton kho|available|availability|stock)/i.test(normalized)) topic = "availability";
-  else if (/(la ai|ai vay|ai day|who is|nguoi nao|nhan vat|founder|ceo|tac gia|mentor)/i.test(normalized)) topic = "identity";
-  else if (/(phu hop|ai nen|danh cho ai|doi tuong|avatar|khach hang nao|nen chon)/i.test(normalized)) topic = "audience";
-  else if (/(ket qua|dau ra|nhan duoc|ung dung|thuc chien|loi ich|co gi|noi dung|benefit|result)/i.test(normalized)) topic = "outcome";
-  else if (/(so sanh|khac gi|khac nhau|nen chon|compare|option)/i.test(normalized)) topic = "comparison";
-  else if (/(san pham|dich vu|tinh nang|goi nao|product|service|feature)/i.test(normalized)) topic = "offering";
-
-  let expectedPhase: QueryProfile["expectedPhase"] = "unknown";
-  if (/(sau khoa|tiep theo|30 ngay|ngay\s*15\s*[-–]\s*44|brand playbook)/i.test(normalized)) {
-    expectedPhase = "followup";
-  } else if (durationQuestion || /(khoa hoc|hoc bao lau|hoc may ngay|ngay\s*1|14 ngay|15 ngay)/i.test(normalized)) {
-    expectedPhase = "main";
-  }
-
-  const subqueries = normalizeChunkTags([
-    query,
-    `${query} ${topic}`,
-    requestedCourseDay ? `ngày ${requestedCourseDay} lộ trình học nội dung bài học` : "",
-    durationQuestion ? "thời lượng thời gian xử lý kéo dài bao lâu" : "",
-    topic === "pricing" ? "giá chi phí báo giá bảng giá ưu đãi thanh toán" : "",
-    topic === "shipping" ? "giao hàng vận chuyển phí ship thời gian giao" : "",
-    topic === "policy" ? "chính sách bảo hành đổi trả hoàn tiền cam kết" : "",
-    topic === "howto" ? "hướng dẫn sử dụng cách dùng cài đặt bảo quản" : "",
-    topic === "identity" ? "là ai vai trò tiểu sử founder mentor chuyên gia người sáng lập" : "",
-    topic === "offering" ? "sản phẩm dịch vụ tính năng gói nội dung chính" : ""
-  ]);
-
-  return {
-    raw: query,
-    normalized,
-    tokens,
-    bigrams: getBigrams(tokens),
-    intent: inferSupportIntent(query),
-    emotion: inferCustomerEmotion(query),
-    topic,
-    expectedPhase,
-    durationQuestion,
-    priceQuestion: /(gia|phi|bao nhieu tien|chi phi|cost|price)/i.test(normalized),
-    requestedCourseDay,
-    subqueries
-  };
-}
-
-function scoreTextRetrieval(profile: QueryProfile, title: string, content: string, metadata = ""): number {
-  const normalizedTitle = normalizeSearchText(title);
-  const normalizedContent = normalizeSearchText(content);
-  const normalizedMeta = normalizeSearchText(metadata);
-  const combined = `${normalizedTitle} ${normalizedContent} ${normalizedMeta}`;
-  const pseudoChunk: KnowledgeChunk = {
-    id: "",
-    botId: "",
-    sourceId: "",
-    title,
-    content,
-    category: "faq",
-    tags: metadata.split(/\s+/).filter(Boolean),
-    isActive: true
-  };
-  const chunkMeta = getChunkMetadata(pseudoChunk);
-  let score = 0;
-
-  if (profile.normalized.length > 4) {
-    if (normalizedTitle.includes(profile.normalized)) score += 5;
-    if (normalizedContent.includes(profile.normalized)) score += 3;
-  }
-
-  for (const token of profile.tokens) {
-    const tokenWeight = token.length >= 6 ? 1.2 : 1;
-    if (normalizedTitle.split(/\s+/).includes(token)) score += 1.4 * tokenWeight;
-    if (normalizedContent.includes(token)) score += 0.45 * tokenWeight;
-    if (normalizedMeta.includes(token)) score += 0.8 * tokenWeight;
-  }
-
-  for (const bigram of profile.bigrams) {
-    if (normalizedTitle.includes(bigram)) score += 2;
-    if (normalizedContent.includes(bigram)) score += 1.2;
-  }
-
-  if (chunkMeta.topic === profile.topic) score += 4;
-  if (profile.expectedPhase !== "unknown" && chunkMeta.coursePhase === profile.expectedPhase) score += 3;
-  if (profile.expectedPhase !== "unknown" && chunkMeta.coursePhase !== "unknown" && chunkMeta.coursePhase !== profile.expectedPhase) score -= 2.5;
-
-  if (profile.durationQuestion) {
-    const originalCombined = `${title} ${content} ${metadata}`;
-    if (extractDurationAnswer(originalCombined)) score += 8;
-    if (/(thời\s*lượng|độ\s*dài|kéo\s*dài|bao\s*lâu|duration|how long)/i.test(originalCombined)) score += 3;
-    if (chunkMeta.topic !== "duration" && chunkMeta.coursePhase === "followup") score -= 3;
-  }
-
-  if (profile.requestedCourseDay) {
-    const originalCombined = `${title} ${content} ${metadata}`;
-    if (extractDayScheduleAnswer(originalCombined, profile.requestedCourseDay)) score += 8;
-    if (new RegExp(`ngày\\s*${profile.requestedCourseDay}\\b|day\\s*${profile.requestedCourseDay}\\b`, "i").test(originalCombined)) score += 4;
-    if (chunkMeta.dayNumber === profile.requestedCourseDay) score += 6;
-    if (chunkMeta.dayNumber && chunkMeta.dayNumber !== profile.requestedCourseDay) score -= 1.5;
-  }
-
-  if (profile.priceQuestion && /(\d+[\.,]?\d*)\s*(k|000|vnđ|vnd|đ|usd|\$)|giá|học phí|chi phí/i.test(content)) {
-    score += 4;
-  }
-
-  if (profile.intent === "policy" && /(policy|chính sách|đổi trả|bảo hành|vận chuyển|shipping|warranty)/i.test(`${title} ${content} ${metadata}`)) {
-    score += 3;
-  }
-
-  if (profile.intent === "complaint" && /(lỗi|hỏng|đổi trả|hoàn tiền|bảo hành|khiếu nại|support|hỗ trợ)/i.test(`${title} ${content}`)) {
-    score += 3;
-  }
-
-  if (Number.isFinite(chunkMeta.priority)) score += Math.min(2, (chunkMeta.priority || 0) / 10);
-  return Math.max(0, score);
-}
-
-function buildNaturalFallbackAnswer(
-  bot: BotConfig,
-  query: string,
-  activeChunks: Array<{ chunk: KnowledgeChunk; score: number }>,
-  pronoun: string,
-  targetName: string,
-  queryProfile = buildQueryProfile(query)
-): string {
-  const brandName = bot.name || bot.telegramBotUsername || "bên em";
-  const lead = pronoun === "Anh/Chị" ? "mình" : `${pronoun} ${targetName}`;
-  const queryWords = query.toLowerCase().split(/[\s,.;:!?()"'`]+/).filter(word => word.length >= 3);
-  const durationQuestion = isDurationQuestion(query);
-
-  const sourceText = activeChunks
-    .map(item => cleanKnowledgeText(item.chunk.content))
-    .filter(Boolean)
-    .join(". ");
-  const educationContext = isEducationContext(bot, query, sourceText);
-
-  const requestedDay = extractRequestedCourseDay(query);
-  if (educationContext && requestedDay) {
-    const dayAnswer = extractDayScheduleAnswer(sourceText, requestedDay);
-    if (dayAnswer) {
-      return `Dạ ${lead} ơi, ngày ${requestedDay} tập trung vào phần: ${dayAnswer}.
-
-Hiểu đơn giản, đây là phần giúp mình chuyển từ học sang triển khai thực tế, để có kế hoạch rõ hơn cho các bước tiếp theo.
-
-${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em nói tiếp ngày ${requestedDay + 1} hoặc tóm tắt cả lộ trình theo từng ngày không ạ?`;
-    }
-  }
-
-  const durationSummary = extractCourseDurationSummary(sourceText);
-  const asksDurationConflict = durationQuestion && /(30|ba muoi|muoi lam|15|chac|khong em|thay)/i.test(normalizeSearchText(query));
-  if (educationContext && asksDurationConflict && (durationSummary.mainDuration || durationSummary.followUpPlan)) {
-    const mainDuration = durationSummary.mainDuration || extractDurationAnswer(sourceText) || "thời lượng chính trong tài liệu";
-    const followUp = durationSummary.followUpPlan || "kế hoạch triển khai tiếp theo";
-    return `Dạ đúng rồi ${lead} ơi, mình đang thấy hai mốc khác nhau nên dễ bị nhầm ạ.
-
-Phần khóa học chính là ${mainDuration}.
-
-Còn ${followUp} là phần kế hoạch/triển khai sau giai đoạn học chính, không phải thời lượng học chính.
-
-Nếu ${lead} hỏi “học bao lâu” thì câu trả lời nên hiểu là ${mainDuration}. Còn nếu hỏi “sau khóa học làm tiếp gì” thì mới nói tới phần ${followUp}.`;
-  }
-
-  const sentences = sourceText
-    .split(/(?<=[.!?。])\s+|\n+/)
-    .map(sentence => sentence.trim())
-    .filter(sentence => sentence.length > 18);
-
-  if (durationQuestion) {
-    const duration = extractDurationAnswer(sourceText);
-    if (duration) {
-      if (!educationContext) {
-        return `Dạ ${lead} ơi, thời gian hiện có trong dữ liệu là ${duration} ạ.
-
-Em hiểu đây là mốc thời gian liên quan đến phần mình đang hỏi. Nếu ${lead} cho em biết thêm trường hợp cụ thể, em sẽ đối chiếu kỹ hơn để tránh nhầm với các mốc khác trong tài liệu nhé.`;
-      }
-      return `Dạ ${lead} ơi, khóa học này kéo dài ${duration} ạ.
-
-Trong thời gian đó, nội dung học đi theo hướng thực chiến để mình từng bước nắm cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc.
-
-${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em nói thêm lộ trình học trong ${duration} này gồm những phần nào không ạ?`;
-    }
-  }
-
-  const selected = sentences
-    .map(sentence => {
-      const lower = sentence.toLowerCase();
-      const score = queryWords.reduce((total, word) => total + (lower.includes(word) ? 1 : 0), 0);
-      return { sentence, score };
-    })
-    .sort((a, b) => b.score - a.score || a.sentence.length - b.sentence.length)
-    .filter(item => item.score > 0)
-    .slice(0, 4)
-    .map(item => item.sentence);
-
-  const basePoints = selected.length > 0 ? selected : sentences.slice(0, 4);
-  const isCourseQuestion = /kh[oó]a|course|h[oọ]c|train|đ[aà]o t[aạ]o/i.test(query);
-  const isPriceQuestion = /gi[aá]|bao nhi[eê]u|ph[ií]|cost|price/i.test(query);
-  const intent = inferSupportIntent(query);
-  const emotion = inferCustomerEmotion(query);
-  const shouldUseCourseComposer = educationContext && (isCourseQuestion || durationQuestion || !!requestedDay);
-
-  if (!shouldUseCourseComposer) {
-    return buildGenericGroundedAnswer(bot, query, sourceText, lead, queryProfile);
-  }
-
-  if (isCourseQuestion && educationContext && !durationQuestion && !requestedDay) {
-    const duration = extractDurationAnswer(sourceText);
-    const naturalPoints = pickNaturalCoursePoints(sourceText, 3);
-    const pointBlock = naturalPoints.length
-      ? naturalPoints.map((point, index) => `${index + 1}. ${point}`).join("\n\n")
-      : [
-        "1. Khóa học đi theo hướng thực chiến, giúp mình biết cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc.",
-        "2. Nội dung được triển khai theo từng bước để mình dễ nắm hướng đi và áp dụng vào mục tiêu thực tế.",
-        "3. Phần học phù hợp với người muốn làm việc rõ quy trình hơn, không chỉ nghe lý thuyết."
-      ].join("\n\n");
-
-    const durationLine = duration ? `\n\nThời lượng khóa học chính là ${duration}.` : "";
-    const nextQuestion = intent === "sales"
-      ? `${lead.charAt(0).toUpperCase() + lead.slice(1)} đang muốn học để làm content, bán hàng hay tự động hóa công việc để em tư vấn đúng hướng hơn ạ?`
-      : `${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em tóm tắt lộ trình theo từng ngày hay nói kỹ phần kết quả sau khi học trước ạ?`;
-
-    return `Dạ ${lead} ơi, khóa học của ${brandName} tập trung vào hướng thực chiến, giúp mình ứng dụng AI vào công việc thay vì chỉ học lý thuyết suông.${durationLine}
-
-Nội dung nổi bật là:
-
-${pointBlock}
-
-${nextQuestion}`;
-  }
-
-  let opening = `Dạ ${lead} ơi, thông tin hiện tại là phần này tập trung vào các điểm chính sau ạ.`;
-  if (intent === "complaint" || emotion === "frustrated" || emotion === "angry") {
-    opening = `Dạ ${lead} ơi, em hiểu vấn đề này có thể làm mình khó chịu. Trường hợp này mình có thể xử lý theo các ý chính sau ạ.`;
-  } else if (isCourseQuestion && educationContext) {
-    opening = `Dạ ${lead} ơi, khóa học của ${brandName} thiên về hướng thực chiến: giúp mình biết cách tạo nội dung, xây hệ thống bán hàng và ứng dụng AI vào công việc hằng ngày, chứ không chỉ học lý thuyết suông.`;
-  } else if (isPriceQuestion) {
-    opening = `Dạ ${lead} ơi, phần giá hoặc chi phí sẽ phụ thuộc vào chương trình/gói đang áp dụng. Em gửi mình các điểm quan trọng trước nha.`;
-  }
-
-  const pointBlock = basePoints
-    .map(humanizeKnowledgePoint)
-    .filter(point => !isInstructionLikeSentence(point))
-    .slice(0, 3)
-    .filter(Boolean)
-    .map((point, index) => `${index + 1}. ${point}`)
-    .join("\n\n");
-  const bodyBlock = pointBlock || "1. Khóa học tập trung vào tư duy triển khai thực tế, giúp mình biến kiến thức thành nội dung, quy trình hoặc hệ thống có thể áp dụng ngay.\n\n2. Phần học đi theo hướng cầm tay chỉ việc, phù hợp với người muốn dùng AI để làm việc nhanh hơn và rõ hướng hơn.";
-
-  const nextStep = intent === "sales"
-    ? `${lead.charAt(0).toUpperCase() + lead.slice(1)} cho em biết mục tiêu chính của mình là học để làm content, bán hàng, xây bot hay tự động hóa công việc để em gợi ý hướng phù hợp nhất ạ?`
-    : intent === "complaint"
-      ? `${lead.charAt(0).toUpperCase() + lead.slice(1)} gửi thêm giúp em tình huống cụ thể mình đang gặp để em hỗ trợ kiểm tra tiếp cho đúng nhé?`
-      : `${lead.charAt(0).toUpperCase() + lead.slice(1)} muốn em tư vấn sâu hơn theo hướng nào trước ạ?`;
-
-  return `${opening}
-
-Các phần chính gồm:
-
-${bodyBlock}
-
-Nếu nói ngắn gọn, phần này phù hợp để ${lead} nắm được hướng đi, biết nên bắt đầu từ đâu và có thể áp dụng vào mục tiêu thực tế của mình.
-
-${nextStep}`;
+  return chunk;
 }
 
 // Core RAG matching & AI generation call
@@ -3058,20 +2809,38 @@ async function generateRAGAnswer(
   replyOptions?: { shouldGreet?: boolean; recentMessages?: Message[] }
 ): Promise<{ text: string; sources: any[]; fallbackTriggered: boolean }> {
   // Determine gender/pronoun and first name for xưng hô
-  let pronoun = "Anh/Chị";
-  let targetName = "Khách Hàng";
+  let pronoun = DEFAULT_CUSTOMER_PRONOUN;
+  let targetName = DEFAULT_CUSTOMER_NAME;
   
   if (userInfo) {
-    const defaultName = userInfo.fullName || userInfo.username || "Khách Hàng";
+    const defaultName = userInfo.fullName || userInfo.username || DEFAULT_CUSTOMER_NAME;
     const detected = getGenderAndName(defaultName);
     pronoun = detected.pronoun;
     targetName = detected.name;
   }
 
+  const customerLead = getSafeCustomerLead(pronoun, targetName);
+  const hasPriorBotReply = (replyOptions?.recentMessages || []).some(msg => msg.sender === "bot");
+  const isFirstInteraction = replyOptions?.shouldGreet !== false && !hasPriorBotReply;
+
+  // Bối cảnh hội thoại + xưng hô để LLM trả lời thông minh (xưng tên, hiểu câu nối tiếp).
+  // recentMessages thường đã chứa chính câu đang trả lời ở cuối — loại nó ra để không
+  // lặp câu hỏi vào history/ngữ cảnh embed (an toàn cả khi caller chưa push).
+  const customerCtx = { lead: customerLead, hasRealName: customerLead !== "mình" };
+  const priorMessages = (replyOptions?.recentMessages || []).slice();
+  const tail = priorMessages[priorMessages.length - 1];
+  if (tail && tail.sender === "user" && (tail.text || "").trim() === query.trim()) {
+    priorMessages.pop();
+  }
+  const history = priorMessages
+    .slice(-6)
+    .map(m => ({ role: (m.sender === "bot" ? "bot" : "user") as "user" | "bot", text: (m.text || "").trim() }))
+    .filter(t => t.text);
+  const lastUserText = [...priorMessages].reverse().find(m => m.sender === "user")?.text;
+  const synthCtx = { customer: customerCtx, history };
+
   const chitChatKind = detectOffTopicChitChat(query);
   if (chitChatKind) {
-    const isFirstInteraction = replyOptions?.shouldGreet !== false &&
-      !(replyOptions?.recentMessages || []).some(msg => msg.sender === "bot");
     return {
       text: postProcessBotReply(buildOffTopicChitChatReply(bot, query, pronoun, targetName, chitChatKind, isFirstInteraction), replyOptions),
       sources: [],
@@ -3081,248 +2850,58 @@ async function generateRAGAnswer(
 
   // 1. Get knowledge chunks for this bot
   const botChunks = await dbGetChunks(bot.id, knowledgeChunks.filter(c => c.botId === bot.id && c.isActive));
-  const botFAQs = await dbGetFAQs(bot.id, faqList.filter(f => f.botId === bot.id));
-  const queryProfile = buildQueryProfile(query);
-  const detectedIntent = queryProfile.intent;
-  const detectedEmotion = queryProfile.emotion;
-  const durationQuestion = queryProfile.durationQuestion;
-  
-  // 2. Multi-signal retrieval: normalized tokens, phrases, intent boosts, and metadata.
-  const retrievalProfiles = queryProfile.subqueries.map(buildQueryProfile);
-  const matchedChunks = botChunks.map(chunk => {
-    const metadata = `${chunk.category || ""} ${(chunk.tags || []).join(" ")}`;
-    const score = Math.max(...retrievalProfiles.map(profile => scoreTextRetrieval(profile, chunk.title, chunk.content, metadata)));
-    return { chunk, score };
-  })
-  .filter(item => item.score >= 0.8)
-  .sort((a, b) => b.score - a.score)
-  .slice(0, 10);
 
-  // Determine maximum match quality
-  const maxScore = matchedChunks.length > 0 ? matchedChunks[0].score : 0;
-  // Consider match trustworthy only if retrieval has meaningful semantic/token evidence.
-  const isGoodMatch = matchedChunks.length > 0 && maxScore >= (durationQuestion ? 2.5 : 1.2);
-  const activeChunks = isGoodMatch ? matchedChunks : [];
-  const matchedFAQs = botFAQs.map(faq => {
-    const score = Math.max(...retrievalProfiles.map(profile => scoreTextRetrieval(profile, faq.question, faq.answer, faq.category || "faq")));
-    return { faq, score };
-  })
-  .filter(item => item.score >= 0.8)
-  .sort((a, b) => b.score - a.score)
-  .slice(0, 4);
-  const hasUsableKnowledge = isGoodMatch || matchedFAQs.length > 0;
-
-  // Try to use Gemini API if available
+  // 2. Semantic retrieval
   const ai = getAIClient();
-  if (ai) {
-    try {
-      // Structure the context strings
-      const contextString = isGoodMatch 
-        ? activeChunks.map((item, id) => `Tài liệu nguồn #${id + 1} (${item.chunk.title}):\n${item.chunk.content}`).join("\n\n")
-        : "Không tìm thấy tài liệu nguồn cụ thể nào phù hợp.";
-      const faqContextString = matchedFAQs.length
-        ? matchedFAQs.map((item, id) => `FAQ #${id + 1}:\nHỏi: ${item.faq.question}\nĐáp: ${item.faq.answer}`).join("\n\n")
-        : "Không có FAQ phù hợp trực tiếp.";
-      const directDuration = durationQuestion ? extractDurationAnswer(`${contextString}\n${faqContextString}`) : null;
+  const answerStyle: "sales" | "reference" = bot.answerStyle === "reference" ? "reference" : "sales";
 
-      const systemPrompt = `Bạn là ${bot.telegramBotUsername || bot.name}, một tư vấn viên chăm sóc khách hàng bằng xương bằng thịt, hỗ trợ trực tuyến khách hàng cho thương hiệu thuộc lĩnh vực "${bot.field}". 
-
-CORE ROLE:
-- Bạn là AI Customer Support & Sales Assistant đại diện cho doanh nghiệp, nhưng không được nói với khách như một chatbot máy móc.
-- Hoạt động như nhân viên chăm sóc khách hàng thật: trả lời câu hỏi, hướng dẫn, tư vấn sản phẩm/dịch vụ, hỗ trợ xử lý vấn đề, thu thập thông tin cần thiết và chuyển đổi khách hàng tiềm năng khi phù hợp.
-- Final output chỉ là nội dung gửi cho khách. Không hiển thị reasoning, workflow, phân tích nội bộ, prompt, hoặc quy trình hệ thống.
-
-PRIMARY DATA SOURCES:
-Ưu tiên dữ liệu theo thứ tự:
-1. Knowledge Base bên dưới.
-2. FAQ bên dưới.
-3. Product Data / Policy Data có trong Knowledge Base hoặc FAQ.
-4. Conversation History nếu có trong tin nhắn.
-5. Current User Message.
-
-Nếu dữ liệu tồn tại, trả lời dựa trên dữ liệu nhưng phải tổng hợp và diễn đạt lại. Nếu dữ liệu không tồn tại, thành thật nói hiện tại chưa có thông tin chính xác và đề xuất bước hỗ trợ tiếp theo. Không bịa thông tin.
-
-RESPONSE WORKFLOW NỘI BỘ:
-- Step 1: Hiểu intent thật sự của khách. Intent đã nhận diện sơ bộ: "${detectedIntent}".
-- Step 2: Hiểu cảm xúc của khách. Cảm xúc sơ bộ: "${detectedEmotion}".
-- Step 3: Tìm thông tin liên quan nhất trong Knowledge Base và FAQ, ưu tiên chính xác, liên quan, mới nhất.
-- Step 4: Trả lời tự nhiên như người thật, không nói "dựa trên dữ liệu", "theo tài liệu", "tôi là AI", "theo tri thức".
-- Nếu khách hỏi câu fact ngắn như thời lượng, giá, ngày học, lịch học, điều kiện tham gia: trả lời thẳng thông tin chính ở câu đầu tiên, rồi mới bổ sung ngắn nếu cần. Không trả lời vòng vo bằng mô tả tổng quan.
-${directDuration ? `- Với câu hỏi hiện tại, thông tin thời lượng đã xác định là: ${directDuration}. Phải trả lời trực tiếp con số này.` : ""}
-
-SALES ASSISTANT LOGIC:
-- Nếu khách có ý định mua, hỏi giá, hỏi sản phẩm/dịch vụ/khóa học/gói giải pháp, so sánh lựa chọn hoặc hỏi khuyến mãi: hiểu nhu cầu, đề xuất giải pháp phù hợp nhất, giải thích lý do phù hợp, gợi ý bước tiếp theo.
-- Không ép mua, không spam bán hàng, không phóng đại.
-
-LEAD COLLECTION:
-- Nếu thiếu thông tin quan trọng để tư vấn, chỉ hỏi từng bước một. Không hỏi quá nhiều thông tin trong một tin nhắn.
-- Ưu tiên hỏi nhu cầu hoặc mục tiêu trước; chỉ hỏi tên/số điện thoại/email khi cần chuyển tư vấn hoặc chốt bước tiếp theo.
-
-COMPLAINT HANDLING:
-- Nếu khách khó chịu, báo lỗi hoặc khiếu nại: thể hiện thấu hiểu, tập trung xử lý, không tranh luận, không đổ lỗi.
-- Có thể dùng câu như "Mình hiểu vấn đề bạn đang gặp" hoặc "Để mình hỗ trợ kiểm tra ngay" nhưng không lặp máy móc.
-
-UNKNOWN ANSWERS:
-- Nếu không tìm thấy thông tin: không bịa, không suy đoán. Trả lời ngắn gọn rằng hiện tại mình chưa có thông tin chính xác về nội dung này và hỏi thêm thông tin cần thiết để kiểm tra kỹ hơn.
-
-PHONG CÁCH HỘI THOẠI & XƯNG HÔ (VÔ CÙNG QUAN TRỌNG):
-- Tone giọng chủ đạo: ${bot.tone} (Dựa vào tone này để điều chỉnh cách nói thích hợp).
-- Thể hiện sự nhiệt tình, ấm áp, chu đáo tuyệt đối. 
-- BẮT BUỘC xưng hô "Em" (hoặc từ phù hợp với thương hiệu) và gọi người dùng bằng đại từ xưng hô tương ứng giới tính đã được xác định của họ là "${pronoun}" kèm theo tên của họ là "${targetName}" (Ví dụ gọi: "${pronoun} ${targetName}"). Không sử dụng chung chung "Quý khách" hay "anh/chị" bừa bãi khi đã biết pronoun chính xác của họ là "${pronoun}" và tên của họ là "${targetName}".
-- Luôn sử dụng từ ngữ nói tự nhiên, trôi chảy, có từ kính ngữ cảm thán nhẹ nhàng ở đầu và cuối câu (Ví dụ: "Dạ em chào ${pronoun} ${targetName} ạ", "Dạ vâng ạ", "nhe ${pronoun} ${targetName}", "nhé ạ", "nha ${pronoun} ${targetName}", "ạ", v.v.).
-- Tránh tuyệt đối lối hành văn rập khuôn, copy nguyên văn tài liệu nguồn, hoặc phản hồi cộc lốc như một công cụ tra cứu. Hãy diễn đạt lại thông tin một cách mượt mà, logic và sinh động như một chuyên viên giàu kinh nghiệm.
-- Trước khi trả lời, hãy tự phân tích tài liệu trong đầu: khách đang hỏi gì, tài liệu có những ý nào liên quan, ý nào quan trọng nhất, rồi mới tổng hợp thành câu trả lời mới bằng lời của bạn.
-- Tuyệt đối không trích xuất nguyên văn, không đưa tiêu đề chunk, mã mục, tên mục, cụm "Mục 27", "Tài liệu nguồn", "theo tri thức", "danh mục huấn luyện", hoặc bất kỳ dòng nào giống copy từ tài liệu. Khách chỉ cần nghe lời tư vấn đã được hiểu và diễn giải lại.
-- Nếu tài liệu là ghi chú sản phẩm/dịch vụ/khóa học dạng gạch đầu dòng, hãy chuyển thành lời tư vấn tự nhiên: nội dung đó giúp được gì, phù hợp với ai, điểm quan trọng là gì, khách nên làm bước tiếp theo nào.
-- Ở cuối câu trả lời, luôn hỏi thêm một câu mở để giữ tương tác ấm áp (Ví dụ: "Dạ không biết thông tin trên đã giúp ích được cho ${pronoun} ${targetName} chưa ạ?" hoặc "${pronoun} ${targetName} cần em hỗ trợ giải đáp thêm thông tin gì nữa không cứ bảo em nha!").
-
-ĐỊNH DẠNG VĂN BẢN & BIỂU TƯỢNG (BẮT BUỘC):
-- TUYỆT ĐỐI KHÔNG dùng bất kỳ dấu hoa thị nào (* hoặc **) hoặc bất kỳ ký tự định dạng markdown nào để bôi đậm, in nghiêng hoặc đánh dấu trong văn bản trả lời. Hãy viết chữ ở dạng thuần văn bản, tự nhiên, không chứa các ký tự * hoặc **.
-- HẠN CHẾ TỐI ĐA việc sử dụng emoji (biểu tượng cảm xúc). Không dùng quá 1 emoji trong toàn bộ câu trả lời, hoặc tốt nhất là không dùng emoji nào để đảm bảo tính chuyên nghiệp và sạch sẽ cho văn bản.
-- BẮT BUỘC PHẢI CHỦ ĐỘNG XUỐNG DÒNG VÀ TẠO DÒNG TRỐNG (ngắt đoạn bằng việc xuống dòng 2 lần, tức là chèn \n\n) để tạo khoảng thờ rộng rãi, thông thoáng cho tin nhắn. Mỗi đoạn văn chỉ viết siêu ngắn, gồm khoảng 1 đến 2 câu ngắn.
-- Khi liệt kê các ý (dùng gạch đầu dòng - hoặc số thứ tự 1, 2, 3), BẮT BUỘC phải xuống dòng thực tế cho mỗi ý, tuyệt đối không viết dính liền tiếp nối nhau. Giữa các gạch đầu dòng liệt kê, hãy phân cách bằng một dòng trống hẳn hoi để nhìn giao diện tin nhắn thông thoáng, gọn gàng, không bị rối mắt.
-
-Ví dụ cấu trúc tin nhắn đạt chuẩn:
-Dạ em chào ${pronoun} ${targetName} ạ! Rất vui được đồng hành cùng ${pronoun} ${targetName} ngày hôm nay nha.
-
-Hiện tại bên em đang có phần thông tin phù hợp với nhu cầu của ${pronoun} ${targetName}:
-
-- Giúp ${pronoun} ${targetName} nắm nhanh điểm chính và hiểu phần nào phù hợp với nhu cầu hiện tại.
-
-- Nếu cần triển khai tiếp, em có thể hỏi thêm một thông tin quan trọng rồi tư vấn bước tiếp theo cho sát hơn.
-
-Dạ không biết thông tin trên đã rõ ràng chưa hay ${pronoun} ${targetName} cần em hỗ trợ giải đáp thêm phần nào khác nữa không ạ?
-
-Ngôn ngữ trả lời bắt buộc: ${bot.language === 'vi' ? 'Tiếng Việt' : 'English'}.
-
-Nguyên tắc bắt buộc:
-1. Bạn CHỈ được phép tư vấn dựa trên thông tin thực tế từ "TÀI LIỆU NGUỒN" dưới đây. 
-2. Nếu câu hỏi không có thông tin rõ ràng hoặc không được đề cập trong TÀI LIỆU NGUỒN, hoặc tài liệu nguồn không chứa câu trả lời trực tiếp cho câu hỏi, bạn TUYỆT ĐỐI không được tự suy diễn, bịa ra thông tin, hay bám víu trích xuất mù quáng thông tin tài liệu không liên quan. 
-Thay vào đó, bạn phải đưa ra phản hồi không biết thông minh: xin lỗi lịch sự, nêu rõ thông tin này tạm thời chưa được cập nhật đầy đủ trong tài liệu tri thức đào tạo của em, tuy nhiên em đã tự động lưu lại và ghi nhận câu hỏi này để báo cáo ban quản trị tiến hành cập nhật thêm vào tri thức hệ thống cho em sớm nhất. Sau đó khuyên họ liên hệ hotline/Zalo của bên em để được tư vấn kĩ hơn.
-3. Bán hàng & Báo giá: ${bot.allowPricing ? 'CHO PHÉP cung cấp đơn giá, chính sách khuyến mãi khuyến nghị có ghi trong tài liệu.' : 'Tuyệt đối KHÔNG ĐƯỢC báo giá lẻ, khéo léo nói rằng giá sản phẩm có thể thay đổi tùy chương trình và hướng dẫn khách liên hệ hotline/Zalo để được báo giá chính xác nhất.'}
-4. Tư vấn kỹ thuật sản phẩm: ${bot.allowProductConsulting ? 'CHO PHÉP giải thích chi tiết, cặn kẽ về sản phẩm của thương hiệu.' : 'Chỉ giới thiệu tổng quan, không đi quá sâu vào các thông số kỹ thuật phức tạp.'}
-5. Các chủ đề bị cấm trả lời tuyệt đối: "${bot.restrictedTopics}". Nếu khách vi phạm hoặc hỏi lạc đề này, hãy khéo léo hướng họ về sản phẩm và dịch vụ cốt lõi của thương hiệu một cách tế nhị.
-
-TÀI LIỆU NGUỒN CHI TIẾT:
-${contextString}
-
-FAQ LIÊN QUAN:
-${faqContextString}
-
-Thông tin liên hệ thêm khi cần thiết:
-- SĐT: ${bot.fallbackPhone}
-- Web: ${bot.fallbackWebsite}
-- Zalo: ${bot.fallbackZalo}
-
-Hãy trình bày bố cục thông tin đẹp mắt, rõ ràng, dễ đọc, ngắt dòng khoa học, chuẩn phong cách nhắn tin trên Telegram.`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: query,
-        config: {
-          systemInstruction: systemPrompt,
-          temperature: 0.3, // Low temperature for high precision referencing
-        }
-      });
-
-      const responseText = response.text || "";
-      const isFallback = !hasUsableKnowledge || 
-                         responseText.includes(bot.fallbackMessage.substring(0, 15)) || 
-                         responseText.toLowerCase().includes("em chưa có thông tin") || 
-                         responseText.toLowerCase().includes("chưa có sẵn trong dữ liệu") ||
-                         responseText.toLowerCase().includes("không tìm thấy tài liệu") ||
-                         responseText.toLowerCase().includes("ghi nhận");
-
-      if (isFallback) {
-        // Report unanswered question to update knowledge base
-        const cleanQuery = query.trim();
-        if (cleanQuery && cleanQuery.length > 2) {
-          const existingQuestion = analytics.unansweredQuestions.find(q => q.question.toLowerCase() === cleanQuery.toLowerCase());
-          if (existingQuestion) {
-            existingQuestion.count += 1;
-            existingQuestion.timestamp = new Date().toISOString();
-          } else {
-            analytics.unansweredQuestions.unshift({
-              question: cleanQuery,
-              count: 1,
-              timestamp: new Date().toISOString()
-            });
-          }
-        }
-      }
-
-      return {
-        text: postProcessBotReply(responseText, replyOptions),
-        sources: [
-          ...(isGoodMatch ? activeChunks.map(m => ({ id: m.chunk.id, name: m.chunk.title, score: Math.min(0.99, 0.4 + m.score) })) : []),
-          ...matchedFAQs.map(m => ({ id: m.faq.id, name: `FAQ: ${m.faq.question}`, score: Math.min(0.99, 0.4 + m.score) }))
-        ],
-        fallbackTriggered: isFallback
-      };
-    } catch (err: any) {
-      console.error("Gemini API Error in RAG:", err);
-      // Fallback in case of call limits or network issue
-    }
-  }
-
-  // --- LOCAL FALLBACK SIMULATOR (In case AI is offline / credential not configured) ---
-  console.log("Using Local Simulation Engine for Query: ", query);
-  
-  if (!isGoodMatch && matchedFAQs.length > 0) {
-    const lead = pronoun === "Anh/Chị" ? "mình" : `${pronoun} ${targetName}`;
-    const topFaq = matchedFAQs[0].faq;
+  if (!ai) {
+    // No API key -> safe fallback
     return {
-      text: postProcessBotReply(`Dạ ${lead} ơi, thông tin hiện tại là ${cleanKnowledgeText(topFaq.answer)}
-
-${lead.charAt(0).toUpperCase() + lead.slice(1)} cần em giải thích kỹ hơn phần nào không ạ?`, replyOptions),
-      sources: matchedFAQs.map(m => ({ id: m.faq.id, name: `FAQ: ${m.faq.question}`, score: Math.min(0.98, 0.5 + m.score) })),
-      fallbackTriggered: false
-    };
-  }
-
-  if (!isGoodMatch) {
-    // Report unanswered question to update knowledge base
-    const cleanQuery = query.trim();
-    if (cleanQuery && cleanQuery.length > 2) {
-      const existingQuestion = analytics.unansweredQuestions.find(q => q.question.toLowerCase() === cleanQuery.toLowerCase());
-      if (existingQuestion) {
-        existingQuestion.count += 1;
-        existingQuestion.timestamp = new Date().toISOString();
-      } else {
-        analytics.unansweredQuestions.unshift({
-          question: cleanQuery,
-          count: 1,
-          timestamp: new Date().toISOString()
-        });
-      }
-    }
-
-    let smartFallbackText = "";
-    if (bot.tone === "friendly") {
-      smartFallbackText = `Dạ em chào ${pronoun} ${targetName} ạ! Hiện tại thông tin chi tiết về câu hỏi "${query}" chưa có sẵn hoàn chỉnh trong dữ liệu tri thức của em rồi nha. Em đã ghi nhận câu hỏi này để gửi cho ban quản trị tiến hành cập nhật thêm vào tri thức hệ thống cho em sớm nhất ạ.
-
-${pronoun === "chị" ? "Chị" : pronoun === "anh" ? "Anh" : "Anh/Chị"} cứ yên tâm nhé! Lúc này, nếu cần phản hồi hỗ trợ khẩn cấp ngay, ${pronoun} ${targetName} liên lạc trực tiếp hotline SĐT ${bot.fallbackPhone} hoặc qua Zalo ${bot.fallbackZalo} giúp em nha! ❤️`;
-    } else {
-      smartFallbackText = `Kính gửi ${pronoun} ${targetName}, hiện tại thông tin về câu hỏi "${query}" chưa có sẵn đầy đủ trong danh mục đào tạo của hệ thống. Chúng tôi đã ghi nhận nội dung câu hỏi để báo cáo ban quản trị tiến hành cập nhật thêm thông tin vào tri thức hệ thống sớm nhất.
-
-Để nhận thông tin hỗ trợ chính xác lập tiếp, kính mời ${pronoun} ${targetName} liên hệ trực tiếp qua Hotline ${bot.fallbackPhone} hoặc kết nối tài khoản Zalo ${bot.fallbackZalo} để chuyên viên chăm sóc ngay ạ.`;
-    }
-
-    return {
-      text: postProcessBotReply(smartFallbackText, replyOptions),
+      text: postProcessBotReply(bot.fallbackMessage || "Dạ em xin phép kết nối nhân viên hỗ trợ mình ngay ạ.", replyOptions),
       sources: [],
-      fallbackTriggered: true
+      fallbackTriggered: true,
     };
   }
 
-  // Auto-compose response string locally based on matched chunk data
-  const replyText = buildNaturalFallbackAnswer(bot, query, activeChunks, pronoun, targetName, queryProfile);
+  let topChunks: Array<{ chunk: KnowledgeChunk; score: number }> = [];
+  try {
+    const qVec = await embedText(ai, buildEmbedQuery(query, lastUserText));
+    topChunks = rankBySimilarity(qVec, botChunks, TOP_K);
+  } catch (e: any) {
+    console.warn("[RAG] retrieve failed:", e?.message || e);
+  }
 
-  return {
-    text: postProcessBotReply(replyText, replyOptions),
-    sources: activeChunks.map(m => ({ id: m.chunk.id, name: m.chunk.title, score: Math.min(0.98, 0.5 + m.score) })),
-    fallbackTriggered: false
-  };
+  const maxScore = topChunks[0]?.score ?? 0;
+  const grounded = maxScore >= SIM_THRESHOLD ? topChunks : [];
+
+  // 3. Insufficient evidence -> low-conf synthesis + fallback flag
+  if (grounded.length === 0) {
+    const lowConf = await synthesizeAnswer(ai, bot, query, [], { answerStyle, ...synthCtx })
+      .catch(() => bot.fallbackMessage || "Dạ thông tin này em chưa có trong tài liệu, em xin phép chuyển nhân viên hỗ trợ mình ạ.");
+    return {
+      text: postProcessBotReply(lowConf, replyOptions),
+      sources: [],
+      fallbackTriggered: true,
+    };
+  }
+
+  // 4. Grounded synthesis
+  try {
+    const answer = await synthesizeAnswer(ai, bot, query, grounded, { answerStyle, ...synthCtx });
+    return {
+      text: postProcessBotReply(answer, replyOptions),
+      sources: grounded.map(g => ({ id: g.chunk.id, name: g.chunk.title, score: Math.min(0.99, g.score) })),
+      fallbackTriggered: false,
+    };
+  } catch (e: any) {
+    console.error("[RAG] synthesis failed:", e?.message || e);
+    return {
+      text: postProcessBotReply(bot.fallbackMessage || "Dạ em xin phép kết nối nhân viên hỗ trợ mình ngay ạ.", replyOptions),
+      sources: [],
+      fallbackTriggered: true,
+    };
+  }
 }
 
 // REST Endpoint for Playground test chat
@@ -3348,7 +2927,31 @@ app.post("/api/bots/:botId/playgroundChat", async (req, res) => {
   }
 });
 
+app.post("/api/rag/reembed", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const ai = getAIClient();
+  if (!ai) return res.status(400).json({ error: "GEMINI_API_KEY chưa cấu hình" });
+  const botId = (req.body?.botId as string) || "";
+  let all = await dbGetChunks(botId, knowledgeChunks.filter(c => !botId || c.botId === botId));
+  all = all.filter(c => c.isActive);
+  let done = 0, skipped = 0, failed = 0;
+  for (const c of all) {
+    const text = `${c.title}\n${c.content}`.trim();
+    const h = hashText(text);
+    if (c.embedding && c.embeddingHash === h) { skipped++; continue; }
+    try {
+      const vec = await embedText(ai, text);
+      await dbUpdateChunk(c.id, { embedding: vec, embeddingHash: h } as any);
+      const mem = knowledgeChunks.find(x => x.id === c.id);
+      if (mem) { mem.embedding = vec; mem.embeddingHash = h; }
+      done++;
+    } catch (e: any) { failed++; console.warn("[RAG reembed] failed chunk", c.id, e?.message); }
+  }
+  res.json({ total: all.length, done, skipped, failed });
+});
+
 app.post("/api/bots/:botId/rag-eval", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
   const botId = req.params.botId;
   const { testCases = [] } = req.body as {
     testCases?: Array<{
@@ -3393,6 +2996,23 @@ app.post("/api/bots/:botId/rag-eval", async (req, res) => {
     passRate: results.length ? Math.round((passed / results.length) * 100) : 0,
     results
   });
+});
+
+app.post("/api/rag/eval", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const cases: Array<{ botId: string; question: string; mustInclude?: string[] }> = req.body?.cases || [];
+  const allBots = await dbGetBots(bots);
+  const results = [];
+  for (const c of cases) {
+    const bot = allBots.find(b => b.id === c.botId);
+    if (!bot) { results.push({ ...c, ok: false, reason: "bot_not_found" }); continue; }
+    const ans = await generateRAGAnswer(bot, c.question, { fullName: "Eval" }, { shouldGreet: false, recentMessages: [] });
+    const text = (ans.text || "").toLowerCase();
+    const hit = (c.mustInclude || []).every(s => text.includes(s.toLowerCase()));
+    results.push({ question: c.question, ok: hit, fallback: ans.fallbackTriggered, reply: ans.text, sources: ans.sources?.length || 0 });
+  }
+  const passed = results.filter(r => r.ok).length;
+  res.json({ total: results.length, passed, results });
 });
 
 function verifyExternalApiSecret(req: express.Request) {
@@ -4174,6 +3794,16 @@ async function startServer() {
     // Initialize Scheduler Engine
     await loadSchedulesFromDB();
     startSchedulerEngine();
+
+    // Khoi dong Zalo Group Bot (no-op neu ZALO_GROUP_BOT_ENABLED != true).
+    await initZaloGroupBot({
+      generateRAGAnswer,
+      postProcessBotReply,
+      getBots: () => dbGetBots(bots),
+      chatSessions,
+      saveConversation: dbSaveConversation,
+      analytics,
+    });
   });
 }
 

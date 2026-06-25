@@ -1,0 +1,17 @@
+node_modules
+dist
+dist-pages
+.git
+.gitignore
+*.log
+.env
+.env.local
+.env.*
+!.env.example
+.wrangler
+.superpowers
+docs/superpowers
+cloudflare-worker
+cloudflare-site-proxy
+scripts
+server.ts.tmp

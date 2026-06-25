@@ -8,6 +8,9 @@ This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/4b5eb3f6-df41-4595-95fd-0dfe585b407d
 
+**Features:**
+- Zalo Group Bot (unofficial): see `docs/zalo-group-bot-ops.md`.
+
 ## Run Locally
 
 **Prerequisites:**  Node.js
