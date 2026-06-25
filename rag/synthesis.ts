@@ -1,6 +1,7 @@
 import type { GoogleGenAI } from "@google/genai";
 import type { BotConfig, KnowledgeChunk } from "../src/types.js";
 import { GEN_MODEL } from "./constants.js";
+import { withRetry } from "./embeddings.js";
 
 type Passage = { chunk: Pick<KnowledgeChunk, "title" | "content"> };
 
@@ -45,11 +46,11 @@ export async function synthesizeAnswer(
   opts: { answerStyle: "sales" | "reference" }
 ): Promise<string> {
   const systemInstruction = buildGroundedPrompt(bot, passages, opts);
-  const res: any = await ai.models.generateContent({
+  const res: any = await withRetry(() => ai.models.generateContent({
     model: GEN_MODEL,
     contents: query,
     config: { systemInstruction, temperature: 0.4 },
-  } as any);
+  } as any));
   const text = (res?.text || "").trim();
   if (!text) throw new Error("empty synthesis response");
   return text;

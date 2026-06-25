@@ -18,6 +18,22 @@ export function hashText(text: string): string {
   return createHash("sha1").update(text || "").digest("hex");
 }
 
+// Retry transient Gemini overload/rate errors (503/429/overloaded) with backoff.
+export async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
+  let lastErr: any;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); }
+    catch (e: any) {
+      lastErr = e;
+      const msg = (e?.message || String(e)).toLowerCase();
+      const transient = /503|429|overloaded|high demand|unavailable|resource_exhausted|rate limit/.test(msg);
+      if (!transient || i === tries - 1) throw e;
+      await new Promise(r => setTimeout(r, 700 * Math.pow(2, i) + Math.random() * 300));
+    }
+  }
+  throw lastErr;
+}
+
 // Chuan hoa shape tra ve cua embedContent ve number[] (cach ly khac biet phien ban SDK).
 function extractVector(res: any): number[] {
   const e = res?.embeddings?.[0] ?? res?.embedding;
@@ -30,7 +46,7 @@ function extractVectors(res: any): number[][] {
 }
 
 export async function embedText(ai: GoogleGenAI, text: string): Promise<number[]> {
-  const res = await ai.models.embedContent({ model: EMBED_MODEL, contents: text } as any);
+  const res = await withRetry(() => ai.models.embedContent({ model: EMBED_MODEL, contents: text } as any));
   return extractVector(res);
 }
 
