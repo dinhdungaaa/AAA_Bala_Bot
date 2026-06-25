@@ -883,6 +883,27 @@ export async function dbSignUpUser(
   const client = getSupabaseClient();
   if (!client) return { success: false, error: "Supabase client not initialized." };
   try {
+    // Auto-confirm email so users can sign in immediately (no email verification).
+    // Needs a service-role key; if the active key isn't admin-capable, fall back
+    // to the normal sign-up flow below.
+    try {
+      const { data: adminData, error: adminError } = await client.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: email.split("@")[0] }
+      });
+      if (!adminError && adminData?.user) {
+        return { success: true, user: adminData.user, session: null };
+      }
+      // If the user already exists, surface a clear message instead of falling through.
+      if (adminError && /already.*(registered|exists)|duplicate|been registered/i.test(adminError.message || "")) {
+        return { success: false, error: adminError.message };
+      }
+    } catch (adminErr) {
+      console.warn("admin.createUser auto-confirm unavailable, falling back to signUp:", adminErr);
+    }
+
     const signUpOptions: any = {};
     if (redirectTo) {
       signUpOptions.redirectTo = redirectTo;
@@ -913,12 +934,28 @@ export async function dbSignInUser(email: string, password: string): Promise<{ s
       email,
       password
     });
-    if (error) throw error;
-    return {
-      success: true,
-      user: data.user,
-      session: data.session
-    };
+    if (!error) {
+      return { success: true, user: data.user, session: data.session };
+    }
+
+    // Rescue legacy accounts created while "Confirm email" was on: auto-confirm
+    // them (service-role only) and retry once. No-op if key isn't admin-capable.
+    if (/not confirmed|email.*confirm/i.test(error.message || "")) {
+      try {
+        const { data: list } = await (client as any).auth.admin.listUsers({ page: 1, perPage: 200 });
+        const target = list?.users?.find((u: any) => (u.email || "").toLowerCase() === email.toLowerCase());
+        if (target?.id) {
+          await client.auth.admin.updateUserById(target.id, { email_confirm: true } as any);
+          const retry = await client.auth.signInWithPassword({ email, password });
+          if (!retry.error) {
+            return { success: true, user: retry.data.user, session: retry.data.session };
+          }
+        }
+      } catch (rescueErr) {
+        console.warn("Auto-confirm rescue on signin failed:", rescueErr);
+      }
+    }
+    throw error;
   } catch (err: any) {
     console.error("Supabase dbSignInUser error:", err);
     return { success: false, error: err.message || String(err) };
