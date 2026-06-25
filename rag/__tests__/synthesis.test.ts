@@ -24,4 +24,43 @@ describe("buildGroundedPrompt", () => {
     const p = buildGroundedPrompt(bot, [], { answerStyle: "reference" });
     expect(p.toLowerCase()).toMatch(/chưa có thông tin|không có trong tài liệu/);
   });
+
+  it("co ten that -> chen ten + chi dan xung ho tu nhien", () => {
+    const p = buildGroundedPrompt(bot, passages, {
+      answerStyle: "sales",
+      customer: { lead: "Anh Dũng", hasRealName: true },
+    });
+    expect(p).toContain("Anh Dũng");
+    expect(p.toLowerCase()).toMatch(/tự nhiên/);
+    expect(p).toMatch(/KHÔNG lặp tên/);
+  });
+
+  it("vo danh -> dung 'minh', khong bia ten", () => {
+    const p = buildGroundedPrompt(bot, passages, {
+      answerStyle: "sales",
+      customer: { lead: "mình", hasRealName: false },
+    });
+    expect(p).toMatch(/KHÔNG bịa ra tên/);
+    expect(p).not.toContain("Anh Dũng");
+  });
+
+  it("co history -> chen block hoi thoai", () => {
+    const p = buildGroundedPrompt(bot, passages, {
+      answerStyle: "sales",
+      history: [
+        { role: "user", text: "xà lách thủy canh còn không" },
+        { role: "bot", text: "Dạ còn ạ" },
+      ],
+    });
+    expect(p).toContain("HỘI THOẠI GẦN ĐÂY");
+    expect(p).toContain("Khách: xà lách thủy canh còn không");
+    expect(p).toContain("Bạn: Dạ còn ạ");
+  });
+
+  it("khong customer + khong history -> giong base prompt", () => {
+    const base = buildGroundedPrompt(bot, passages, { answerStyle: "sales" });
+    const withEmpty = buildGroundedPrompt(bot, passages, { answerStyle: "sales", history: [] });
+    expect(withEmpty).toBe(base);
+    expect(base).not.toContain("HỘI THOẠI GẦN ĐÂY");
+  });
 });

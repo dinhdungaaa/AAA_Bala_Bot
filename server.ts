@@ -5,7 +5,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { embedText, hashText } from "./rag/embeddings.js";
-import { rankBySimilarity } from "./rag/retriever.js";
+import { rankBySimilarity, buildEmbedQuery } from "./rag/retriever.js";
 import { synthesizeAnswer } from "./rag/synthesis.js";
 import { TOP_K, SIM_THRESHOLD } from "./rag/constants.js";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult } from "./src/types.js";
@@ -2823,6 +2823,22 @@ async function generateRAGAnswer(
   const hasPriorBotReply = (replyOptions?.recentMessages || []).some(msg => msg.sender === "bot");
   const isFirstInteraction = replyOptions?.shouldGreet !== false && !hasPriorBotReply;
 
+  // Bối cảnh hội thoại + xưng hô để LLM trả lời thông minh (xưng tên, hiểu câu nối tiếp).
+  // recentMessages thường đã chứa chính câu đang trả lời ở cuối — loại nó ra để không
+  // lặp câu hỏi vào history/ngữ cảnh embed (an toàn cả khi caller chưa push).
+  const customerCtx = { lead: customerLead, hasRealName: customerLead !== "mình" };
+  const priorMessages = (replyOptions?.recentMessages || []).slice();
+  const tail = priorMessages[priorMessages.length - 1];
+  if (tail && tail.sender === "user" && (tail.text || "").trim() === query.trim()) {
+    priorMessages.pop();
+  }
+  const history = priorMessages
+    .slice(-6)
+    .map(m => ({ role: (m.sender === "bot" ? "bot" : "user") as "user" | "bot", text: (m.text || "").trim() }))
+    .filter(t => t.text);
+  const lastUserText = [...priorMessages].reverse().find(m => m.sender === "user")?.text;
+  const synthCtx = { customer: customerCtx, history };
+
   const chitChatKind = detectOffTopicChitChat(query);
   if (chitChatKind) {
     return {
@@ -2850,7 +2866,7 @@ async function generateRAGAnswer(
 
   let topChunks: Array<{ chunk: KnowledgeChunk; score: number }> = [];
   try {
-    const qVec = await embedText(ai, query);
+    const qVec = await embedText(ai, buildEmbedQuery(query, lastUserText));
     topChunks = rankBySimilarity(qVec, botChunks, TOP_K);
   } catch (e: any) {
     console.warn("[RAG] retrieve failed:", e?.message || e);
@@ -2861,7 +2877,7 @@ async function generateRAGAnswer(
 
   // 3. Insufficient evidence -> low-conf synthesis + fallback flag
   if (grounded.length === 0) {
-    const lowConf = await synthesizeAnswer(ai, bot, query, [], { answerStyle })
+    const lowConf = await synthesizeAnswer(ai, bot, query, [], { answerStyle, ...synthCtx })
       .catch(() => bot.fallbackMessage || "Dạ thông tin này em chưa có trong tài liệu, em xin phép chuyển nhân viên hỗ trợ mình ạ.");
     return {
       text: postProcessBotReply(lowConf, replyOptions),
@@ -2872,7 +2888,7 @@ async function generateRAGAnswer(
 
   // 4. Grounded synthesis
   try {
-    const answer = await synthesizeAnswer(ai, bot, query, grounded, { answerStyle });
+    const answer = await synthesizeAnswer(ai, bot, query, grounded, { answerStyle, ...synthCtx });
     return {
       text: postProcessBotReply(answer, replyOptions),
       sources: grounded.map(g => ({ id: g.chunk.id, name: g.chunk.title, score: Math.min(0.99, g.score) })),

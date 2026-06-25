@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rankBySimilarity } from "../retriever.js";
+import { rankBySimilarity, buildEmbedQuery } from "../retriever.js";
 import type { KnowledgeChunk } from "../../src/types.js";
 
 function chunk(id: string, embedding: number[]): KnowledgeChunk {
@@ -25,5 +25,19 @@ describe("rankBySimilarity", () => {
   });
   it("queryVec rong -> []", () => {
     expect(rankBySimilarity([], chunks, 5)).toEqual([]);
+  });
+});
+
+describe("buildEmbedQuery", () => {
+  it("cau ngan/am chi -> ghep cau khach hoi truoc do", () => {
+    expect(buildEmbedQuery("cái đó bao nhiêu?", "xà lách thủy canh")).toContain("xà lách thủy canh");
+    expect(buildEmbedQuery("còn không?", "rau muống")).toContain("rau muống");
+  });
+  it("cau day du -> giu nguyen", () => {
+    const q = "Cho mình hỏi giá xà lách thủy canh loại 300g là bao nhiêu tiền vậy";
+    expect(buildEmbedQuery(q, "chào shop")).toBe(q);
+  });
+  it("khong co cau truoc -> giu nguyen", () => {
+    expect(buildEmbedQuery("cái đó bao nhiêu?")).toBe("cái đó bao nhiêu?");
   });
 });
