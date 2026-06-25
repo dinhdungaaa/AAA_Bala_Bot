@@ -13,6 +13,12 @@ export interface BotConfig {
   telegramStatus: 'not_connected' | 'connected' | 'error' | 'testing';
   telegramBotUsername?: string;
   telegramWebhookActive: boolean;
+  // Facebook Messenger — per-bot (giống Telegram), thay vì biến môi trường toàn cục.
+  facebookPageAccessToken?: string;
+  facebookPageId?: string;
+  facebookPageName?: string;
+  facebookStatus?: 'not_connected' | 'connected';
+  facebookConnectedAt?: string;
   welcomeMessage: string;
   fallbackMessage: string;
   fallbackEmail: string;

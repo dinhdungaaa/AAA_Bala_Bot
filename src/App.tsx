@@ -290,6 +290,8 @@ export default function App() {
   const [facebookDetails, setFacebookDetails] = useState<any>(null);
   const [isFetchingFacebook, setIsFetchingFacebook] = useState(false);
   const [facebookActionMsg, setFacebookActionMsg] = useState<{ status: 'success' | 'error'; text: string } | null>(null);
+  const [inputFacebookToken, setInputFacebookToken] = useState('');
+  const [isConnectingFacebook, setIsConnectingFacebook] = useState(false);
   const [facebookSimText, setFacebookSimText] = useState('Shop tư vấn giúp mình sản phẩm/dịch vụ phù hợp với nhu cầu hiện tại nhé.');
   const [facebookSimUserId, setFacebookSimUserId] = useState('fb-test-user-001');
   const [isSimulatingFacebook, setIsSimulatingFacebook] = useState(false);
@@ -375,6 +377,50 @@ export default function App() {
       setFacebookActionMsg({ status: 'error', text: 'Lỗi tải cấu hình Facebook: ' + err.message });
     } finally {
       setIsFetchingFacebook(false);
+    }
+  };
+
+  const handleConnectFacebook = async () => {
+    if (!selectedBotId || !inputFacebookToken.trim()) return;
+    setIsConnectingFacebook(true);
+    setFacebookActionMsg(null);
+    try {
+      const res = await fetch(`/api/bots/${selectedBotId}/facebook-connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
+        body: JSON.stringify({ pageAccessToken: inputFacebookToken.trim() })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setFacebookActionMsg({ status: 'success', text: data.message || 'Kết nối Facebook Page thành công.' });
+        setInputFacebookToken('');
+        fetchFacebookDetails();
+      } else {
+        setFacebookActionMsg({ status: 'error', text: data.error || 'Kết nối Facebook Page thất bại.' });
+      }
+    } catch (err: any) {
+      setFacebookActionMsg({ status: 'error', text: 'Lỗi kết nối Facebook: ' + err.message });
+    } finally {
+      setIsConnectingFacebook(false);
+    }
+  };
+
+  const handleDisconnectFacebook = async () => {
+    if (!selectedBotId) return;
+    setIsConnectingFacebook(true);
+    setFacebookActionMsg(null);
+    try {
+      const res = await fetch(`/api/bots/${selectedBotId}/facebook-disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() }
+      });
+      const data = await res.json();
+      setFacebookActionMsg({ status: data.success ? 'success' : 'error', text: data.message || 'Đã xử lý.' });
+      fetchFacebookDetails();
+    } catch (err: any) {
+      setFacebookActionMsg({ status: 'error', text: 'Lỗi ngắt kết nối Facebook: ' + err.message });
+    } finally {
+      setIsConnectingFacebook(false);
     }
   };
 
@@ -3014,11 +3060,10 @@ export default function App() {
                 <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-3 text-xs leading-relaxed text-slate-700">
                   <h4 className="font-bold text-slate-900 text-sm">Các bước kết nối trên Meta Developers</h4>
                   <ol className="list-decimal pl-4 space-y-2">
-                    <li>Tạo hoặc mở app Meta Developers, thêm sản phẩm Messenger.</li>
-                    <li>Trong phần Webhooks, chọn Page và dán Callback URL bên dưới.</li>
-                    <li>Dùng Verify Token hiển thị bên dưới để xác thực webhook.</li>
-                    <li>Subscribe các event tin nhắn cần thiết như <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono">messages</code> và <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono">messaging_postbacks</code>.</li>
-                    <li>Cấu hình biến môi trường <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono">FACEBOOK_PAGE_ACCESS_TOKEN</code> trên server/deploy để bot gửi trả lời ra Messenger thật.</li>
+                    <li>Tạo hoặc mở app Meta Developers, thêm sản phẩm Messenger và liên kết Fanpage của bạn.</li>
+                    <li>Trong phần Webhooks, dán <strong>Callback URL</strong> và <strong>Verify Token</strong> bên dưới để xác thực webhook.</li>
+                    <li>Tạo <strong>Page Access Token</strong> cho Fanpage (mục Messenger → Generate Token).</li>
+                    <li>Dán Page Access Token vào ô bên dưới rồi bấm <strong>Kết nối</strong>. Hệ thống sẽ tự xác thực và tự đăng ký nhận tin nhắn (không cần subscribe thủ công hay cấu hình biến môi trường).</li>
                   </ol>
                 </div>
 
@@ -3037,15 +3082,53 @@ export default function App() {
                     <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
                       <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Verify Token</span>
                       <div className="font-mono text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-lg p-3 break-all select-all">
-                        {facebookDetails?.verifyTokenHint || 'balabot-dev-verify-token'}
+                        {facebookDetails?.verifyToken || 'balabot-dev-verify-token'}
                       </div>
                     </div>
                     <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
-                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Page Access Token</span>
-                      <div className={`text-xs font-bold rounded-lg p-3 border ${facebookDetails?.configured ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                        {facebookDetails?.configured ? 'Đã cấu hình trên server' : 'Chưa cấu hình FACEBOOK_PAGE_ACCESS_TOKEN'}
+                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Trạng thái Page</span>
+                      <div className={`text-xs font-bold rounded-lg p-3 border ${facebookDetails?.facebookStatus === 'connected' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                        {facebookDetails?.facebookStatus === 'connected'
+                          ? `Đã kết nối: ${facebookDetails?.facebookPageName || facebookDetails?.facebookPageId || 'Page'}`
+                          : 'Chưa kết nối Fanpage'}
                       </div>
                     </div>
+                  </div>
+
+                  {/* Per-bot Page Access Token connect */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Page Access Token</span>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Dán Page Access Token của Fanpage..."
+                        className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                        value={inputFacebookToken}
+                        onChange={(e) => setInputFacebookToken(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleConnectFacebook}
+                        disabled={isConnectingFacebook || !inputFacebookToken.trim()}
+                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs whitespace-nowrap flex items-center gap-2"
+                      >
+                        {isConnectingFacebook ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                        Kết nối
+                      </button>
+                    </div>
+                    {facebookDetails?.facebookStatus === 'connected' && (
+                      <button
+                        type="button"
+                        onClick={handleDisconnectFacebook}
+                        disabled={isConnectingFacebook}
+                        className="text-[11px] font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50"
+                      >
+                        Ngắt kết nối Fanpage
+                      </button>
+                    )}
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      Token được lưu riêng cho từng bot. Khi bấm Kết nối, hệ thống tự xác thực với Facebook và tự đăng ký nhận tin nhắn.
+                    </p>
                   </div>
 
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-600 leading-relaxed">
