@@ -2836,32 +2836,51 @@ export default function App() {
                               </span>
                             </div>
 
-                            {webhookDetails.webhookInfo.last_error_message && (
-                              <div className="grid grid-cols-3 text-xs py-1.5 text-rose-600 bg-rose-50/50 p-2 rounded-lg">
-                                <span className="font-bold flex items-center gap-1 font-sans">
-                                  <AlertCircle className="w-3.5 h-3.5" /> Lỗi gửi tin gần nhất:
-                                </span>
-                                <span className="col-span-2 font-medium leading-relaxed break-words font-mono">
-                                  {webhookDetails.webhookInfo.last_error_message}
-                                  {webhookDetails.webhookInfo.last_error_date && (
-                                    <span className="block text-[10px] text-slate-400 mt-1">
-                                      Thời gian lỗi: {new Date(webhookDetails.webhookInfo.last_error_date * 1000).toLocaleString('vi-VN')}
-                                    </span>
-                                  )}
-                                </span>
-                              </div>
-                            )}
+                            {(() => {
+                              const wi = webhookDetails.webhookInfo;
+                              const errAgeSec = wi.last_error_date ? (Date.now() / 1000 - wi.last_error_date) : Infinity;
+                              // Lỗi "thực sự đang xảy ra" = còn tin pending HOẶC lỗi vừa mới (<2 phút).
+                              // Lỗi cũ + 0 pending = lịch sử (vd 503 hồi Render suspend), không phải sự cố hiện tại.
+                              const activeError = !!wi.last_error_message && (wi.pending_update_count > 0 || errAgeSec <= 120);
+                              const staleError = !!wi.last_error_message && !activeError;
 
-                            {!webhookDetails.webhookInfo.last_error_message && webhookDetails.webhookInfo.url && (
-                              <div className="grid grid-cols-3 text-xs py-1.5 text-green-700 bg-green-50/50 p-2 rounded-lg">
-                                <span className="font-bold flex items-center gap-1 font-sans">
-                                  <CheckCircle2 className="w-3.5 h-3.5" /> Trạng thái truyền:
-                                </span>
-                                <span className="col-span-2 font-medium font-sans">
-                                  Kết nối thông suốt! Máy chủ Telegram đang nhận gửi dữ liệu bình thường.
-                                </span>
-                              </div>
-                            )}
+                              if (activeError) {
+                                return (
+                                  <div className="grid grid-cols-3 text-xs py-1.5 text-rose-600 bg-rose-50/50 p-2 rounded-lg">
+                                    <span className="font-bold flex items-center gap-1 font-sans">
+                                      <AlertCircle className="w-3.5 h-3.5" /> Lỗi gửi tin gần nhất:
+                                    </span>
+                                    <span className="col-span-2 font-medium leading-relaxed break-words font-mono">
+                                      {wi.last_error_message}
+                                      {wi.last_error_date && (
+                                        <span className="block text-[10px] text-slate-400 mt-1">
+                                          Thời gian lỗi: {new Date(wi.last_error_date * 1000).toLocaleString('vi-VN')}
+                                        </span>
+                                      )}
+                                    </span>
+                                  </div>
+                                );
+                              }
+
+                              if (wi.url) {
+                                return (
+                                  <div className="grid grid-cols-3 text-xs py-1.5 text-green-700 bg-green-50/50 p-2 rounded-lg">
+                                    <span className="font-bold flex items-center gap-1 font-sans">
+                                      <CheckCircle2 className="w-3.5 h-3.5" /> Trạng thái truyền:
+                                    </span>
+                                    <span className="col-span-2 font-medium font-sans">
+                                      Kết nối thông suốt! Máy chủ Telegram đang nhận gửi dữ liệu bình thường.
+                                      {staleError && wi.last_error_date && (
+                                        <span className="block text-[10px] text-slate-400 mt-1 font-normal">
+                                          (Lỗi cũ đã qua lúc {new Date(wi.last_error_date * 1000).toLocaleString('vi-VN')} — không còn ảnh hưởng.)
+                                        </span>
+                                      )}
+                                    </span>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </>
                         )}
                       </div>

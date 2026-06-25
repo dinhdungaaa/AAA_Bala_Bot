@@ -1452,11 +1452,21 @@ app.post("/api/bots/:botId/telegram-webhook", async (req, res) => {
   }
 
   const webhookUrl = `${origin}/api/telegram-webhook/${botId}`;
-  const tgUrl = `https://api.telegram.org/bot${bot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
+  // deleteWebhook trước (drop_pending_updates) để Telegram XOÁ HẲN bản ghi webhook cũ,
+  // gồm cả last_error_date/last_error_message bị cache. setWebhook đơn thuần KHÔNG xoá
+  // được trường lỗi lịch sử này — đây là lý do bấm "đồng bộ" mà lỗi 503 cũ vẫn hiện.
+  const tgUrl = `https://api.telegram.org/bot${bot.telegramToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}&drop_pending_updates=true`;
 
   console.log(`[Telegram Register Manual] URL: ${webhookUrl}`);
 
   try {
+    // Reset hẳn webhook để clear cache lỗi cũ; bỏ qua nếu deleteWebhook lỗi nhẹ.
+    try {
+      await fetch(`https://api.telegram.org/bot${bot.telegramToken}/deleteWebhook?drop_pending_updates=true`);
+    } catch (delErr) {
+      console.warn("[Telegram] deleteWebhook trước setWebhook thất bại (bỏ qua):", delErr);
+    }
+
     const tgRes = await fetch(tgUrl);
     const tgData = await tgRes.json();
     
