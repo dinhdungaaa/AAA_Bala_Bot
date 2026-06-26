@@ -10,17 +10,35 @@ export type CustomerCtx = { lead: string; hasRealName: boolean };
 
 export type SynthesisOpts = {
   answerStyle: "sales" | "reference";
+  // Chỉ áp dụng cho mode "reference": cho phép gợi ý sản phẩm ngắn gọn khi khách hỏi liên quan.
+  allowProductIntro?: boolean;
   customer?: CustomerCtx;
   history?: HistoryTurn[];
 };
 
-const STYLE_RULES: Record<"sales" | "reference", string> = {
-  sales:
-    "Giọng thân thiện như nhân viên tư vấn bán hàng thật. Sau khi trả lời đúng trọng tâm, " +
-    "có thể thêm một lời mời/CTA tự nhiên để chốt đơn. Vẫn tuyệt đối bám tài liệu.",
-  reference:
-    "Giọng trung lập, khách quan, súc tích. Trả lời đúng trọng tâm, không bán hàng, không CTA.",
-};
+// Quy tắc giọng theo kiểu bot. Mode "reference" (tra cứu kiến thức) tách 2 nhánh:
+// - allowProductIntro=false: thuần kiến thức, tuyệt đối không bán hàng.
+// - allowProductIntro=true: ưu tiên kiến thức, chỉ gợi ý sản phẩm khi khách hỏi đúng chủ đề.
+function buildStyleRule(answerStyle: "sales" | "reference", allowProductIntro?: boolean): string {
+  if (answerStyle === "sales") {
+    return (
+      "Giọng thân thiện như nhân viên tư vấn bán hàng thật. Sau khi trả lời đúng trọng tâm, " +
+      "có thể thêm một lời mời/CTA tự nhiên để chốt đơn. Vẫn tuyệt đối bám tài liệu."
+    );
+  }
+  if (allowProductIntro) {
+    return (
+      "Giọng trung lập, khách quan, súc tích — ưu tiên trả lời đúng KIẾN THỨC trong tài liệu. " +
+      "KHÔNG chủ động chào mời hay bán hàng. CHỈ KHI câu hỏi của khách liên quan TRỰC TIẾP đến một " +
+      "sản phẩm/dịch vụ CÓ trong tài liệu, được phép giới thiệu NGẮN GỌN (tối đa 1 câu) sản phẩm/dịch " +
+      "vụ đó như một gợi ý hữu ích — không thúc ép, không CTA chốt đơn, không spam liên kết."
+    );
+  }
+  return (
+    "Giọng trung lập, khách quan, súc tích. Trả lời đúng trọng tâm dựa trên KIẾN THỨC trong tài liệu. " +
+    "KHÔNG bán hàng, KHÔNG chào mời sản phẩm, KHÔNG CTA."
+  );
+}
 
 function buildCustomerLine(customer?: CustomerCtx): string | null {
   if (!customer) return null;
@@ -60,7 +78,7 @@ export function buildGroundedPrompt(
 
   return [
     `Bạn là trợ lý của "${bot.name}" (lĩnh vực ${bot.field || "kinh doanh"}).`,
-    STYLE_RULES[opts.answerStyle],
+    buildStyleRule(opts.answerStyle, opts.allowProductIntro),
     ...(customerLine ? [customerLine] : []),
     "",
     "QUY TẮC BẮT BUỘC:",

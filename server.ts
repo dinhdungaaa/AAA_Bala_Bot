@@ -2842,7 +2842,9 @@ async function generateRAGAnswer(
     .map(m => ({ role: (m.sender === "bot" ? "bot" : "user") as "user" | "bot", text: (m.text || "").trim() }))
     .filter(t => t.text);
   const lastUserText = [...priorMessages].reverse().find(m => m.sender === "user")?.text;
-  const synthCtx = { customer: customerCtx, history };
+  // Mode "reference": cho phép gợi ý sản phẩm khi khách hỏi liên quan nếu owner bật allowProductConsulting.
+  const allowProductIntro = bot.allowProductConsulting !== false;
+  const synthCtx = { customer: customerCtx, history, allowProductIntro };
 
   const chitChatKind = detectOffTopicChitChat(query);
   if (chitChatKind) {

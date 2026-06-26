@@ -2280,16 +2280,39 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Phong cách trả lời (RAG)</label>
+                    <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Kiểu Bot (mục đích trả lời)</label>
                     <select
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
                       value={activeBot.answerStyle || 'sales'}
                       onChange={(e) => handleUpdateBotSettings({ answerStyle: e.target.value as 'sales' | 'reference' })}
                     >
-                      <option value="sales">Bán hàng (thân thiện, có CTA)</option>
-                      <option value="reference">Tra cứu (trung lập, súc tích)</option>
+                      <option value="sales">Bán hàng — thân thiện, chủ động mời chốt đơn (CTA)</option>
+                      <option value="reference">Tra cứu kiến thức — trung lập, súc tích, hạn chế bán hàng</option>
                     </select>
+                    <span className="text-[10px] text-slate-400 block mt-1">
+                      {activeBot.answerStyle === 'reference'
+                        ? 'Bot tập trung trả lời đúng kiến thức đã nạp, không chào mời.'
+                        : 'Bot tư vấn như nhân viên sale, có thể gợi ý chốt đơn.'}
+                    </span>
                   </div>
+
+                  {activeBot.answerStyle === 'reference' && (
+                    <div className="flex items-start justify-between gap-3 bg-amber-50/60 border border-amber-200 rounded-lg p-3">
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-xs text-slate-800">Cho phép gợi ý sản phẩm khi khách hỏi liên quan</h4>
+                        <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
+                          Bật: khi câu hỏi liên quan trực tiếp đến sản phẩm/dịch vụ có trong tài liệu, bot được
+                          giới thiệu ngắn gọn (1 câu), không thúc ép. Tắt: thuần kiến thức, tuyệt đối không nhắc sản phẩm.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleUpdateBotSettings({ allowProductConsulting: activeBot.allowProductConsulting === false })}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${activeBot.allowProductConsulting !== false ? 'bg-amber-500' : 'bg-slate-350'}`}
+                      >
+                        <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out ${activeBot.allowProductConsulting !== false ? 'translate-x-5' : 'translate-x-0'}`}></span>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-4">

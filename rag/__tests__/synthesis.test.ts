@@ -20,6 +20,19 @@ describe("buildGroundedPrompt", () => {
     expect(sales.toLowerCase()).toMatch(/bán|chốt|tư vấn|CTA/i);
     expect(ref.toLowerCase()).toMatch(/trung lập|khách quan|súc tích/);
   });
+  it("reference + cam san pham -> tuyet doi khong ban hang", () => {
+    const p = buildGroundedPrompt(bot, passages, { answerStyle: "reference", allowProductIntro: false });
+    expect(p).toMatch(/KHÔNG bán hàng/);
+    expect(p).toMatch(/KHÔNG chào mời sản phẩm/);
+  });
+
+  it("reference + cho gioi thieu -> chi goi y khi lien quan, khong CTA", () => {
+    const p = buildGroundedPrompt(bot, passages, { answerStyle: "reference", allowProductIntro: true });
+    expect(p).toMatch(/CHỈ KHI/);
+    expect(p.toLowerCase()).toMatch(/liên quan trực tiếp/);
+    expect(p).toMatch(/không thúc ép/);
+  });
+
   it("khong co doan -> yeu cau noi chua co thong tin", () => {
     const p = buildGroundedPrompt(bot, [], { answerStyle: "reference" });
     expect(p.toLowerCase()).toMatch(/chưa có thông tin|không có trong tài liệu/);
