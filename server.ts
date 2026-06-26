@@ -8,7 +8,7 @@ import { embedText, hashText } from "./rag/embeddings.js";
 import { rankBySimilarity, buildEmbedQuery } from "./rag/retriever.js";
 import { synthesizeAnswer } from "./rag/synthesis.js";
 import { TOP_K, SIM_THRESHOLD } from "./rag/constants.js";
-import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult } from "./src/types.js";
+import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult, TelegramGroup } from "./src/types.js";
 import {
   getSupabaseConfig,
   withSupabaseConfig,
@@ -48,7 +48,9 @@ import {
   dbSaveReminderLog,
   dbGetReminderLogs,
   dbSaveUserConfig,
-  dbGetUserConfig
+  dbGetUserConfig,
+  dbGetTelegramGroups,
+  dbSaveTelegramGroup
 } from "./supabaseService.js";
 
 import {
@@ -1485,6 +1487,46 @@ app.post("/api/check-token", async (req, res) => {
   }
 });
 
+// Registry các nhóm Telegram bot đã được add vào (auto-bắt qua webhook).
+const telegramGroups: TelegramGroup[] = [];
+
+// Ghi nhận/cập nhật một nhóm khi bot nhìn thấy hoạt động trong đó.
+// isActive=false khi bot bị xóa/kick. Lưu cả in-memory + DB (idempotent theo id).
+async function registerTelegramGroup(
+  botId: string,
+  chat: { id: number | string; title?: string; type?: string },
+  opts?: { isActive?: boolean }
+): Promise<void> {
+  const type = chat.type === "channel" ? "channel" : chat.type === "supergroup" ? "supergroup" : "group";
+  if (type !== "group" && type !== "supergroup" && type !== "channel") return;
+  const chatId = String(chat.id);
+  const id = `${botId}:${chatId}`;
+  const now = new Date().toISOString();
+  const isActive = opts?.isActive !== false;
+
+  const existing = telegramGroups.find(g => g.id === id);
+  const group: TelegramGroup = existing
+    ? { ...existing, title: chat.title || existing.title, type, isActive, lastSeenAt: now }
+    : { id, botId, chatId, title: chat.title || chatId, type, isActive, addedAt: now, lastSeenAt: now };
+
+  if (existing) {
+    Object.assign(existing, group);
+  } else {
+    telegramGroups.unshift(group);
+  }
+  await dbSaveTelegramGroup(group);
+}
+
+// Liệt kê nhóm còn hoạt động của một bot (cho UI đặt lịch chọn).
+app.get("/api/bots/:botId/telegram-groups", async (req, res) => {
+  const botId = req.params.botId;
+  const list = telegramGroups
+    .filter(g => g.botId === botId && g.isActive)
+    .sort((a, b) => (b.lastSeenAt || "").localeCompare(a.lastSeenAt || ""))
+    .map(g => ({ chatId: g.chatId, title: g.title, type: g.type, lastSeenAt: g.lastSeenAt }));
+  res.json({ groups: list });
+});
+
 // Real Webhook handler from Live Telegram API
 app.post("/api/telegram-webhook/:botId", async (req, res) => {
   const update = req.body;
@@ -1501,8 +1543,26 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
   res.status(200).send("OK");
 
   try {
+    // Bot được add/xóa khỏi nhóm → Telegram bắn my_chat_member. Bắt để đăng ký nhóm.
+    if (update?.my_chat_member?.chat) {
+      const mcm = update.my_chat_member;
+      const status = mcm.new_chat_member?.status;
+      const inGroup = status === "member" || status === "administrator" || status === "creator";
+      const removed = status === "left" || status === "kicked";
+      if (inGroup || removed) {
+        await registerTelegramGroup(botId, mcm.chat, { isActive: inGroup });
+        console.log(`[Telegram Webhook] my_chat_member: nhóm "${mcm.chat.title || mcm.chat.id}" → ${inGroup ? "active" : "removed"}`);
+      }
+      return;
+    }
+
     if (!update || !update.message) {
       return;
+    }
+
+    // Tin nhắn đến từ nhóm → đăng ký nhóm (phòng khi bỏ lỡ my_chat_member lúc add).
+    if (update.message.chat && (update.message.chat.type === "group" || update.message.chat.type === "supergroup")) {
+      await registerTelegramGroup(botId, update.message.chat, { isActive: true });
     }
 
     const updateKey = `${botId}:${update.update_id || "no-update"}:${update.message?.chat?.id || "no-chat"}:${update.message?.message_id || "no-message"}`;
@@ -3739,6 +3799,17 @@ async function startServer() {
     // Initialize Scheduler Engine
     await loadSchedulesFromDB();
     startSchedulerEngine();
+
+    // Nạp registry nhóm Telegram đã bắt được (để UI đặt lịch chọn nhóm sau restart).
+    try {
+      const dbGroups = await dbGetTelegramGroups([]);
+      for (const g of dbGroups) {
+        if (!telegramGroups.some(x => x.id === g.id)) telegramGroups.push(g);
+      }
+      console.log(`[Telegram] Loaded ${telegramGroups.length} group(s) from registry.`);
+    } catch (err) {
+      console.warn("[Telegram] Failed to load group registry:", err);
+    }
 
     // Khoi dong Zalo Group Bot (no-op neu ZALO_GROUP_BOT_ENABLED != true).
     await initZaloGroupBot({

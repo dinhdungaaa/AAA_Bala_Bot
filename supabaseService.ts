@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { BotConfig, KnowledgeSource, KnowledgeChunk, ChatSession, FAQItem, WorkspaceUser, ScheduleItem, ReminderLog } from './src/types';
+import { BotConfig, KnowledgeSource, KnowledgeChunk, ChatSession, FAQItem, WorkspaceUser, ScheduleItem, ReminderLog, TelegramGroup } from './src/types';
 import { AsyncLocalStorage } from 'async_hooks';
 
 let _supabaseClient: SupabaseClient | null = null;
@@ -1166,6 +1166,42 @@ export async function dbGetUserConfig(email: string): Promise<{ url: string; key
   } catch (err: any) {
     console.warn("dbGetUserConfig failed (non-critical):", err.message || err);
     return null;
+  }
+}
+
+// ================= TELEGRAM GROUP REGISTRY (AUTO-CAPTURE) =================
+
+export async function dbGetTelegramGroups(localFallback: TelegramGroup[]): Promise<TelegramGroup[]> {
+  const client = getSupabaseClient();
+  if (!client) return localFallback;
+  try {
+    const { data, error } = await client.from('telegram_groups').select('*');
+    if (error) {
+      console.warn("Supabase dbGetTelegramGroups error, using local fallback:", error.message);
+      return localFallback;
+    }
+    const dbGroups = data as TelegramGroup[];
+    const merged = [...dbGroups];
+    for (const local of localFallback) {
+      if (!merged.some(g => g.id === local.id)) merged.push(local);
+    }
+    return merged;
+  } catch (err: any) {
+    console.warn("Supabase dbGetTelegramGroups failed (using local fallback):", err.message || err);
+    return localFallback;
+  }
+}
+
+export async function dbSaveTelegramGroup(group: TelegramGroup): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('telegram_groups').upsert(group, { onConflict: 'id' });
+    if (error) throw error;
+    return true;
+  } catch (err: any) {
+    console.warn("Supabase dbSaveTelegramGroup failed (non-critical):", err.message || err);
+    return false;
   }
 }
 

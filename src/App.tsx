@@ -463,6 +463,7 @@ export default function App() {
   // Schedule/Reminder System States
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [remLogs, setRemLogs] = useState<ReminderLog[]>([]);
+  const [tgGroups, setTgGroups] = useState<Array<{ chatId: string; title: string; type: string }>>([]);
   const [schedForm, setSchedForm] = useState({
     label: '', content: '', time: '08:00', frequency: 'daily' as string,
     targetChatIds: '', aiEnhanced: false, aiTone: 'friendly' as string,
@@ -665,6 +666,11 @@ export default function App() {
     fetch(`/api/bots/${selectedBotId}/reminder-logs`)
       .then(res => res.json())
       .then(data => setRemLogs(data));
+
+    fetch(`/api/bots/${selectedBotId}/telegram-groups`)
+      .then(res => res.json())
+      .then(data => setTgGroups(data.groups || []))
+      .catch(() => setTgGroups([]));
 
     fetch(`/api/bots/${selectedBotId}/conversations`)
       .then(res => res.json())
@@ -5179,10 +5185,44 @@ WHERE email = 'customer-email@example.com';`}
                       </div>
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Telegram Group Chat IDs (phân cách bằng dấu phẩy)</label>
-                      <input type="text" placeholder="VD: -100123456789, -100987654321" value={schedForm.targetChatIds} onChange={e => setSchedForm({ ...schedForm, targetChatIds: e.target.value })}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono" />
-                      <p className="text-[10px] text-slate-400 mt-1">Lấy Group Chat ID bằng cách thêm bot @RawDataBot vào group Telegram.</p>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Nhóm Telegram nhận nhắc</label>
+                        <button type="button" onClick={async () => {
+                          if (!selectedBotId) return;
+                          try {
+                            const r = await fetch(`/api/bots/${selectedBotId}/telegram-groups`);
+                            const d = await r.json();
+                            setTgGroups(d.groups || []);
+                          } catch { /* ignore */ }
+                        }} className="text-[10px] font-semibold text-teal-600 hover:text-teal-700 cursor-pointer">↻ Làm mới</button>
+                      </div>
+                      {tgGroups.length > 0 ? (
+                        <div className="space-y-1.5 border border-slate-200 rounded-lg p-2 bg-slate-50/50 max-h-40 overflow-y-auto">
+                          {tgGroups.map(g => {
+                            const selected = schedForm.targetChatIds.split(',').map(s => s.trim()).filter(Boolean);
+                            const checked = selected.includes(g.chatId);
+                            return (
+                              <label key={g.chatId} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white cursor-pointer text-sm">
+                                <input type="checkbox" checked={checked} onChange={() => {
+                                  const next = checked ? selected.filter(id => id !== g.chatId) : [...selected, g.chatId];
+                                  setSchedForm({ ...schedForm, targetChatIds: next.join(', ') });
+                                }} className="accent-teal-600" />
+                                <span className="font-medium text-slate-700 flex-1 min-w-0 truncate">{g.title}</span>
+                                <span className="text-[10px] text-slate-400 font-mono">{g.chatId}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="border border-dashed border-slate-300 rounded-lg p-3 text-center text-[11px] text-slate-400">
+                          Chưa thấy nhóm nào. Thêm bot vào nhóm Telegram, gửi 1 tin nhắn trong nhóm, rồi bấm <b>Làm mới</b>.
+                        </div>
+                      )}
+                      <details className="mt-2">
+                        <summary className="text-[10px] text-slate-400 cursor-pointer hover:text-slate-600">Hoặc nhập Chat ID thủ công</summary>
+                        <input type="text" placeholder="VD: -100123456789, -100987654321" value={schedForm.targetChatIds} onChange={e => setSchedForm({ ...schedForm, targetChatIds: e.target.value })}
+                          className="w-full mt-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono" />
+                      </details>
                     </div>
                     {/* AI PUSH TOGGLE */}
                     <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-xl p-4 space-y-3">

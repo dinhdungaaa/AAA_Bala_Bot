@@ -104,6 +104,19 @@ export interface FAQItem {
   useCount: number;
 }
 
+// Nhóm Telegram mà bot đã được add vào — tự bắt qua webhook (my_chat_member / tin nhắn group)
+// để người dùng chọn từ dropdown khi đặt lịch nhắc, thay vì gõ tay chat_id âm.
+export interface TelegramGroup {
+  id: string;          // `${botId}:${chatId}` — khóa upsert idempotent
+  botId: string;
+  chatId: string;      // ID nhóm (số âm) dạng chuỗi
+  title: string;
+  type: 'group' | 'supergroup' | 'channel';
+  isActive: boolean;   // false khi bot bị xóa/kick khỏi nhóm
+  addedAt: string;
+  lastSeenAt: string;
+}
+
 export interface AnalyticsSummary {
   totalUsers: number;
   totalMessages: number;
