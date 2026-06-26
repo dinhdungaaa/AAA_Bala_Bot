@@ -197,7 +197,7 @@ export default function App() {
   const [trainType, setTrainType] = useState<'file' | 'text' | 'faq' | 'url'>('file');
   const [fileStorageStrategy, setFileStorageStrategy] = useState<'default' | 'extract-and-delete' | 'byo-cloud'>('extract-and-delete');
   const [byoCloudUrl, setByoCloudUrl] = useState('');
-  const [uploadFileName, setUploadFileName] = useState('Bang_Gia_Bo_Sung.pdf');
+  const [uploadFileName, setUploadFileName] = useState('Tai_lieu_mau.txt');
   const [manualText, setManualText] = useState('');
   const [manualTextTitle, setManualTextTitle] = useState('');
   const [faqQ, setFaqQ] = useState('');
@@ -2409,7 +2409,8 @@ export default function App() {
                         <div className="border-2 border-dashed border-slate-350 bg-slate-50 p-8 rounded-xl text-center hover:bg-slate-100/50 transition-colors cursor-pointer relative">
                           <input
                             type="file"
-                            className="absolute inset-0 opacity-0 cursor-pointer"
+                            title=""
+                            className="absolute inset-0 opacity-0 cursor-pointer text-[0px]"
                             onChange={(e) => {
                               if (e.target.files && e.target.files[0]) {
                                 setUploadFileName(e.target.files[0].name);
@@ -2420,11 +2421,13 @@ export default function App() {
                           <Upload className="w-10 h-10 text-slate-400 mx-auto mb-3" />
                           <span className="font-bold text-sm text-slate-800 block">Kéo thả file tài liệu hoặc Click để tìm</span>
                           <span className="text-[11px] text-slate-400 block mt-1">Hỗ trợ tốt nhất các tệp văn bản bóc tách như <b>.txt, .md, .csv, .json, .xml</b>. Dung lượng tối ưu không tốn dung lượng máy chủ.</span>
-                          
-                          <div className="mt-4 inline-flex items-center gap-2 bg-slate-200 text-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-300 pointer-events-none">
-                            <FileText className="w-3.5 h-3.5 text-blue-500" />
-                            <span className="font-semibold">{selectedFile ? selectedFile.name : uploadFileName}</span>
-                          </div>
+
+                          {selectedFile && (
+                            <div className="mt-4 inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 text-xs px-3 py-1.5 rounded-lg border border-emerald-200 pointer-events-none">
+                              <FileText className="w-3.5 h-3.5 text-emerald-500" />
+                              <span className="font-semibold">Đã chọn tài liệu — sẵn sàng xử lý</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}

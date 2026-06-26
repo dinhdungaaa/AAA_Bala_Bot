@@ -1737,6 +1737,36 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
 });
 
 const processedFacebookMessageIds = new Set<string>();
+// Cache tên người dùng Facebook (PSID -> tên) để không gọi Graph API mỗi tin nhắn.
+const facebookUserNameCache = new Map<string, { name: string; at: number }>();
+const FACEBOOK_NAME_TTL_MS = 24 * 60 * 60 * 1000;
+
+// Lấy tên thật của người chat từ Graph API (PSID). Trả "" nếu không lấy được —
+// caller sẽ tự fallback xưng hô trung lập. Emoji trong tên được xử lý ở getGenderAndName.
+async function fetchFacebookUserName(bot: BotConfig, psid: string): Promise<string> {
+  const pageAccessToken = bot.facebookPageAccessToken || process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
+  if (!pageAccessToken || !psid) return "";
+
+  const cached = facebookUserNameCache.get(psid);
+  if (cached && Date.now() - cached.at < FACEBOOK_NAME_TTL_MS) return cached.name;
+
+  try {
+    const url = `https://graph.facebook.com/${getFacebookGraphApiVersion()}/${encodeURIComponent(psid)}?fields=first_name,last_name,name&access_token=${encodeURIComponent(pageAccessToken)}`;
+    const res = await fetch(url);
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.warn(`[Facebook] Không lấy được tên PSID ${psid}: ${data?.error?.message || res.status}`);
+      facebookUserNameCache.set(psid, { name: "", at: Date.now() });
+      return "";
+    }
+    const name = [data.first_name, data.last_name].filter(Boolean).join(" ") || data.name || "";
+    facebookUserNameCache.set(psid, { name, at: Date.now() });
+    return name;
+  } catch (err: any) {
+    console.warn(`[Facebook] Lỗi fetch tên PSID ${psid}: ${err?.message || err}`);
+    return "";
+  }
+}
 
 function getFacebookVerifyToken() {
   return process.env.FACEBOOK_VERIFY_TOKEN || "balabot-dev-verify-token";
@@ -1798,7 +1828,9 @@ async function processFacebookIncomingMessage(bot: BotConfig, event: any, option
 
   const userKey = `facebook:${senderId}`;
   const username = `facebook_${senderId}`;
-  const fullName = "Khách hàng Facebook";
+  // Lấy tên thật của khách từ Graph API (có cache). Rỗng -> xưng hô trung lập.
+  const resolvedName = await fetchFacebookUserName(bot, senderId);
+  const fullName = resolvedName || "Khách hàng Facebook";
 
   let session = chatSessions.find(s => s.botId === bot.id && s.telegramUserId === userKey);
   if (!session) {
@@ -2591,7 +2623,15 @@ function postProcessBotReply(text: string, options?: { shouldGreet?: boolean; re
   if (options?.shouldGreet === false || hasPriorBotReply) {
     cleaned = removeRepeatedGreeting(cleaned);
   }
-  return cleaned;
+  return capitalizeFirstLetter(cleaned);
+}
+
+// Viết hoa chữ cái đầu tiên của câu trả lời, bỏ qua khoảng trắng/dấu câu/emoji ở đầu.
+function capitalizeFirstLetter(text: string): string {
+  const str = String(text || "");
+  const idx = str.search(/\p{L}/u);
+  if (idx === -1) return str;
+  return str.slice(0, idx) + str.charAt(idx).toUpperCase() + str.slice(idx + 1);
 }
 
 function inferSupportIntent(query: string): string {
