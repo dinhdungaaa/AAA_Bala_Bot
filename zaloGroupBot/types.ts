@@ -41,12 +41,14 @@ export interface GroupBinding {
   group_id: string;
   group_name?: string;
   bot_id: string;
+  owner_email: string;
   enabled: boolean;
 }
 
 export interface ZaloSessionRecord {
   id: string;
   account_label: string;
+  owner_email: string;
   credentials: any | null;
   status: "active" | "needs_login" | "error";
   last_error?: string | null;
@@ -60,4 +62,24 @@ export interface ZaloRuntimeStatus {
   accountName: string | null;
   listenerConnected: boolean;
   lastError: string | null;
+}
+
+export interface ZaloSession {
+  id: string;
+  accountLabel: string;
+  ownerEmail: string;
+  status: "active" | "needs_login" | "error";
+  lastError?: string | null;
+}
+
+export interface ZaloInjectedDeps {
+  generateRAGAnswer: ZaloDeps["generateRAGAnswer"];
+  postProcessBotReply: ZaloDeps["postProcessBotReply"];
+  getBots: ZaloDeps["getBots"];
+  chatSessions: ZaloDeps["chatSessions"];
+  saveConversation: ZaloDeps["saveConversation"];
+  analytics: ZaloDeps["analytics"];
+  checkUsage: ZaloDeps["checkUsage"];
+  recordUsage: ZaloDeps["recordUsage"];
+  blockMessage: string;
 }
