@@ -6,8 +6,17 @@ import {
   Menu, X, Clock, Calendar, Zap, Power, Eye
 } from 'lucide-react';
 import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSummary, SaasCustomer, ScheduleItem, ReminderLog } from './types';
+import { PLAN_LIMITS } from '../billing';
 
 const ADMIN_EMAIL = 'ox102.crypto@gmail.com';
+
+// Hạn mức theo gói — NGUỒN DUY NHẤT, lấy thẳng từ billing.ts (PLAN_LIMITS) để
+// admin UI không bao giờ lệch với backend. UI rút gọn còn 3 gói quản lý nhanh.
+const TIER_LIMIT = {
+  free: PLAN_LIMITS.free.messages,         // 150
+  pro: PLAN_LIMITS.pro.messages,           // 10.000
+  enterprise: PLAN_LIMITS.enterprise.messages, // 250.000
+} as const;
 
 const isAdminRoute = () => {
   if (typeof window === 'undefined') return false;
@@ -116,10 +125,10 @@ export default function App() {
 
   // States for user subscription management/simulator
   const [simulatedCustomers, setSimulatedCustomers] = useState<SaasCustomer[]>([
-    { id: '1', name: 'Đại lý Gạo Tám Thơm Sài Gòn', email: 'gaotamthom@gmail.com', phone: '090.123.4567', tier: 'free', messageLimit: 1000, joinedDate: '15/05/2026' },
-    { id: '2', name: 'Hợp tác xã Nông sản sạch Đà Lạt', email: 'dalatcleanfoods@gmail.com', phone: '091.234.5678', tier: 'pro', messageLimit: 25000, joinedDate: '20/04/2026' },
-    { id: '3', name: 'Vựa Trái cây Xuất khẩu Miền Tây', email: 'mientayfruits@outlook.com', phone: '098.765.4321', tier: 'enterprise', messageLimit: 150000, joinedDate: '01/03/2026' },
-    { id: '4', name: 'Vật tư Nông nghiệp Phú Quốc', email: 'phuquocagri@yahoo.com', phone: '097.766.5544', tier: 'free', messageLimit: 1000, joinedDate: '10/05/2026' }
+    { id: '1', name: 'Đại lý Gạo Tám Thơm Sài Gòn', email: 'gaotamthom@gmail.com', phone: '090.123.4567', tier: 'free', messageLimit: TIER_LIMIT.free, joinedDate: '15/05/2026' },
+    { id: '2', name: 'Hợp tác xã Nông sản sạch Đà Lạt', email: 'dalatcleanfoods@gmail.com', phone: '091.234.5678', tier: 'pro', messageLimit: TIER_LIMIT.pro, joinedDate: '20/04/2026' },
+    { id: '3', name: 'Vựa Trái cây Xuất khẩu Miền Tây', email: 'mientayfruits@outlook.com', phone: '098.765.4321', tier: 'enterprise', messageLimit: TIER_LIMIT.enterprise, joinedDate: '01/03/2026' },
+    { id: '4', name: 'Vật tư Nông nghiệp Phú Quốc', email: 'phuquocagri@yahoo.com', phone: '097.766.5544', tier: 'free', messageLimit: TIER_LIMIT.free, joinedDate: '10/05/2026' }
   ]);
 
   const [newCustomerName, setNewCustomerName] = useState('');
@@ -4919,7 +4928,7 @@ export default function App() {
                                   alert('Vui lòng nhập Tên và Email để khởi tạo khách hàng!');
                                   return;
                                 }
-                                const limitMap = { free: 1000, pro: 25000, enterprise: 150000 };
+                                const limitMap = TIER_LIMIT;
                                 const newC = {
                                   name: newCustomerName,
                                   email: newCustomerEmail,
@@ -5004,8 +5013,8 @@ export default function App() {
                                       <div className="inline-flex gap-1">
                                         <button
                                           onClick={() => {
-                                            handleUpdateCustomer(c.id, { tier: 'free', messageLimit: 1000 });
-                                            alert(`Đã hạ cấp thủ công tài khoản ${c.name} về gói Standard Free (Giới hạn 1,000 tin).`);
+                                            handleUpdateCustomer(c.id, { tier: 'free', messageLimit: TIER_LIMIT.free });
+                                            alert(`Đã hạ cấp thủ công tài khoản ${c.name} về gói Standard Free (Giới hạn ${TIER_LIMIT.free.toLocaleString()} tin).`);
                                           }}
                                           disabled={c.tier === 'free'}
                                           className={`px-2 py-1 rounded text-[10px] font-bold transition-colors font-sans cursor-pointer ${c.tier === 'free' ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
@@ -5014,8 +5023,8 @@ export default function App() {
                                         </button>
                                         <button
                                           onClick={() => {
-                                            handleUpdateCustomer(c.id, { tier: 'pro', messageLimit: 25000 });
-                                            alert(`Đã nâng cấp thủ công tài khoản ${c.name} lên gói Premium Pro (Hạn mức 25,000 tin nhắn).`);
+                                            handleUpdateCustomer(c.id, { tier: 'pro', messageLimit: TIER_LIMIT.pro });
+                                            alert(`Đã nâng cấp thủ công tài khoản ${c.name} lên gói Premium Pro (Hạn mức ${TIER_LIMIT.pro.toLocaleString()} tin nhắn).`);
                                           }}
                                           disabled={c.tier === 'pro'}
                                           className={`px-2 py-1 rounded text-[10px] font-bold transition-colors font-sans cursor-pointer ${c.tier === 'pro' ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'}`}
@@ -5024,8 +5033,8 @@ export default function App() {
                                         </button>
                                         <button
                                           onClick={() => {
-                                            handleUpdateCustomer(c.id, { tier: 'enterprise', messageLimit: 150000 });
-                                            alert(`Đã nâng cấp thủ công tài khoản ${c.name} lên gói Enterprise (Hạn mức 150,000 tin nhắn).`);
+                                            handleUpdateCustomer(c.id, { tier: 'enterprise', messageLimit: TIER_LIMIT.enterprise });
+                                            alert(`Đã nâng cấp thủ công tài khoản ${c.name} lên gói Enterprise (Hạn mức ${TIER_LIMIT.enterprise.toLocaleString()} tin nhắn).`);
                                           }}
                                           disabled={c.tier === 'enterprise'}
                                           className={`px-2 py-1 rounded text-[10px] font-bold transition-colors font-sans cursor-pointer ${c.tier === 'enterprise' ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'}`}
@@ -5073,9 +5082,9 @@ export default function App() {
                           </li>
                         </ul>
                         <pre className="bg-slate-950 text-emerald-400 p-3 rounded-lg font-mono text-[10px] overflow-x-auto text-left leading-relaxed">
-{`-- Cập nhật gói Premium Pro và Set hạn mức 25,000 tin nhắn cho khách hàng cụ thể
-UPDATE public.profiles 
-SET tier = 'pro', message_limit = 25000, updated_at = NOW() 
+{`-- Cập nhật gói Premium Pro và Set hạn mức 10,000 tin nhắn cho khách hàng cụ thể
+UPDATE public.profiles
+SET tier = 'pro', message_limit = 10000, updated_at = NOW()
 WHERE email = 'customer-email@example.com';`}
                         </pre>
                       </div>
@@ -5600,7 +5609,7 @@ WHERE email = 'customer-email@example.com';`}
                               alert('Vui lòng điền đủ Tên và Email để đăng ký khách hàng!');
                               return;
                             }
-                            const limitMap = { free: 1000, pro: 25000, enterprise: 150000 };
+                            const limitMap = TIER_LIMIT;
                             const defaultLimit = limitMap[newCustomerTier];
                             const newGuest = {
                               name: newCustomerName,
@@ -5763,15 +5772,15 @@ WHERE email = 'customer-email@example.com';`}
                                         <div className="flex flex-wrap justify-end gap-1.5">
                                           <button
                                             onClick={() => {
-                                              handleUpdateCustomer(c.id, { tier: 'free', messageLimit: 1000 });
-                                              
+                                              handleUpdateCustomer(c.id, { tier: 'free', messageLimit: TIER_LIMIT.free });
+
                                               // Log statement
-                                              const logText = `UPDATE public.profiles \nSET tier = 'free', message_limit = 1000, updated_at = NOW() \nWHERE id = '${c.id}';`;
+                                              const logText = `UPDATE public.profiles \nSET tier = 'free', message_limit = ${TIER_LIMIT.free}, updated_at = NOW() \nWHERE id = '${c.id}';`;
                                               setAdminActionLogs(prevLogs => [
                                                 { timestamp: new Date().toLocaleTimeString('vi-VN'), query: logText, status: 'SUCCESS' },
                                                 ...prevLogs
                                               ]);
-                                              alert(`Đã hạ cấp thủ công tài khoản ${c.name} về gói Standard Free (Giới hạn 1,000 tin).`);
+                                              alert(`Đã hạ cấp thủ công tài khoản ${c.name} về gói Standard Free (Giới hạn ${TIER_LIMIT.free.toLocaleString()} tin).`);
                                             }}
                                             disabled={c.tier === 'free'}
                                             className={`px-2 py-1 rounded text-[10px] font-bold transition-all whitespace-nowrap cursor-pointer ${c.tier === 'free' ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' : 'bg-slate-50 hover:bg-slate-100 text-slate-705 border border-slate-250 active:scale-95'}`}
@@ -5782,14 +5791,14 @@ WHERE email = 'customer-email@example.com';`}
                                           
                                           <button
                                             onClick={() => {
-                                              handleUpdateCustomer(c.id, { tier: 'pro', messageLimit: 25000 });
-                                              
-                                              const logText = `UPDATE public.profiles \nSET tier = 'pro', message_limit = 25000, updated_at = NOW() \nWHERE id = '${c.id}';`;
+                                              handleUpdateCustomer(c.id, { tier: 'pro', messageLimit: TIER_LIMIT.pro });
+
+                                              const logText = `UPDATE public.profiles \nSET tier = 'pro', message_limit = ${TIER_LIMIT.pro}, updated_at = NOW() \nWHERE id = '${c.id}';`;
                                               setAdminActionLogs(prevLogs => [
                                                 { timestamp: new Date().toLocaleTimeString('vi-VN'), query: logText, status: 'SUCCESS' },
                                                 ...prevLogs
                                               ]);
-                                              alert(`Đã nâng cấp thủ công tài khoản ${c.name} lên gói Premium Pro (Hạn mức 25,000 tin nhắn).`);
+                                              alert(`Đã nâng cấp thủ công tài khoản ${c.name} lên gói Premium Pro (Hạn mức ${TIER_LIMIT.pro.toLocaleString()} tin nhắn).`);
                                             }}
                                             disabled={c.tier === 'pro'}
                                             className={`px-2 py-1 rounded text-[10px] font-bold transition-all whitespace-nowrap cursor-pointer ${c.tier === 'pro' ? 'bg-indigo-50/65 text-indigo-400 border border-indigo-150 cursor-not-allowed' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-750 border border-indigo-200 active:scale-95'}`}
@@ -5800,14 +5809,14 @@ WHERE email = 'customer-email@example.com';`}
 
                                           <button
                                             onClick={() => {
-                                              handleUpdateCustomer(c.id, { tier: 'enterprise', messageLimit: 150000 });
-                                              
-                                              const logText = `UPDATE public.profiles \nSET tier = 'enterprise', message_limit = 150000, updated_at = NOW() \nWHERE id = '${c.id}';`;
+                                              handleUpdateCustomer(c.id, { tier: 'enterprise', messageLimit: TIER_LIMIT.enterprise });
+
+                                              const logText = `UPDATE public.profiles \nSET tier = 'enterprise', message_limit = ${TIER_LIMIT.enterprise}, updated_at = NOW() \nWHERE id = '${c.id}';`;
                                               setAdminActionLogs(prevLogs => [
                                                 { timestamp: new Date().toLocaleTimeString('vi-VN'), query: logText, status: 'SUCCESS' },
                                                 ...prevLogs
                                               ]);
-                                              alert(`Đã nâng cấp thủ công tài khoản ${c.name} lên gói Enterprise (Hạn mức 150,000 tin nhắn).`);
+                                              alert(`Đã nâng cấp thủ công tài khoản ${c.name} lên gói Enterprise (Hạn mức ${TIER_LIMIT.enterprise.toLocaleString()} tin nhắn).`);
                                             }}
                                             disabled={c.tier === 'enterprise'}
                                             className={`px-2 py-1 rounded text-[10px] font-bold transition-all whitespace-nowrap cursor-pointer ${c.tier === 'enterprise' ? 'bg-amber-50/65 text-amber-400 border border-amber-200 cursor-not-allowed' : 'bg-amber-55/70 hover:bg-amber-100/80 text-amber-900 border border-amber-300 active:scale-95'}`}
