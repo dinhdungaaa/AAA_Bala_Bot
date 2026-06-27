@@ -18,6 +18,9 @@ export interface ZaloDeps {
   botUid: () => string | null;                 // uid của chính tài khoản bot (để nhận biết @mention)
   send: ZaloSendFn;
   sendTyping: (groupId: string) => Promise<void>;  // hiệu ứng "đang soạn tin" trước khi trả lời
+  checkUsage: (bot: BotConfig) => Promise<{ allowed: boolean }>;  // chặn khi vượt hạn mức billing
+  recordUsage: (bot: BotConfig) => Promise<void>;                 // đếm sau khi trả lời thành công
+  blockMessage: string;                                           // câu gửi khi hết hạn mức
   generateRAGAnswer: (
     bot: BotConfig, query: string,
     userInfo?: { fullName?: string; username?: string; id?: string },

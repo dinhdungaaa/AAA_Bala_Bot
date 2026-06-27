@@ -32,6 +32,13 @@ export function createZaloMessageHandler(
 
       if (!limiter.allow(event.groupId)) return { replied: false, reason: "rate_limited" };
 
+      // Chặn theo hạn mức billing (vượt mức -> gửi thông báo, không gọi AI).
+      const gate = await deps.checkUsage(bot);
+      if (!gate.allowed) {
+        await deps.send(event.groupId, deps.blockMessage);
+        return { replied: false, reason: "usage_blocked" };
+      }
+
       const question = stripMention(event.text, bot.name || "");
       if (!question) return { replied: false, reason: "empty_after_strip" };
 
@@ -99,6 +106,8 @@ export function createZaloMessageHandler(
 
       const sentId = await deps.send(event.groupId, ai.text);
       if (sentId) deps.rememberSentMessage(sentId);
+
+      await deps.recordUsage(bot);
 
       try {
         await deps.saveConversation(session);

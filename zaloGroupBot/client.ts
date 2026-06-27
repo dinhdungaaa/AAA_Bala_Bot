@@ -21,6 +21,9 @@ interface InjectedDeps {
   chatSessions: ZaloDeps["chatSessions"];
   saveConversation: ZaloDeps["saveConversation"];
   analytics: ZaloDeps["analytics"];
+  checkUsage: ZaloDeps["checkUsage"];
+  recordUsage: ZaloDeps["recordUsage"];
+  blockMessage: string;
 }
 
 const ACCOUNT_LABEL = process.env.ZALO_ACCOUNT_LABEL || "default";
@@ -89,6 +92,9 @@ function buildDeps(): ZaloDeps {
     rememberSentMessage,
     isBotMessageId,
     ratePerMin: RATE,
+    checkUsage: injected.checkUsage,
+    recordUsage: injected.recordUsage,
+    blockMessage: injected.blockMessage,
   };
 }
 

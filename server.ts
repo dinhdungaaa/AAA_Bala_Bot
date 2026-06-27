@@ -3865,6 +3865,9 @@ async function startServer() {
       chatSessions,
       saveConversation: dbSaveConversation,
       analytics,
+      checkUsage: async (bot) => ({ allowed: (await checkUsageGate(bot)).allowed }),
+      recordUsage: recordUsageForBot,
+      blockMessage: BLOCK_MESSAGE,
     });
   });
 }

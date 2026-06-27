@@ -11,6 +11,9 @@ function baseDeps(over: Partial<ZaloDeps> = {}): { deps: ZaloDeps; sent: string[
     botUid: () => "BOT_UID",
     send: async (_g, t) => { sent.push(t); return "sent-id"; },
     sendTyping: async () => {},
+    checkUsage: async () => ({ allowed: true }),
+    recordUsage: async () => {},
+    blockMessage: "het han muc",
     generateRAGAnswer: async () => ({ text: "Da, gia 100k a.", sources: [], fallbackTriggered: false }),
     postProcessBotReply: (t) => t,
     getBots: async () => [{ id: "bot-1", name: "BalaBot" } as any],
@@ -102,6 +105,24 @@ describe("createZaloMessageHandler", () => {
     for (const s of sessions) {
       expect(s.messages.filter((m) => m.sender === "user").length).toBe(1);
     }
+  });
+
+  it("chan khi het han muc: khong goi RAG, gui block message", async () => {
+    const ragSpy = vi.fn();
+    const { deps, sent } = baseDeps({ checkUsage: async () => ({ allowed: false }), generateRAGAnswer: ragSpy as any });
+    const h = createZaloMessageHandler(deps);
+    const r = await h(ev({}));
+    expect(ragSpy).not.toHaveBeenCalled();
+    expect(sent).toEqual(["het han muc"]);
+    expect(r.replied).toBe(false);
+  });
+
+  it("record usage sau khi tra loi thanh cong", async () => {
+    const rec = vi.fn();
+    const { deps } = baseDeps({ recordUsage: rec as any });
+    const h = createZaloMessageHandler(deps);
+    await h(ev({}));
+    expect(rec).toHaveBeenCalledTimes(1);
   });
 
   it("khong throw khi generateRAGAnswer loi", async () => {
