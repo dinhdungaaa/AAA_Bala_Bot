@@ -144,7 +144,7 @@ export interface SaasCustomer {
   name: string;
   email: string;
   phone: string;
-  tier: 'free' | 'pro' | 'enterprise';
+  tier: 'free' | 'starter' | 'pro' | 'business' | 'enterprise';
   messageLimit: number;
   joinedDate: string;
   status?: 'active' | 'suspended';
@@ -206,5 +206,20 @@ export interface ScheduleUploadResult {
   totalParsed: number;
   schedules: ScheduleItem[];
   errors?: string[];
+}
+
+// === BILLING / USAGE METERING ===
+
+export interface UsageCounter {
+  ownerKey: string;
+  yearMonth: string;     // "YYYY-MM"
+  messageCount: number;
+  updatedAt: string;
+}
+
+export interface PlanLimit {
+  messages: number;
+  bots: number;
+  channels: number | 'all';
 }
 
