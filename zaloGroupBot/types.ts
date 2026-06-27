@@ -17,6 +17,7 @@ export type ZaloSendFn = (groupId: string, text: string) => Promise<string | nul
 export interface ZaloDeps {
   botUid: () => string | null;                 // uid của chính tài khoản bot (để nhận biết @mention)
   send: ZaloSendFn;
+  sendTyping: (groupId: string) => Promise<void>;  // hiệu ứng "đang soạn tin" trước khi trả lời
   generateRAGAnswer: (
     bot: BotConfig, query: string,
     userInfo?: { fullName?: string; username?: string; id?: string },

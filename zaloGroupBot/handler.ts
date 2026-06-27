@@ -71,6 +71,9 @@ export function createZaloMessageHandler(
       session.lastMessageText = question;
       session.lastMessageTime = userMsg.timestamp;
 
+      // Hiệu ứng "đang soạn tin" trong lúc AI chuẩn bị câu trả lời (không chặn nếu lỗi).
+      await deps.sendTyping(event.groupId);
+
       const ai = await deps.generateRAGAnswer(
         bot,
         question,

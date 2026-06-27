@@ -55,6 +55,11 @@ function buildDeps(): ZaloDeps {
   if (!injected) throw new Error("Zalo not initialized");
   return {
     botUid: () => selfUid,
+    sendTyping: async (groupId) => {
+      // Hiển thị "đang soạn tin" trong nhóm trong lúc chờ AI tạo câu trả lời. Lỗi thì bỏ qua.
+      try { await api?.sendTypingEvent?.(groupId, ThreadType.Group); }
+      catch (e: unknown) { console.warn("[Zalo Client] sendTyping failed:", e instanceof Error ? e.message : e); }
+    },
     send: async (groupId, text) => {
       try {
         const chunks = text.match(/[\s\S]{1,1800}/g) || [text];

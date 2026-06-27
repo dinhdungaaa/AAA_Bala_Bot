@@ -10,6 +10,7 @@ function baseDeps(over: Partial<ZaloDeps> = {}): { deps: ZaloDeps; sent: string[
   const deps: ZaloDeps = {
     botUid: () => "BOT_UID",
     send: async (_g, t) => { sent.push(t); return "sent-id"; },
+    sendTyping: async () => {},
     generateRAGAnswer: async () => ({ text: "Da, gia 100k a.", sources: [], fallbackTriggered: false }),
     postProcessBotReply: (t) => t,
     getBots: async () => [{ id: "bot-1", name: "BalaBot" } as any],
