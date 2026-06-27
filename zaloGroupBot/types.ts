@@ -41,14 +41,14 @@ export interface GroupBinding {
   group_id: string;
   group_name?: string;
   bot_id: string;
-  owner_email: string;
+  owner_email?: string;   // multitenant scoping (zalo-multitenant) — tạm optional tới khi wire xong
   enabled: boolean;
 }
 
 export interface ZaloSessionRecord {
   id: string;
   account_label: string;
-  owner_email: string;
+  owner_email?: string;   // multitenant scoping — tạm optional tới khi wire xong
   credentials: any | null;
   status: "active" | "needs_login" | "error";
   last_error?: string | null;
