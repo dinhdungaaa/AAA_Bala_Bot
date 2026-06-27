@@ -11,7 +11,7 @@ import { ZaloApiError } from "zca-js";
 import type {
   ZaloDeps, ZaloIncomingEvent, ZaloRuntimeStatus, ZaloSessionRecord,
 } from "./types.js";
-import { loadSession, saveSession, getBinding } from "./store.js";
+import { loadSession, saveSession, getBinding, upsertBinding } from "./store.js";
 import { createZaloMessageHandler } from "./handler.js";
 
 interface InjectedDeps {
@@ -135,15 +135,40 @@ function normalizeEvent(raw: Message): ZaloIncomingEvent | null {
   }
 }
 
+// ---------- group auto-discovery ----------
+
+// Khi thấy nhóm LẦN ĐẦU (chưa có binding) → tự đăng ký với bot_id rỗng, enabled=false
+// để nhóm hiện trong admin cho owner gán bot. KHÔNG ghi đè binding đã có (giữ bot_id/enabled).
+async function registerDiscoveredGroup(ev: ZaloIncomingEvent): Promise<void> {
+  try {
+    const existing = await getBinding(ev.groupId);
+    if (existing) return;
+
+    let groupName = `Nhóm ${ev.groupId}`;
+    try {
+      const info = await api?.getGroupInfo?.(ev.groupId);
+      const name = info?.gridInfoMap?.[ev.groupId]?.name;
+      if (name) groupName = String(name);
+    } catch { /* tên là phụ, bỏ qua nếu lỗi */ }
+
+    await upsertBinding({ group_id: ev.groupId, group_name: groupName, bot_id: "", enabled: false });
+    console.log(`[Zalo Client] discovered new group ${ev.groupId} ("${groupName}")`);
+  } catch (e: unknown) {
+    console.warn("[Zalo Client] registerDiscoveredGroup failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 // ---------- listener ----------
 
 async function startListening(handler: (e: ZaloIncomingEvent) => Promise<unknown>) {
   try {
     // Use EventEmitter .on() — the deprecated onMessage/onError/onClosed methods still work
     // but the modern API is EventEmitter events: "message", "error", "closed", "disconnected".
-    api.listener.on("message", (msg: Message) => {
+    api.listener.on("message", async (msg: Message) => {
       const ev = normalizeEvent(msg);
       if (!ev) return;
+      // Đăng ký nhóm mới TRƯỚC khi xử lý, để nhóm luôn hiện trong admin dù chưa gán bot.
+      await registerDiscoveredGroup(ev);
       handler(ev).catch((e: unknown) => console.error("[Zalo Client] handler error:", e));
     });
 

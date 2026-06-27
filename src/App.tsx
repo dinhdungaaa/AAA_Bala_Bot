@@ -3299,17 +3299,19 @@ export default function App() {
                         <div key={b.group_id} className="flex flex-wrap items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
                           <span className="font-medium text-slate-700 flex-1 min-w-0 truncate">{b.group_name || b.group_id}</span>
                           <select
-                            value={b.bot_id}
-                            onChange={(e) => saveZaloBinding(b.group_id, e.target.value, b.enabled, b.group_name)}
+                            value={b.bot_id || ''}
+                            onChange={(e) => saveZaloBinding(b.group_id, e.target.value, e.target.value ? b.enabled : false, b.group_name)}
                             className="bg-white border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none focus:border-green-500"
                           >
+                            <option value="">— Chọn bot —</option>
                             {(zaloGroups.bots || []).map((bot: any) => (
                               <option key={bot.id} value={bot.id}>{bot.name}</option>
                             ))}
                           </select>
-                          <label className="flex items-center gap-1.5 cursor-pointer">
+                          <label className={`flex items-center gap-1.5 ${b.bot_id ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`} title={b.bot_id ? '' : 'Chọn bot trước khi bật'}>
                             <input
                               type="checkbox"
+                              disabled={!b.bot_id}
                               checked={b.enabled}
                               onChange={(e) => saveZaloBinding(b.group_id, b.bot_id, e.target.checked, b.group_name)}
                               className="accent-green-600"
