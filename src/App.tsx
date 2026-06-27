@@ -5738,13 +5738,22 @@ WHERE email = 'customer-email@example.com';`}
                                           />
                                           <span className="text-[10px] text-slate-400">tin / Mo</span>
                                         </div>
-                                        {/* Visual limit gauge */}
-                                        <div className="w-[120px] h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                          <div 
-                                            className={`h-full rounded-full ${c.tier === 'enterprise' ? 'bg-amber-500' : c.tier === 'pro' ? 'bg-indigo-500' : 'bg-slate-450'}`}
-                                            style={{ width: `${c.tier === 'enterprise' ? '85%' : c.tier === 'pro' ? '50%' : '20%'}` }}
-                                          />
-                                        </div>
+                                        {/* Real usage gauge tháng này */}
+                                        {(() => {
+                                          const used = Number((c as any).usageThisMonth || 0);
+                                          const lim = Number(c.messageLimit) || 0;
+                                          const pct = lim > 0 ? Math.min(100, Math.round(used / lim * 100)) : 0;
+                                          const over = lim > 0 && used >= lim;
+                                          const warn = lim > 0 && used >= lim * 0.8;
+                                          return (
+                                            <>
+                                              <div className="text-[10px] font-bold text-slate-600">Đã dùng: {used.toLocaleString()} ({pct}%)</div>
+                                              <div className="w-[120px] h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                <div className={`h-full rounded-full ${over ? 'bg-rose-500' : warn ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${pct}%` }} />
+                                              </div>
+                                            </>
+                                          );
+                                        })()}
                                       </div>
                                     </td>
 

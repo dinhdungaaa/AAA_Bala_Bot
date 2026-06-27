@@ -372,7 +372,14 @@ app.get("/api/admin/customers", async (req, res) => {
     });
   }
 
-  res.json(finalCustomers);
+  // Gắn mức dùng tháng này cho mỗi khách (khớp theo id hoặc email = ownerKey).
+  const usageMap = await dbGetUsageBulk(currentYearMonth());
+  const withUsage = finalCustomers.map(c => ({
+    ...c,
+    usageThisMonth: usageMap[c.id] ?? usageMap[c.email?.toLowerCase?.() || ""] ?? 0,
+  }));
+
+  res.json(withUsage);
 });
 
 app.post("/api/admin/customers", async (req, res) => {
