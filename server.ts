@@ -1640,16 +1640,23 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
       customWelcome = personalizeWelcomeMessage(customWelcome, pr, nm);
       responseText = postProcessBotReply(customWelcome, { shouldGreet: true });
     } else {
-      // Fetch dynamic answer using vector tri thức
-      const aiAnswer = await generateRAGAnswer(
-        bot,
-        text,
-        { fullName: tFullName, username: tUsername, id: tUserId },
-        { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8) }
-      );
-      responseText = aiAnswer.text;
-      sourcesUsed = aiAnswer.sources;
-      fallbackTriggered = aiAnswer.fallbackTriggered;
+      const gate = await checkUsageGate(bot);
+      if (!gate.allowed) {
+        responseText = BLOCK_MESSAGE;
+        fallbackTriggered = true;
+      } else {
+        // Fetch dynamic answer using vector tri thức
+        const aiAnswer = await generateRAGAnswer(
+          bot,
+          text,
+          { fullName: tFullName, username: tUsername, id: tUserId },
+          { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8) }
+        );
+        responseText = aiAnswer.text;
+        sourcesUsed = aiAnswer.sources;
+        fallbackTriggered = aiAnswer.fallbackTriggered;
+        await recordUsageForBot(bot);
+      }
     }
 
     // Save actual bot reply
@@ -1940,12 +1947,18 @@ async function processFacebookIncomingMessage(bot: BotConfig, event: any, option
       fallbackTriggered: false
     };
   } else {
-    aiAnswer = await generateRAGAnswer(
-      bot,
-      text,
-      { fullName, username, id: userKey },
-      { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8, -1) }
-    );
+    const gate = await checkUsageGate(bot);
+    if (!gate.allowed) {
+      aiAnswer = { text: BLOCK_MESSAGE, sources: [], fallbackTriggered: true };
+    } else {
+      aiAnswer = await generateRAGAnswer(
+        bot,
+        text,
+        { fullName, username, id: userKey },
+        { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8, -1) }
+      );
+      await recordUsageForBot(bot);
+    }
   }
 
   const botMsg: Message = {
@@ -3112,12 +3125,18 @@ app.post("/api/integrations/botpress/reply", async (req, res) => {
     };
     session.messages.push(userMsg);
 
+    const gate = await checkUsageGate(bot);
+    if (!gate.allowed) {
+      return res.json({ reply: BLOCK_MESSAGE, text: BLOCK_MESSAGE, sources: [], fallbackTriggered: true, blocked: true });
+    }
+
     const aiAnswer = await generateRAGAnswer(
       bot,
       text,
       { fullName: channelFullName, username: channelUsername, id: channelUserId },
       { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8, -1) }
     );
+    await recordUsageForBot(bot);
 
     const botMsg: Message = {
       id: "m-bp-bot-" + Math.random().toString(36).substr(2, 9),
