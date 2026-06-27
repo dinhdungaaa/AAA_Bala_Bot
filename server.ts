@@ -50,8 +50,13 @@ import {
   dbSaveUserConfig,
   dbGetUserConfig,
   dbGetTelegramGroups,
-  dbSaveTelegramGroup
+  dbSaveTelegramGroup,
+  dbGetUsage,
+  dbIncrementUsage,
+  dbGetUsageBulk
 } from "./supabaseService.js";
+import { currentYearMonth, usageVerdict } from "./billing.js";
+import { resolveLimitForOwner } from "./billingResolve.js";
 
 import {
   startQrLogin, getQrLoginResult, getRuntimeStatus,
@@ -2804,6 +2809,26 @@ async function attachChunkEmbedding(chunk: KnowledgeChunk): Promise<KnowledgeChu
     console.warn("[RAG] embed chunk failed:", e?.message || e);
   }
   return chunk;
+}
+
+// ================= USAGE METERING / BILLING =================
+const BLOCK_MESSAGE = "Dạ hệ thống tạm đạt giới hạn phục vụ trong tháng, mong anh/chị thông cảm và liên hệ lại sau ạ.";
+
+// Kiểm tra hạn mức TRƯỚC khi gọi AI. Fail-open: lỗi DB -> count=0 -> cho qua.
+async function checkUsageGate(bot: BotConfig): Promise<{ allowed: boolean; verdict: "ok" | "warn" | "blocked"; count: number; limit: number }> {
+  const ownerKey = bot.userId || "";
+  if (!ownerKey) return { allowed: true, verdict: "ok", count: 0, limit: 0 };
+  const limit = resolveLimitForOwner(ownerKey, saasCustomers);
+  const count = await dbGetUsage(ownerKey, currentYearMonth());
+  const verdict = usageVerdict(count, limit);
+  return { allowed: verdict !== "blocked", verdict, count, limit };
+}
+
+// Tăng đếm SAU khi đã gửi câu trả lời AI thành công.
+async function recordUsageForBot(bot: BotConfig): Promise<void> {
+  const ownerKey = bot.userId || "";
+  if (!ownerKey) return;
+  await dbIncrementUsage(ownerKey, currentYearMonth());
 }
 
 // Core RAG matching & AI generation call
