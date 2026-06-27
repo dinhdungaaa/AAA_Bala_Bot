@@ -321,7 +321,11 @@ export default function App() {
     try {
       const r = await fetch('/api/zalo/login/start', { method: 'POST', headers: getScopedApiHeaders() }).then((x) => x.json());
       const qrValue = r?.qr || null;
-      setZaloQr(typeof qrValue === 'string' && qrValue.length > 0 ? qrValue : null);
+      // zca-js trả base64 THUẦN (đã cắt tiền tố data-URL) → phải thêm lại, nếu không <img> vỡ ảnh.
+      const qrSrc = typeof qrValue === 'string' && qrValue.length > 0
+        ? (/^(data:|https?:)/.test(qrValue) ? qrValue : `data:image/png;base64,${qrValue}`)
+        : null;
+      setZaloQr(qrSrc);
       if (zaloPollerRef.current) clearInterval(zaloPollerRef.current);
       zaloPollerRef.current = setInterval(async () => {
         try {
