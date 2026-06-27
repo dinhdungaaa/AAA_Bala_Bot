@@ -38,17 +38,18 @@ export interface ZaloDeps {
 }
 
 export interface GroupBinding {
+  id?: string;
+  owner_email: string;
   group_id: string;
   group_name?: string;
   bot_id: string;
-  owner_email?: string;   // multitenant scoping (zalo-multitenant) — tạm optional tới khi wire xong
   enabled: boolean;
 }
 
 export interface ZaloSessionRecord {
   id: string;
+  owner_email: string;
   account_label: string;
-  owner_email?: string;   // multitenant scoping — tạm optional tới khi wire xong
   credentials: any | null;
   status: "active" | "needs_login" | "error";
   last_error?: string | null;
@@ -57,6 +58,7 @@ export interface ZaloSessionRecord {
 
 export interface ZaloRuntimeStatus {
   enabled: boolean;
+  ownerEmail: string;
   loginState: "active" | "needs_login" | "error" | "logging_in";
   accountLabel: string;
   accountName: string | null;
@@ -64,14 +66,24 @@ export interface ZaloRuntimeStatus {
   lastError: string | null;
 }
 
+// Per-user mutable runtime state held in the session registry.
 export interface ZaloSession {
-  id: string;
-  accountLabel: string;
   ownerEmail: string;
-  status: "active" | "needs_login" | "error";
-  lastError?: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  api: any | null;
+  selfUid: string | null;
+  selfName: string | null;
+  listenerConnected: boolean;
+  loginState: ZaloRuntimeStatus["loginState"];
+  lastError: string | null;
+  qrPayload: string | null;
+  qrResult: { state: "pending" | "success" | "failed"; error?: string };
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  reconnectDelay: number;
+  recentBotMsgIds: Set<string>;
 }
 
+// App-level injected deps the client receives from the server (NOT user-scoped).
 export interface ZaloInjectedDeps {
   generateRAGAnswer: ZaloDeps["generateRAGAnswer"];
   postProcessBotReply: ZaloDeps["postProcessBotReply"];
@@ -82,4 +94,8 @@ export interface ZaloInjectedDeps {
   checkUsage: ZaloDeps["checkUsage"];
   recordUsage: ZaloDeps["recordUsage"];
   blockMessage: string;
+  // Resolve a user's Supabase config (url/key) by email, or null if not configured.
+  resolveUserConfig: (ownerEmail: string) => { url: string; key: string } | null;
+  // Run fn inside that user's Supabase scope (wraps withSupabaseConfig).
+  withUserScope: <T>(ownerEmail: string, fn: () => T) => T;
 }

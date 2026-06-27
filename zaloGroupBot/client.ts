@@ -1,6 +1,7 @@
 /**
  * zca-js client lifecycle — the ONLY file that touches the zca-js SDK.
- * If zca-js API changes, only edit this file.
+ * Multi-tenant: per-user runtime state lives in the session registry
+ * (Map<ownerEmail, ZaloSession>); this file holds no per-user globals.
  */
 
 import { Zalo, ThreadType } from "zca-js";
@@ -10,57 +11,47 @@ import { LoginQRCallbackEventType } from "zca-js";
 import { ZaloApiError } from "zca-js";
 import type {
   ZaloDeps, ZaloIncomingEvent, ZaloRuntimeStatus, ZaloSessionRecord,
+  ZaloInjectedDeps, ZaloSession,
 } from "./types.js";
-import { loadSession, saveSession, getBinding, upsertBinding } from "./store.js";
+import {
+  loadSession, saveSession, listActiveSessions, getBinding, upsertBinding,
+} from "./store.js";
 import { createZaloMessageHandler } from "./handler.js";
-
-interface InjectedDeps {
-  generateRAGAnswer: ZaloDeps["generateRAGAnswer"];
-  postProcessBotReply: ZaloDeps["postProcessBotReply"];
-  getBots: ZaloDeps["getBots"];
-  chatSessions: ZaloDeps["chatSessions"];
-  saveConversation: ZaloDeps["saveConversation"];
-  analytics: ZaloDeps["analytics"];
-  checkUsage: ZaloDeps["checkUsage"];
-  recordUsage: ZaloDeps["recordUsage"];
-  blockMessage: string;
-}
+import * as registry from "./sessionRegistry.js";
 
 const ACCOUNT_LABEL = process.env.ZALO_ACCOUNT_LABEL || "default";
 const RATE = parseInt(process.env.ZALO_RATE_LIMIT_PER_MIN || "5", 10);
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let api: any = null;                  // zca-js API object (typed as any for flexibility)
-let selfUid: string | null = null;
-let selfName: string | null = null;
-let listenerConnected = false;
-let loginState: ZaloRuntimeStatus["loginState"] = "needs_login";
-let lastError: string | null = null;
-let qrPayload: string | null = null;
-let qrResult: { state: "pending" | "success" | "failed"; error?: string } = { state: "pending" };
-let injected: InjectedDeps | null = null;
+let injected: ZaloInjectedDeps | null = null;
 
-// ---------- bot-message dedup (reply-loop guard) ----------
+// ---------- per-session bot-message dedup (reply-loop guard) ----------
 
-const recentBotMsgIds = new Set<string>();
-function rememberSentMessage(id: string) {
-  recentBotMsgIds.add(id);
-  if (recentBotMsgIds.size > 1000) {
-    const oldest = recentBotMsgIds.values().next().value;
-    if (oldest) recentBotMsgIds.delete(oldest);
+function rememberSentMessage(s: ZaloSession, id: string) {
+  s.recentBotMsgIds.add(id);
+  if (s.recentBotMsgIds.size > 1000) {
+    const oldest = s.recentBotMsgIds.values().next().value;
+    if (oldest) s.recentBotMsgIds.delete(oldest);
   }
 }
-function isBotMessageId(id: string) { return recentBotMsgIds.has(id); }
 
-// ---------- deps builder ----------
+// getBinding lives in the CENTRAL Supabase (bindings are infra data). The
+// background listener has no request scope, so getSupabaseClient() already
+// resolves to the central client here — do NOT wrap this in withUserScope.
+async function getBindingForOwner(owner: string, groupId: string) {
+  return getBinding(owner, groupId);
+}
 
-function buildDeps(): ZaloDeps {
+// ---------- per-session deps builder ----------
+
+function buildDeps(s: ZaloSession): ZaloDeps {
   if (!injected) throw new Error("Zalo not initialized");
+  const inj = injected;
+  const owner = s.ownerEmail;
   return {
-    botUid: () => selfUid,
+    botUid: () => s.selfUid,
     sendTyping: async (groupId) => {
       // Hiển thị "đang soạn tin" trong nhóm trong lúc chờ AI tạo câu trả lời. Lỗi thì bỏ qua.
-      try { await api?.sendTypingEvent?.(groupId, ThreadType.Group); }
+      try { await s.api?.sendTypingEvent?.(groupId, ThreadType.Group); }
       catch (e: unknown) { console.warn("[Zalo Client] sendTyping failed:", e instanceof Error ? e.message : e); }
     },
     send: async (groupId, text) => {
@@ -70,27 +61,27 @@ function buildDeps(): ZaloDeps {
         for (const chunk of chunks) {
           // Humanized 1-3s delay before each send (reduces bot-detection risk).
           await new Promise((r) => setTimeout(r, 1000 + Math.floor(Math.random() * 2000)));
-          const res = await api.sendMessage(chunk, groupId, ThreadType.Group);
-          // sendMessage returns { message: { msgId: number } | null, attachment: [] }
+          const res = await s.api.sendMessage(chunk, groupId, ThreadType.Group);
           const msgId = res?.message?.msgId;
           lastId = msgId != null ? String(msgId) : lastId;
         }
         return lastId;
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error("[Zalo Client] send error:", msg);
+        console.error("[Zalo Client] send error:", e instanceof Error ? e.message : String(e));
         return null;
       }
     },
-    generateRAGAnswer: injected.generateRAGAnswer,
-    postProcessBotReply: injected.postProcessBotReply,
-    getBots: injected.getBots,
-    getBinding,
-    chatSessions: injected.chatSessions,
-    saveConversation: injected.saveConversation,
-    analytics: injected.analytics,
-    rememberSentMessage,
-    isBotMessageId,
+    // Bots + conversation read/write hit the USER's Supabase (via withUserScope).
+    generateRAGAnswer: inj.generateRAGAnswer,
+    postProcessBotReply: inj.postProcessBotReply,
+    getBots: () => inj.withUserScope(owner, () => inj.getBots()),
+    // getBinding hits the CENTRAL Supabase — NOT user-scoped (see note above).
+    getBinding: (groupId) => getBindingForOwner(owner, groupId),
+    chatSessions: inj.chatSessions,
+    saveConversation: (c) => inj.withUserScope(owner, () => inj.saveConversation(c)),
+    analytics: inj.analytics,
+    rememberSentMessage: (id) => rememberSentMessage(s, id),
+    isBotMessageId: (id) => s.recentBotMsgIds.has(id),
     ratePerMin: RATE,
     checkUsage: injected.checkUsage,
     recordUsage: injected.recordUsage,
@@ -100,75 +91,48 @@ function buildDeps(): ZaloDeps {
 
 // ---------- normalizeEvent ----------
 // Converts a real zca-js Message (UserMessage | GroupMessage) -> ZaloIncomingEvent.
-// Real shape: msg.type === ThreadType.Group, msg.threadId, msg.data (TGroupMessage).
-// TGroupMessage: { msgId, cliMsgId, uidFrom, dName, content, mentions?, quote? }
 
-function normalizeEvent(raw: Message): ZaloIncomingEvent | null {
+function normalizeEvent(s: ZaloSession, raw: Message): ZaloIncomingEvent | null {
   try {
-    // Only process group messages
     if (raw.type !== ThreadType.Group) return null;
-
     const msg = raw as GroupMessage;
     const groupId = msg.threadId.toString();
     const data = msg.data;
-
     const messageId = (data.msgId ?? data.cliMsgId ?? "").toString();
     const senderId = (data.uidFrom ?? "").toString();
-    if (selfUid && senderId === selfUid) return null;
+    if (s.selfUid && senderId === s.selfUid) return null;
     const senderName = (data.dName ?? "Khach hang Zalo").toString();
-
-    // content is string | TAttachmentContent | TOtherContent
     const content = data.content;
     const text = typeof content === "string" ? content : "";
-
-    // mentions: TMention[] — each has { uid, pos, len, type }
     const mentions = Array.isArray(data.mentions) ? data.mentions : [];
     const mentionedUids = mentions.map((m) => (m?.uid ?? "").toString()).filter(Boolean);
-
-    // quote: TQuote — { globalMsgId, cliMsgId, ... }
     const quotedMessageId = data.quote
       ? (data.quote.globalMsgId ?? data.quote.cliMsgId ?? "").toString() || undefined
       : undefined;
-
     if (!groupId || !messageId) return null;
-
-    return {
-      groupId,
-      messageId,
-      senderId,
-      senderName,
-      text: String(text || ""),
-      mentionedUids,
-      quotedMessageId,
-    };
-  } catch {
-    return null;
-  }
+    return { groupId, messageId, senderId, senderName, text: String(text || ""), mentionedUids, quotedMessageId };
+  } catch { return null; }
 }
 
 // ---------- group auto-discovery ----------
+// Phát hiện nhóm từ MỌI tin nhắn nhóm (kể cả tin tự-gửi) để owner test một mình vẫn ra nhóm.
+// Chỉ ghi nhận nhóm (bot_id rỗng, enabled=false), KHÔNG ghi đè binding đã có.
 
-// Phát hiện nhóm từ MỌI tin nhắn nhóm — KỂ CẢ tin của chính nick bot — để owner test
-// một mình vẫn ra nhóm. Chỉ ghi nhận nhóm (bot_id rỗng, enabled=false), KHÔNG trả lời ở đây;
-// việc lọc tin tự-gửi cho luồng trả lời vẫn nằm ở normalizeEvent. KHÔNG ghi đè binding đã có.
-async function registerGroupFromRaw(raw: Message): Promise<void> {
+async function registerGroupFromRaw(s: ZaloSession, raw: Message): Promise<void> {
   try {
     if (raw?.type !== ThreadType.Group) return;
     const groupId = ((raw as GroupMessage).threadId ?? "").toString();
     if (!groupId) return;
-
-    const existing = await getBinding(groupId);
+    const existing = await getBinding(s.ownerEmail, groupId);
     if (existing) return;
-
     let groupName = `Nhóm ${groupId}`;
     try {
-      const info = await api?.getGroupInfo?.(groupId);
+      const info = await s.api?.getGroupInfo?.(groupId);
       const name = info?.gridInfoMap?.[groupId]?.name;
       if (name) groupName = String(name);
     } catch { /* tên là phụ, bỏ qua nếu lỗi */ }
-
-    await upsertBinding({ group_id: groupId, group_name: groupName, bot_id: "", enabled: false });
-    console.log(`[Zalo Client] discovered group ${groupId} ("${groupName}")`);
+    await upsertBinding({ owner_email: s.ownerEmail, group_id: groupId, group_name: groupName, bot_id: "", enabled: false });
+    console.log(`[Zalo ${s.ownerEmail}] discovered group ${groupId} ("${groupName}")`);
   } catch (e: unknown) {
     console.warn("[Zalo Client] registerGroupFromRaw failed:", e instanceof Error ? e.message : e);
   }
@@ -176,284 +140,221 @@ async function registerGroupFromRaw(raw: Message): Promise<void> {
 
 // ---------- listener ----------
 
-async function startListening(handler: (e: ZaloIncomingEvent) => Promise<unknown>) {
+async function startListening(s: ZaloSession, handler: (e: ZaloIncomingEvent) => Promise<unknown>) {
   try {
-    // Use EventEmitter .on() — the deprecated onMessage/onError/onClosed methods still work
-    // but the modern API is EventEmitter events: "message", "error", "closed", "disconnected".
-    api.listener.on("message", async (msg: Message) => {
+    s.api.listener.on("message", async (msg: Message) => {
       // Đăng ký nhóm TRƯỚC (kể cả tin tự-gửi) để nhóm luôn hiện trong admin dù chưa gán bot.
-      await registerGroupFromRaw(msg);
-      const ev = normalizeEvent(msg);
+      await registerGroupFromRaw(s, msg);
+      const ev = normalizeEvent(s, msg);
       if (!ev) return;
       handler(ev).catch((e: unknown) => console.error("[Zalo Client] handler error:", e));
     });
-
-    api.listener.on("error", (e: unknown) => {
-      console.error("[Zalo Client] listener error:", e);
-      listenerConnected = false;
-      scheduleReconnect();
+    s.api.listener.on("error", (e: unknown) => {
+      console.error(`[Zalo ${s.ownerEmail}] listener error:`, e);
+      s.listenerConnected = false; scheduleReconnect(s);
     });
-
-    // "closed" and "disconnected" both signal the connection dropped
-    api.listener.on("closed", () => {
-      console.warn("[Zalo Client] listener closed");
-      listenerConnected = false;
-      scheduleReconnect();
+    s.api.listener.on("closed", () => {
+      console.warn(`[Zalo ${s.ownerEmail}] listener closed`);
+      s.listenerConnected = false; scheduleReconnect(s);
     });
-
-    api.listener.on("disconnected", () => {
-      console.warn("[Zalo Client] listener disconnected");
-      listenerConnected = false;
-      scheduleReconnect();
+    s.api.listener.on("disconnected", () => {
+      console.warn(`[Zalo ${s.ownerEmail}] listener disconnected`);
+      s.listenerConnected = false; scheduleReconnect(s);
     });
-
-    // retryOnClose: false — we handle reconnect ourselves with backoff
-    api.listener.start({ retryOnClose: false });
-    // I1: set active state AFTER start() returns — a synchronous throw from start()
-    // must NOT leave loginState as "active".
-    listenerConnected = true;
-    loginState = "active";
-    console.log("[Zalo Client] listener started");
+    // retryOnClose: false — we handle reconnect ourselves with backoff.
+    s.api.listener.start({ retryOnClose: false });
+    s.listenerConnected = true;
+    s.loginState = "active";
+    console.log(`[Zalo ${s.ownerEmail}] listener started`);
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    lastError = msg;
-    listenerConnected = false;
-    console.error("[Zalo Client] startListening failed:", lastError);
+    s.lastError = e instanceof Error ? e.message : String(e);
+    s.listenerConnected = false;
+    console.error(`[Zalo ${s.ownerEmail}] startListening failed:`, s.lastError);
   }
 }
 
-// ---------- reconnect with exponential backoff ----------
-
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let reconnectDelay = 5000;
+// ---------- reconnect with exponential backoff (per session) ----------
 
 /** Returns true if the error looks like an authentication/credentials failure. */
 function isAuthError(e: unknown): boolean {
   if (e instanceof ZaloApiError) {
-    // ZaloApiError.code: Zalo's -101 / -216 are common auth rejection codes.
-    // Treat any negative code as a potential auth issue when the message also matches.
     const authCodes = new Set([-101, -216, -1006, -1004]);
     if (e.code !== null && authCodes.has(e.code)) return true;
   }
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
-  const authKeywords = ["login", "auth", "unauthorized", "expired", "credential", "cookie", "invalid session", "session"];
-  return authKeywords.some((kw) => msg.includes(kw));
+  const kw = ["login", "auth", "unauthorized", "expired", "credential", "cookie", "invalid session", "session"];
+  return kw.some((k) => msg.includes(k));
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(async () => {
-    reconnectTimer = null;
+function scheduleReconnect(s: ZaloSession) {
+  if (s.reconnectTimer) return;
+  s.reconnectTimer = setTimeout(async () => {
+    s.reconnectTimer = null;
     try {
-      const rec = await loadSession(ACCOUNT_LABEL);
-      if (rec?.credentials) {
-        await loginWithCredentials(rec.credentials);
-      }
-      // Success: bootApi resets reconnectDelay to 5000
+      const rec = await loadSession(s.ownerEmail);
+      if (rec?.credentials) await loginWithCredentials(s, rec.credentials);
+      // Success: bootApi resets reconnectDelay to 5000.
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (isAuthError(e)) {
-        // C1: Auth failure — stop retrying to avoid account lockout.
-        console.error("[Zalo Client] reconnect aborted (auth failure — needs re-login):", msg);
-        loginState = "needs_login";
-        lastError = msg;
+        // Auth failure — stop retrying to avoid account lockout.
+        console.error(`[Zalo ${s.ownerEmail}] reconnect aborted (auth — needs re-login):`, msg);
+        s.loginState = "needs_login"; s.lastError = msg;
         await saveSession({
-          id: ACCOUNT_LABEL,
-          account_label: ACCOUNT_LABEL,
-          credentials: null,
-          status: "needs_login",
-          last_error: msg,
+          id: s.ownerEmail, owner_email: s.ownerEmail, account_label: ACCOUNT_LABEL,
+          credentials: null, status: "needs_login", last_error: msg,
         } as ZaloSessionRecord).catch(() => { /* persist best-effort */ });
-        // Do NOT re-queue — returning here stops the retry loop.
         return;
       }
-      // Non-auth (network/transient) — log and grow backoff; caller will re-queue next time.
-      console.error("[Zalo Client] reconnect failed (transient):", msg);
-      reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
+      console.error(`[Zalo ${s.ownerEmail}] reconnect failed (transient):`, msg);
+      s.reconnectDelay = Math.min(s.reconnectDelay * 2, 60_000);
     }
-  }, reconnectDelay);
+  }, s.reconnectDelay);
 }
 
 // ---------- boot helpers ----------
 
-async function bootApi(loggedInApi: unknown) {
-  api = loggedInApi;
+async function bootApi(s: ZaloSession, loggedInApi: unknown) {
+  s.api = loggedInApi;
   try {
-    // Attempt 1: getOwnId() — synchronous, most reliable source
-    const ownId: string | undefined = api.getOwnId?.();
-    if (ownId) {
-      selfUid = ownId;
-    }
-    // Attempt 2: getContext().uid
-    if (!selfUid) {
-      const ctx = api.getContext?.() || {};
-      if (ctx.uid) selfUid = ctx.uid.toString();
-    }
-    // Attempt 3: fetchAccountInfo().profile.uid (async, fallback)
-    if (!selfUid) {
+    const ownId: string | undefined = s.api.getOwnId?.();
+    if (ownId) s.selfUid = ownId;
+    if (!s.selfUid) { const ctx = s.api.getContext?.() || {}; if (ctx.uid) s.selfUid = ctx.uid.toString(); }
+    if (!s.selfUid) {
       try {
-        const info = await api.fetchAccountInfo?.();
-        const profileUid = info?.profile?.uid ?? info?.profile?.userId;
-        if (profileUid) selfUid = profileUid.toString();
+        const info = await s.api.fetchAccountInfo?.();
+        const uid = info?.profile?.uid ?? info?.profile?.userId;
+        if (uid) s.selfUid = uid.toString();
       } catch { /* ignore — network may not be ready */ }
     }
-    if (!selfUid) {
-      console.warn("[Zalo Client] selfUid could not be resolved — mention-detection will be degraded (@mentions may be missed)");
-    }
-    // Use selfUid as name fallback since ContextSession has no displayName
-    selfName = selfUid ?? selfName;
+    if (!s.selfUid) console.warn(`[Zalo ${s.ownerEmail}] selfUid unresolved — @mentions may be missed`);
+    s.selfName = s.selfUid ?? s.selfName;
   } catch { /* optional enrichment */ }
-  reconnectDelay = 5000;
-  await startListening(createZaloMessageHandler(buildDeps()));
+  s.reconnectDelay = 5000;
+  await startListening(s, createZaloMessageHandler(buildDeps(s)));
 }
 
-async function loginWithCredentials(credentials: unknown) {
+async function loginWithCredentials(s: ZaloSession, credentials: unknown) {
   const zalo = new Zalo();
-  // credentials must match Credentials type: { imei, cookie, userAgent, language? }
   const loggedIn = await zalo.login(credentials as Parameters<typeof zalo.login>[0]);
-  await bootApi(loggedIn);
+  await bootApi(s, loggedIn);
   await saveSession({
-    id: ACCOUNT_LABEL,
-    account_label: ACCOUNT_LABEL,
-    credentials,
-    status: "active",
-    last_error: null,
+    id: s.ownerEmail, owner_email: s.ownerEmail, account_label: ACCOUNT_LABEL,
+    credentials, status: "active", last_error: null,
   } as ZaloSessionRecord);
 }
 
-// ---------- public exports ----------
+// ---------- public exports (owner-scoped) ----------
 
-export async function initZaloGroupBot(deps: InjectedDeps): Promise<void> {
+export async function initZaloGroupBot(deps: ZaloInjectedDeps): Promise<void> {
   injected = deps;
   if (process.env.ZALO_GROUP_BOT_ENABLED !== "true") {
     console.log("[Zalo Client] disabled (ZALO_GROUP_BOT_ENABLED != true)");
     return;
   }
+  // Restore all active sessions sequentially with throttle (avoid login thundering-herd).
   try {
-    const rec = await loadSession(ACCOUNT_LABEL);
-    if (rec?.credentials && rec.status === "active") {
-      await loginWithCredentials(rec.credentials);
-    } else {
-      loginState = "needs_login";
-      console.log("[Zalo Client] no active session, waiting for QR login via admin");
+    const active = await listActiveSessions();
+    console.log(`[Zalo Client] restoring ${active.length} active session(s)`);
+    for (const rec of active) {
+      if (!rec.owner_email || !rec.credentials) continue;
+      if (registry.atCapacity()) { console.warn("[Zalo Client] capacity reached during restore"); break; }
+      const s = registry.getOrCreate(rec.owner_email);
+      try { await loginWithCredentials(s, rec.credentials); }
+      catch (e: unknown) {
+        s.loginState = "needs_login";
+        s.lastError = e instanceof Error ? e.message : String(e);
+        console.error(`[Zalo ${rec.owner_email}] restore failed:`, s.lastError);
+      }
+      await new Promise((r) => setTimeout(r, 1000)); // throttle ~1/s
     }
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    lastError = msg;
-    loginState = "error";
-    console.error("[Zalo Client] init error (swallowed):", lastError);
+    console.error("[Zalo Client] boot restore error (swallowed):", e instanceof Error ? e.message : e);
   }
 }
 
-export async function startQrLogin(): Promise<{ qr: string | null; error?: string }> {
-  if (process.env.ZALO_GROUP_BOT_ENABLED !== "true") {
-    return { qr: null, error: "ZALO_GROUP_BOT_ENABLED chua bat" };
+export async function startQrLogin(ownerEmail: string): Promise<{ qr: string | null; error?: string }> {
+  if (process.env.ZALO_GROUP_BOT_ENABLED !== "true") return { qr: null, error: "ZALO_GROUP_BOT_ENABLED chua bat" };
+  const existing = registry.get(ownerEmail);
+  // Guard concurrent QR logins — return existing QR payload if already logging in.
+  if (existing && existing.loginState === "logging_in") return { qr: existing.qrPayload };
+  // Capacity only blocks BRAND-NEW users (no registry slot). A user who already has a
+  // session — even one in error/needs_login — is reclaiming their own slot, not adding a
+  // new tenant, so they may always retry.
+  if (registry.atCapacity() && !existing) {
+    return { qr: null, error: "He thong dang ban (toi da so phien Zalo). Thu lai sau." };
   }
-  // m1: Guard concurrent QR logins — return existing QR payload if already logging in.
-  if (loginState === "logging_in") {
-    return { qr: qrPayload };
-  }
+  const s = registry.getOrCreate(ownerEmail);
   try {
-    loginState = "logging_in";
-    qrResult = { state: "pending" };
-    qrPayload = null;
-
+    s.loginState = "logging_in";
+    s.qrResult = { state: "pending" };
+    s.qrPayload = null;
     const zalo = new Zalo();
-
-    // LoginQRCallback receives typed events. QR image is at event.data.image
-    // when event.type === LoginQRCallbackEventType.QRCodeGenerated.
-    // GotLoginInfo event carries credentials for saveSession.
     let savedCredentials: unknown = null;
-
     const loginPromise = zalo.loginQR(undefined, (event: LoginQRCallbackEvent) => {
       if (event.type === LoginQRCallbackEventType.QRCodeGenerated) {
-        qrPayload = event.data.image || null;
+        s.qrPayload = event.data.image || null;
       } else if (event.type === LoginQRCallbackEventType.GotLoginInfo) {
-        // Capture credentials from the callback for persistence
-        savedCredentials = {
-          cookie: event.data.cookie,
-          imei: event.data.imei,
-          userAgent: event.data.userAgent,
-        };
+        savedCredentials = { cookie: event.data.cookie, imei: event.data.imei, userAgent: event.data.userAgent };
       }
     });
-
     loginPromise
       .then(async (loggedIn) => {
-        if (!loggedIn) {
-          qrResult = { state: "failed", error: "loginQR returned null" };
-          loginState = "error";
-          return;
-        }
-        await bootApi(loggedIn);
-        // Prefer credentials captured from GotLoginInfo callback;
-        // fall back to getContext() if available.
-        const ctx = api.getContext?.() || {};
+        if (!loggedIn) { s.qrResult = { state: "failed", error: "loginQR returned null" }; s.loginState = "error"; return; }
+        await bootApi(s, loggedIn);
+        const ctx = s.api.getContext?.() || {};
         const credentials = savedCredentials ?? {
-          cookie: api.getCookie?.()?.toJSON?.()?.cookies ?? [],
-          imei: ctx.imei,
-          userAgent: ctx.userAgent,
+          cookie: s.api.getCookie?.()?.toJSON?.()?.cookies ?? [], imei: ctx.imei, userAgent: ctx.userAgent,
         };
         await saveSession({
-          id: ACCOUNT_LABEL,
-          account_label: ACCOUNT_LABEL,
-          credentials,
-          status: "active",
-          last_error: null,
+          id: ownerEmail, owner_email: ownerEmail, account_label: ACCOUNT_LABEL,
+          credentials, status: "active", last_error: null,
         } as ZaloSessionRecord);
-        qrResult = { state: "success" };
+        s.qrResult = { state: "success" };
       })
       .catch((e: unknown) => {
-        const msg = e instanceof Error ? e.message : String(e);
-        lastError = msg;
-        loginState = "error";
-        qrResult = { state: "failed", error: lastError };
-        console.error("[Zalo Client] QR login failed:", lastError);
+        s.lastError = e instanceof Error ? e.message : String(e);
+        s.loginState = "error";
+        s.qrResult = { state: "failed", error: s.lastError };
+        console.error(`[Zalo ${ownerEmail}] QR login failed:`, s.lastError);
       });
-
-    // Wait up to ~8s for QR payload to appear (callback fires quickly)
-    for (let i = 0; i < 40 && !qrPayload; i++) {
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    return { qr: qrPayload };
+    // Wait up to ~8s for QR payload to appear (callback fires quickly).
+    for (let i = 0; i < 40 && !s.qrPayload; i++) await new Promise((r) => setTimeout(r, 200));
+    return { qr: s.qrPayload };
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    loginState = "error";
-    return { qr: null, error: msg };
+    s.loginState = "error";
+    return { qr: null, error: e instanceof Error ? e.message : String(e) };
   }
 }
 
-export function getQrLoginResult() { return qrResult; }
+export function getQrLoginResult(ownerEmail: string) {
+  return registry.get(ownerEmail)?.qrResult ?? { state: "pending" as const };
+}
 
-export function getRuntimeStatus(): ZaloRuntimeStatus {
+export function getRuntimeStatus(ownerEmail: string): ZaloRuntimeStatus {
+  const s = registry.get(ownerEmail);
   return {
     enabled: process.env.ZALO_GROUP_BOT_ENABLED === "true",
-    loginState,
+    ownerEmail,
+    loginState: s?.loginState ?? "needs_login",
     accountLabel: ACCOUNT_LABEL,
-    accountName: selfName,
-    listenerConnected,
-    lastError,
+    accountName: s?.selfName ?? null,
+    listenerConnected: s?.listenerConnected ?? false,
+    lastError: s?.lastError ?? null,
   };
 }
 
-export async function logoutZalo(): Promise<void> {
-  try { api?.listener?.stop?.(); } catch { /* ignore */ }
-  // m2: Reset backoff and clear any pending reconnect on explicit logout.
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+export async function logoutZalo(ownerEmail: string): Promise<void> {
+  const s = registry.get(ownerEmail);
+  if (s) {
+    try { s.api?.listener?.stop?.(); } catch { /* ignore */ }
+    if (s.reconnectTimer) { clearTimeout(s.reconnectTimer); s.reconnectTimer = null; }
+    s.reconnectDelay = 5000; s.api = null; s.selfUid = null; s.selfName = null;
+    s.listenerConnected = false; s.loginState = "needs_login";
   }
-  reconnectDelay = 5000;
-  api = null;
-  selfUid = null;
-  selfName = null;
-  listenerConnected = false;
-  loginState = "needs_login";
+  registry.remove(ownerEmail);
   await saveSession({
-    id: ACCOUNT_LABEL,
-    account_label: ACCOUNT_LABEL,
-    credentials: null,
-    status: "needs_login",
-    last_error: null,
+    id: ownerEmail, owner_email: ownerEmail, account_label: ACCOUNT_LABEL,
+    credentials: null, status: "needs_login", last_error: null,
   } as ZaloSessionRecord);
 }
