@@ -275,7 +275,10 @@ export async function startQrLogin(ownerEmail: string): Promise<{ qr: string | n
   const existing = registry.get(ownerEmail);
   // Guard concurrent QR logins — return existing QR payload if already logging in.
   if (existing && existing.loginState === "logging_in") return { qr: existing.qrPayload };
-  if (registry.atCapacity() && !(existing && existing.loginState === "active")) {
+  // Capacity only blocks BRAND-NEW users (no registry slot). A user who already has a
+  // session — even one in error/needs_login — is reclaiming their own slot, not adding a
+  // new tenant, so they may always retry.
+  if (registry.atCapacity() && !existing) {
     return { qr: null, error: "He thong dang ban (toi da so phien Zalo). Thu lai sau." };
   }
   const s = registry.getOrCreate(ownerEmail);
