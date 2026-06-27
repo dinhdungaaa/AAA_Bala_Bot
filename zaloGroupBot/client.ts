@@ -137,24 +137,29 @@ function normalizeEvent(raw: Message): ZaloIncomingEvent | null {
 
 // ---------- group auto-discovery ----------
 
-// Khi thấy nhóm LẦN ĐẦU (chưa có binding) → tự đăng ký với bot_id rỗng, enabled=false
-// để nhóm hiện trong admin cho owner gán bot. KHÔNG ghi đè binding đã có (giữ bot_id/enabled).
-async function registerDiscoveredGroup(ev: ZaloIncomingEvent): Promise<void> {
+// Phát hiện nhóm từ MỌI tin nhắn nhóm — KỂ CẢ tin của chính nick bot — để owner test
+// một mình vẫn ra nhóm. Chỉ ghi nhận nhóm (bot_id rỗng, enabled=false), KHÔNG trả lời ở đây;
+// việc lọc tin tự-gửi cho luồng trả lời vẫn nằm ở normalizeEvent. KHÔNG ghi đè binding đã có.
+async function registerGroupFromRaw(raw: Message): Promise<void> {
   try {
-    const existing = await getBinding(ev.groupId);
+    if (raw?.type !== ThreadType.Group) return;
+    const groupId = ((raw as GroupMessage).threadId ?? "").toString();
+    if (!groupId) return;
+
+    const existing = await getBinding(groupId);
     if (existing) return;
 
-    let groupName = `Nhóm ${ev.groupId}`;
+    let groupName = `Nhóm ${groupId}`;
     try {
-      const info = await api?.getGroupInfo?.(ev.groupId);
-      const name = info?.gridInfoMap?.[ev.groupId]?.name;
+      const info = await api?.getGroupInfo?.(groupId);
+      const name = info?.gridInfoMap?.[groupId]?.name;
       if (name) groupName = String(name);
     } catch { /* tên là phụ, bỏ qua nếu lỗi */ }
 
-    await upsertBinding({ group_id: ev.groupId, group_name: groupName, bot_id: "", enabled: false });
-    console.log(`[Zalo Client] discovered new group ${ev.groupId} ("${groupName}")`);
+    await upsertBinding({ group_id: groupId, group_name: groupName, bot_id: "", enabled: false });
+    console.log(`[Zalo Client] discovered group ${groupId} ("${groupName}")`);
   } catch (e: unknown) {
-    console.warn("[Zalo Client] registerDiscoveredGroup failed:", e instanceof Error ? e.message : e);
+    console.warn("[Zalo Client] registerGroupFromRaw failed:", e instanceof Error ? e.message : e);
   }
 }
 
@@ -165,10 +170,10 @@ async function startListening(handler: (e: ZaloIncomingEvent) => Promise<unknown
     // Use EventEmitter .on() — the deprecated onMessage/onError/onClosed methods still work
     // but the modern API is EventEmitter events: "message", "error", "closed", "disconnected".
     api.listener.on("message", async (msg: Message) => {
+      // Đăng ký nhóm TRƯỚC (kể cả tin tự-gửi) để nhóm luôn hiện trong admin dù chưa gán bot.
+      await registerGroupFromRaw(msg);
       const ev = normalizeEvent(msg);
       if (!ev) return;
-      // Đăng ký nhóm mới TRƯỚC khi xử lý, để nhóm luôn hiện trong admin dù chưa gán bot.
-      await registerDiscoveredGroup(ev);
       handler(ev).catch((e: unknown) => console.error("[Zalo Client] handler error:", e));
     });
 
