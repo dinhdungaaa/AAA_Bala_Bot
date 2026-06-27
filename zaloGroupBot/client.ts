@@ -37,16 +37,6 @@ let qrPayload: string | null = null;
 let qrResult: { state: "pending" | "success" | "failed"; error?: string } = { state: "pending" };
 let injected: InjectedDeps | null = null;
 
-// ---------- diagnostics (để soi listener khi nhóm không hiện) ----------
-const diag = {
-  rawMessages: 0,
-  groupMessages: 0,
-  lastEventType: null as string | null,
-  lastGroupId: null as string | null,
-  groupsDiscovered: 0,
-  lastDiscoverError: null as string | null,
-};
-
 // ---------- bot-message dedup (reply-loop guard) ----------
 
 const recentBotMsgIds = new Set<string>();
@@ -152,12 +142,8 @@ function normalizeEvent(raw: Message): ZaloIncomingEvent | null {
 // việc lọc tin tự-gửi cho luồng trả lời vẫn nằm ở normalizeEvent. KHÔNG ghi đè binding đã có.
 async function registerGroupFromRaw(raw: Message): Promise<void> {
   try {
-    diag.rawMessages += 1;
-    diag.lastEventType = raw?.type !== undefined && raw?.type !== null ? String(raw.type) : "undefined";
     if (raw?.type !== ThreadType.Group) return;
     const groupId = ((raw as GroupMessage).threadId ?? "").toString();
-    diag.groupMessages += 1;
-    diag.lastGroupId = groupId || null;
     if (!groupId) return;
 
     const existing = await getBinding(groupId);
@@ -171,12 +157,9 @@ async function registerGroupFromRaw(raw: Message): Promise<void> {
     } catch { /* tên là phụ, bỏ qua nếu lỗi */ }
 
     await upsertBinding({ group_id: groupId, group_name: groupName, bot_id: "", enabled: false });
-    diag.groupsDiscovered += 1;
-    diag.lastDiscoverError = null;
     console.log(`[Zalo Client] discovered group ${groupId} ("${groupName}")`);
   } catch (e: unknown) {
-    diag.lastDiscoverError = e instanceof Error ? e.message : String(e);
-    console.warn("[Zalo Client] registerGroupFromRaw failed:", diag.lastDiscoverError);
+    console.warn("[Zalo Client] registerGroupFromRaw failed:", e instanceof Error ? e.message : e);
   }
 }
 
@@ -439,7 +422,6 @@ export function getRuntimeStatus(): ZaloRuntimeStatus {
     accountName: selfName,
     listenerConnected,
     lastError,
-    diag: { ...diag },
   };
 }
 

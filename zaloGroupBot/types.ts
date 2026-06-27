@@ -56,13 +56,4 @@ export interface ZaloRuntimeStatus {
   accountName: string | null;
   listenerConnected: boolean;
   lastError: string | null;
-  // Chẩn đoán listener (để soi vì sao nhóm không hiện)
-  diag?: {
-    rawMessages: number;        // tổng sự kiện "message" listener nhận
-    groupMessages: number;      // số tin thuộc nhóm
-    lastEventType: string | null;
-    lastGroupId: string | null;
-    groupsDiscovered: number;   // số lần upsert nhóm thành công
-    lastDiscoverError: string | null;
-  };
 }

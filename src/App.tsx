@@ -3260,15 +3260,6 @@ export default function App() {
                       Lỗi: {zaloStatus.lastError}
                     </div>
                   )}
-                  {zaloStatus?.diag && (
-                    <div className="mt-2 p-2 rounded bg-slate-100 border border-slate-200 font-mono text-[11px] text-slate-600 space-y-0.5">
-                      <div className="font-bold text-slate-700">Chẩn đoán listener:</div>
-                      <div>Tổng tin nhận: {zaloStatus.diag.rawMessages} · Tin nhóm: {zaloStatus.diag.groupMessages}</div>
-                      <div>Loại sự kiện cuối: {String(zaloStatus.diag.lastEventType ?? '—')} · Nhóm cuối: {String(zaloStatus.diag.lastGroupId ?? '—')}</div>
-                      <div>Số nhóm đã ghi nhận: {zaloStatus.diag.groupsDiscovered}</div>
-                      {zaloStatus.diag.lastDiscoverError && <div className="text-red-600">Lỗi ghi nhận: {zaloStatus.diag.lastDiscoverError}</div>}
-                    </div>
-                  )}
                 </div>
 
                 <div className="flex gap-3 flex-wrap">
