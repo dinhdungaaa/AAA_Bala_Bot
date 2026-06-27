@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { BotConfig, KnowledgeSource, KnowledgeChunk, ChatSession, FAQItem, WorkspaceUser, ScheduleItem, ReminderLog, TelegramGroup } from './src/types';
+import { BotConfig, KnowledgeSource, KnowledgeChunk, ChatSession, FAQItem, WorkspaceUser, ScheduleItem, ReminderLog, TelegramGroup, UsageCounter } from './src/types';
 import { AsyncLocalStorage } from 'async_hooks';
 
 let _supabaseClient: SupabaseClient | null = null;
@@ -1203,5 +1203,41 @@ export async function dbSaveTelegramGroup(group: TelegramGroup): Promise<boolean
     console.warn("Supabase dbSaveTelegramGroup failed (non-critical):", err.message || err);
     return false;
   }
+}
+
+// ================= USAGE METERING (BILLING) =================
+// Tất cả fail-open: lỗi DB trả 0 / no-op để không chặn nhầm dịch vụ khách.
+
+export async function dbGetUsage(ownerKey: string, yearMonth: string): Promise<number> {
+  const client = getSupabaseClient();
+  if (!client || !ownerKey) return 0;
+  try {
+    const { data, error } = await client.from("usage_counters")
+      .select("messageCount").eq("ownerKey", ownerKey).eq("yearMonth", yearMonth).maybeSingle();
+    if (error) { console.warn("dbGetUsage error:", error.message); return 0; }
+    return ((data as Partial<UsageCounter>) || {}).messageCount ?? 0;
+  } catch (e: any) { console.warn("dbGetUsage failed:", e?.message || e); return 0; }
+}
+
+export async function dbIncrementUsage(ownerKey: string, yearMonth: string): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client || !ownerKey) return;
+  try {
+    const { error } = await client.rpc("increment_usage", { p_owner: ownerKey, p_month: yearMonth });
+    if (error) console.warn("dbIncrementUsage error:", error.message);
+  } catch (e: any) { console.warn("dbIncrementUsage failed:", e?.message || e); }
+}
+
+export async function dbGetUsageBulk(yearMonth: string): Promise<Record<string, number>> {
+  const client = getSupabaseClient();
+  if (!client) return {};
+  try {
+    const { data, error } = await client.from("usage_counters")
+      .select("ownerKey,messageCount").eq("yearMonth", yearMonth);
+    if (error) { console.warn("dbGetUsageBulk error:", error.message); return {}; }
+    const out: Record<string, number> = {};
+    for (const r of (data as UsageCounter[]) || []) out[r.ownerKey] = r.messageCount;
+    return out;
+  } catch (e: any) { console.warn("dbGetUsageBulk failed:", e?.message || e); return {}; }
 }
 
