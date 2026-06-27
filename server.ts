@@ -843,6 +843,16 @@ app.get("/api/bots/:id", async (req, res) => {
   res.json(bot);
 });
 
+// Mức dùng tháng này của user đăng nhập (cho thẻ usage + nút nâng gói).
+app.get("/api/usage/me", async (req, res) => {
+  const ownerKey = (req.query.userId as string) || "";
+  if (!ownerKey) return res.json({ count: 0, limit: 0, tier: "free", verdict: "ok", yearMonth: currentYearMonth() });
+  const limit = resolveLimitForOwner(ownerKey, saasCustomers);
+  const count = await dbGetUsage(ownerKey, currentYearMonth());
+  const cust = saasCustomers.find(c => c.id === ownerKey || c.email?.toLowerCase() === ownerKey.toLowerCase());
+  res.json({ count, limit, tier: cust?.tier || "free", verdict: usageVerdict(count, limit), yearMonth: currentYearMonth() });
+});
+
 app.post("/api/bots", async (req, res) => {
   const botData = req.body;
   if (!botData.userId) {

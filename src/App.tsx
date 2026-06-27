@@ -91,6 +91,8 @@ export default function App() {
   const [sbAuthEmail, setSbAuthEmail] = useState('');
   const [sbAuthPassword, setSbAuthPassword] = useState('');
   const [sbUser, setSbUser] = useState<any | null>(null);
+  const [usage, setUsage] = useState<{ count: number; limit: number; tier: string; verdict: string } | null>(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const [sbAuthMode, setSbAuthMode] = useState<'signin' | 'signup'>('signin');
   const [sbAuthLoading, setSbAuthLoading] = useState(false);
   const [sbAuthError, setSbAuthError] = useState('');
@@ -517,6 +519,15 @@ export default function App() {
       window.fetch = originalFetch;
     };
   }, [sbUser?.email, sbUrl, sbKey]);
+
+  // Nạp mức dùng tháng này của user đăng nhập (thẻ usage + nâng gói).
+  useEffect(() => {
+    if (!sbUser?.id) { setUsage(null); return; }
+    fetch(`/api/usage/me?userId=${encodeURIComponent(sbUser.id)}`)
+      .then(r => r.json())
+      .then(d => setUsage(d))
+      .catch(() => setUsage(null));
+  }, [sbUser?.id, activeTab]);
 
   // Rehydrate Supabase Auth Session & Restore User Config
   useEffect(() => {
@@ -2047,6 +2058,42 @@ export default function App() {
           {/* TAB 1: DASHBOARD OVERVIEW */}
           {activeTab === 'dashboard' && bots.length > 0 && (
             <div className="space-y-6">
+              {/* Usage / Billing card */}
+              {usage && (
+                <div className={`bg-white p-5 rounded-xl border shadow-xs ${usage.verdict === 'blocked' ? 'border-rose-300' : usage.verdict === 'warn' ? 'border-amber-300' : 'border-slate-200'}`}>
+                  <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
+                    <div>
+                      <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Mức dùng tháng này</span>
+                      <span className="font-bold text-slate-800">Gói <span className="uppercase">{usage.tier}</span> — {usage.count.toLocaleString()} / {usage.limit ? usage.limit.toLocaleString() : '∞'} tin</span>
+                    </div>
+                    <button onClick={() => setShowUpgrade(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold">Nâng gói</button>
+                  </div>
+                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full transition-all ${usage.verdict === 'blocked' ? 'bg-rose-500' : usage.verdict === 'warn' ? 'bg-amber-500' : 'bg-green-500'}`}
+                      style={{ width: `${usage.limit > 0 ? Math.min(100, Math.round(usage.count / usage.limit * 100)) : 0}%` }} />
+                  </div>
+                  {usage.verdict === 'warn' && <p className="text-[11px] text-amber-600 mt-1.5 font-medium">Sắp đạt giới hạn — cân nhắc nâng gói để bot không bị tạm dừng.</p>}
+                  {usage.verdict === 'blocked' && <p className="text-[11px] text-rose-600 mt-1.5 font-medium">Đã đạt giới hạn tháng này — bot tạm dừng trả lời AI. Vui lòng nâng gói.</p>}
+                </div>
+              )}
+
+              {showUpgrade && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowUpgrade(false)}>
+                  <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+                    <h3 className="font-bold text-lg text-slate-800 mb-1">Nâng gói dịch vụ</h3>
+                    <p className="text-sm text-slate-500 mb-4">Chuyển khoản theo thông tin dưới đây, ghi rõ email tài khoản. Chúng tôi sẽ kích hoạt gói trong vòng 24h làm việc.</p>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm space-y-1 font-mono">
+                      <div>Ngân hàng: <b>[Tên ngân hàng]</b></div>
+                      <div>Số TK: <b>[Số tài khoản]</b></div>
+                      <div>Chủ TK: <b>[Tên chủ tài khoản]</b></div>
+                      <div>Nội dung: <b>BALABOT {sbUser?.email || ''}</b></div>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-3">Hỗ trợ / đổi gói: [email hoặc Zalo hỗ trợ của bạn].</p>
+                    <button onClick={() => setShowUpgrade(false)} className="mt-4 w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-sm font-semibold">Đóng</button>
+                  </div>
+                </div>
+              )}
+
               {/* Top Row Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
