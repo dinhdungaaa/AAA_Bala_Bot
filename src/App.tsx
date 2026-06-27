@@ -523,7 +523,7 @@ export default function App() {
   // Nạp mức dùng tháng này của user đăng nhập (thẻ usage + nâng gói).
   useEffect(() => {
     if (!sbUser?.id) { setUsage(null); return; }
-    fetch(`/api/usage/me?userId=${encodeURIComponent(sbUser.id)}`)
+    fetch(`/api/usage/me?userId=${encodeURIComponent(sbUser.id)}&email=${encodeURIComponent(sbUser.email || '')}`)
       .then(r => r.json())
       .then(d => setUsage(d))
       .catch(() => setUsage(null));

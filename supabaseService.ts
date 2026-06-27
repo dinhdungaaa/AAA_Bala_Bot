@@ -1228,6 +1228,32 @@ export async function dbIncrementUsage(ownerKey: string, yearMonth: string): Pro
   } catch (e: any) { console.warn("dbIncrementUsage failed:", e?.message || e); }
 }
 
+// Đọc gói (tier + hạn mức) bền từ profiles theo id hoặc email. Fail-open: null nếu lỗi/không có.
+export async function dbGetProfilePlan(ownerKey: string): Promise<{ tier?: string; message_limit?: number; email?: string } | null> {
+  const client = getSupabaseClient();
+  if (!client || !ownerKey) return null;
+  try {
+    let resp = await client.from("profiles").select("id,email,tier,message_limit").eq("id", ownerKey).maybeSingle();
+    if ((!resp.data || resp.error) && ownerKey.includes("@")) {
+      resp = await client.from("profiles").select("id,email,tier,message_limit").eq("email", ownerKey.toLowerCase()).maybeSingle();
+    }
+    if (resp.error || !resp.data) return null;
+    const d = resp.data as any;
+    return { tier: d.tier, message_limit: d.message_limit, email: d.email };
+  } catch (e: any) { console.warn("dbGetProfilePlan failed:", e?.message || e); return null; }
+}
+
+// Ghi gói bền vào profiles khi admin nâng/hạ gói (sống sót qua Railway redeploy).
+export async function dbUpdateProfilePlan(id: string, tier: string, messageLimit: number): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client || !id) return false;
+  try {
+    const { error } = await client.from("profiles").update({ tier, message_limit: messageLimit }).eq("id", id);
+    if (error) { console.warn("dbUpdateProfilePlan error:", error.message); return false; }
+    return true;
+  } catch (e: any) { console.warn("dbUpdateProfilePlan failed:", e?.message || e); return false; }
+}
+
 export async function dbGetUsageBulk(yearMonth: string): Promise<Record<string, number>> {
   const client = getSupabaseClient();
   if (!client) return {};

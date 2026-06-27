@@ -53,9 +53,11 @@ import {
   dbSaveTelegramGroup,
   dbGetUsage,
   dbIncrementUsage,
-  dbGetUsageBulk
+  dbGetUsageBulk,
+  dbGetProfilePlan,
+  dbUpdateProfilePlan
 } from "./supabaseService.js";
-import { currentYearMonth, usageVerdict } from "./billing.js";
+import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
 import { resolveLimitForOwner } from "./billingResolve.js";
 
 import {
@@ -493,6 +495,12 @@ app.put("/api/admin/customers/:id", async (req, res) => {
   }
 
   saveSaasCustomers();
+
+  // Ghi gói BỀN vào Supabase profiles (sống sót qua redeploy). Best-effort, không chặn nếu lỗi.
+  if ((tier !== undefined || messageLimit !== undefined) && !id.startsWith("cust-") && !id.startsWith("u-")) {
+    await dbUpdateProfilePlan(id, customer.tier, Number(customer.messageLimit) || 0);
+  }
+
   res.json({ ...customer, passwordSync, passwordError });
 });
 
@@ -863,11 +871,11 @@ app.get("/api/bots/:id", async (req, res) => {
 // Mức dùng tháng này của user đăng nhập (cho thẻ usage + nút nâng gói).
 app.get("/api/usage/me", async (req, res) => {
   const ownerKey = (req.query.userId as string) || "";
+  const email = (req.query.email as string) || "";
   if (!ownerKey) return res.json({ count: 0, limit: 0, tier: "free", verdict: "ok", yearMonth: currentYearMonth() });
-  const limit = resolveLimitForOwner(ownerKey, saasCustomers);
+  const { tier, limit } = await resolveOwnerPlan(ownerKey, email);
   const count = await dbGetUsage(ownerKey, currentYearMonth());
-  const cust = saasCustomers.find(c => c.id === ownerKey || c.email?.toLowerCase() === ownerKey.toLowerCase());
-  res.json({ count, limit, tier: cust?.tier || "free", verdict: usageVerdict(count, limit), yearMonth: currentYearMonth() });
+  res.json({ count, limit, tier, verdict: usageVerdict(count, limit), yearMonth: currentYearMonth() });
 });
 
 app.post("/api/bots", async (req, res) => {
@@ -2856,11 +2864,43 @@ async function attachChunkEmbedding(chunk: KnowledgeChunk): Promise<KnowledgeChu
 // ================= USAGE METERING / BILLING =================
 const BLOCK_MESSAGE = "Dạ hệ thống tạm đạt giới hạn phục vụ trong tháng, mong anh/chị thông cảm và liên hệ lại sau ạ.";
 
+// Phân giải gói (tier + hạn mức) cho 1 chủ sở hữu, ưu tiên theo độ bền:
+//  1) saasCustomers (admin override trong phiên) → 2) profiles Supabase (bền) → 3) đặc cách admin = enterprise → 4) free.
+async function resolveOwnerPlan(ownerKey: string, emailHint?: string): Promise<{ tier: string; limit: number }> {
+  const keyLc = (ownerKey || "").toLowerCase();
+  const emailLc = (emailHint || "").toLowerCase();
+
+  const cust = saasCustomers.find(c =>
+    c.id === ownerKey || c.email?.toLowerCase() === keyLc || (emailLc && c.email?.toLowerCase() === emailLc));
+  let tier = cust?.tier as string | undefined;
+  let limit = (cust?.messageLimit && cust.messageLimit > 0) ? cust.messageLimit : undefined;
+  let email = cust?.email?.toLowerCase() || emailLc;
+
+  if (!tier || !limit || !email) {
+    const p = await dbGetProfilePlan(ownerKey);
+    if (p) {
+      if (!tier && p.tier) tier = p.tier;
+      if (!limit && p.message_limit && p.message_limit > 0) limit = p.message_limit;
+      if (!email && p.email) email = p.email.toLowerCase();
+    }
+  }
+
+  // Admin không bao giờ bị giới hạn.
+  if (email === ADMIN_EMAIL || keyLc === ADMIN_EMAIL) {
+    tier = "enterprise";
+    if (!limit || limit <= 0) limit = PLAN_LIMITS.enterprise.messages;
+  }
+
+  const effTier = (tier as keyof typeof PLAN_LIMITS) || "free";
+  const effLimit = (limit && limit > 0) ? limit : (PLAN_LIMITS[effTier]?.messages ?? PLAN_LIMITS.free.messages);
+  return { tier: effTier, limit: effLimit };
+}
+
 // Kiểm tra hạn mức TRƯỚC khi gọi AI. Fail-open: lỗi DB -> count=0 -> cho qua.
 async function checkUsageGate(bot: BotConfig): Promise<{ allowed: boolean; verdict: "ok" | "warn" | "blocked"; count: number; limit: number }> {
   const ownerKey = bot.userId || "";
   if (!ownerKey) return { allowed: true, verdict: "ok", count: 0, limit: 0 };
-  const limit = resolveLimitForOwner(ownerKey, saasCustomers);
+  const { limit } = await resolveOwnerPlan(ownerKey);
   const count = await dbGetUsage(ownerKey, currentYearMonth());
   const verdict = usageVerdict(count, limit);
   return { allowed: verdict !== "blocked", verdict, count, limit };
