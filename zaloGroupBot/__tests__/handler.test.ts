@@ -6,7 +6,7 @@ import type { ChatSession } from "../../src/types.js";
 function baseDeps(over: Partial<ZaloDeps> = {}): { deps: ZaloDeps; sent: string[]; sessions: ChatSession[] } {
   const sent: string[] = [];
   const sessions: ChatSession[] = [];
-  const binding: GroupBinding = { group_id: "g1", bot_id: "bot-1", enabled: true };
+  const binding: GroupBinding = { owner_email: "owner@x.com", group_id: "g1", bot_id: "bot-1", enabled: true };
   const deps: ZaloDeps = {
     botUid: () => "BOT_UID",
     send: async (_g, t) => { sent.push(t); return "sent-id"; },
@@ -57,7 +57,7 @@ describe("createZaloMessageHandler", () => {
   });
 
   it("im lang khi binding disabled", async () => {
-    const { deps, sent } = baseDeps({ getBinding: async () => ({ group_id: "g1", bot_id: "bot-1", enabled: false }) });
+    const { deps, sent } = baseDeps({ getBinding: async () => ({ owner_email: "owner@x.com", group_id: "g1", bot_id: "bot-1", enabled: false }) });
     const h = createZaloMessageHandler(deps);
     expect((await h(ev({}))).replied).toBe(false);
     expect(sent).toEqual([]);

@@ -631,7 +631,7 @@ export default function App() {
 
   // Load Zalo status and groups when Zalo tab opens; clear poll when leaving
   useEffect(() => {
-    if (activeTab === 'zalo' && sbUser?.email === ADMIN_EMAIL) {
+    if (activeTab === 'zalo' && sbUser?.email) {
       loadZalo();
     } else if (activeTab !== 'zalo' && zaloPollerRef.current) {
       clearInterval(zaloPollerRef.current);
@@ -1753,7 +1753,7 @@ export default function App() {
             Tích hợp Facebook
           </button>
 
-          {sbUser?.email === ADMIN_EMAIL && (
+          {sbUser?.email && (
             <button
               onClick={() => { setActiveTab('zalo'); setIsMobileMenuOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'zalo' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -3223,7 +3223,7 @@ export default function App() {
           )}
 
           {/* TAB: ZALO GROUP BOT */}
-          {activeTab === 'zalo' && sbUser?.email === ADMIN_EMAIL && (
+          {activeTab === 'zalo' && sbUser?.email && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-xs p-6 md:p-8 space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">

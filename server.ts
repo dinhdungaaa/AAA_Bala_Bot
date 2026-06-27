@@ -111,6 +111,16 @@ function requireOwnerAdmin(req: express.Request, res: express.Response) {
   return false;
 }
 
+// Yêu cầu user đã đăng nhập (bất kỳ ai có email hợp lệ). Trả về email, hoặc null nếu chưa đăng nhập.
+function requireSignedInUser(req: express.Request, res: express.Response): string | null {
+  const email = getRequestUserEmail(req);
+  if (!email) {
+    res.status(401).json({ error: "Cần đăng nhập để dùng tính năng Zalo." });
+    return null;
+  }
+  return email;
+}
+
 function getRequestConfig(req: express.Request): { url: string; key: string } | null {
   const url = (req.headers["x-balabot-supabase-url"] || "").toString().trim();
   const key = (req.headers["x-balabot-supabase-key"] || "").toString().trim();
@@ -2138,41 +2148,42 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
-// ===== Zalo Group Bot admin API (owner-only) =====
+// ===== Zalo Group Bot API (per signed-in user) =====
 app.get("/api/zalo/status", (req, res) => {
-  if (!requireOwnerAdmin(req, res)) return;
-  res.json(getRuntimeStatus());
+  const email = requireSignedInUser(req, res); if (!email) return;
+  res.json(getRuntimeStatus(email));
 });
 
 app.post("/api/zalo/login/start", async (req, res) => {
-  if (!requireOwnerAdmin(req, res)) return;
-  const r = await startQrLogin();
-  res.json(r);
+  const email = requireSignedInUser(req, res); if (!email) return;
+  res.json(await startQrLogin(email));
 });
 
 app.get("/api/zalo/login/result", (req, res) => {
-  if (!requireOwnerAdmin(req, res)) return;
-  res.json(getQrLoginResult());
+  const email = requireSignedInUser(req, res); if (!email) return;
+  res.json(getQrLoginResult(email));
 });
 
 app.post("/api/zalo/logout", async (req, res) => {
-  if (!requireOwnerAdmin(req, res)) return;
-  await logoutZalo();
+  const email = requireSignedInUser(req, res); if (!email) return;
+  await logoutZalo(email);
   res.json({ ok: true });
 });
 
 app.get("/api/zalo/groups", async (req, res) => {
-  if (!requireOwnerAdmin(req, res)) return;
-  const bindings = await listBindings();
-  const allBots = await dbGetBots(bots);
+  const email = requireSignedInUser(req, res); if (!email) return;
+  const bindings = await listBindings(email);
+  const userConfig = getSavedSupabaseConfigForEmail(email);
+  const allBots = await withSupabaseConfig(userConfig, () => dbGetBots(bots));
   res.json({ bindings, bots: allBots.map((b) => ({ id: b.id, name: b.name })) });
 });
 
 app.post("/api/zalo/groups/:groupId/binding", async (req, res) => {
-  if (!requireOwnerAdmin(req, res)) return;
+  const email = requireSignedInUser(req, res); if (!email) return;
   const { botId, enabled, groupName } = req.body || {};
   if (!botId) return res.status(400).json({ error: "Thieu botId" }) as any;
   await upsertBinding({
+    owner_email: email,
     group_id: req.params.groupId,
     group_name: groupName,
     bot_id: botId,
@@ -2183,17 +2194,18 @@ app.post("/api/zalo/groups/:groupId/binding", async (req, res) => {
 
 // Test duong RAG ma khong can Zalo that.
 app.post("/api/zalo/simulate", async (req, res) => {
-  if (!requireOwnerAdmin(req, res)) return;
+  const email = requireSignedInUser(req, res); if (!email) return;
   const { botId, text, senderName } = req.body || {};
-  const allBots = await dbGetBots(bots);
+  const userConfig = getSavedSupabaseConfigForEmail(email);
+  const allBots = await withSupabaseConfig(userConfig, () => dbGetBots(bots));
   const bot = allBots.find((b) => b.id === botId);
   if (!bot) return res.status(404).json({ error: "Bot not found" }) as any;
   try {
-    const ai = await generateRAGAnswer(
+    const ai = await withSupabaseConfig(userConfig, () => generateRAGAnswer(
       bot, String(text || ""),
       { fullName: senderName || "Khach test", username: senderName || "tester", id: "zalo-sim" },
       { shouldGreet: true, recentMessages: [] }
-    );
+    ));
     res.json({ reply: postProcessBotReply(ai.text, { shouldGreet: true }), sources: ai.sources });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Zalo simulation failed" });
@@ -3821,6 +3833,9 @@ async function startServer() {
       chatSessions,
       saveConversation: dbSaveConversation,
       analytics,
+      resolveUserConfig: (ownerEmail) => getSavedSupabaseConfigForEmail(ownerEmail),
+      withUserScope: (ownerEmail, fn) =>
+        withSupabaseConfig(getSavedSupabaseConfigForEmail(ownerEmail), fn),
     });
   });
 }
