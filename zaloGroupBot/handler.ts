@@ -35,19 +35,23 @@ export function createZaloMessageHandler(
       const question = stripMention(event.text, bot.name || "");
       if (!question) return { replied: false, reason: "empty_after_strip" };
 
-      const userKey = `zalo:${event.groupId}`;
+      // Ngữ cảnh RIÊNG cho từng người trong nhóm: key theo (group + sender) thay vì chỉ group.
+      // Nhờ vậy lịch sử/ngữ cảnh của mỗi khách tách biệt → bot hiểu đúng hoàn cảnh từng người
+      // và gợi ý sản phẩm/dịch vụ phù hợp khi trả lời họ.
+      const groupLabel = binding.group_name || `Nhóm ${event.groupId}`;
+      const userKey = `zalo:${event.groupId}:${event.senderId}`;
       let session = deps.chatSessions.find((s) => s.botId === bot.id && s.telegramUserId === userKey);
       if (!session) {
         session = {
           id: "sess-zalo-" + rid(""),
           botId: bot.id,
           telegramUserId: userKey,
-          telegramUsername: `zalo_group_${event.groupId}`,
-          telegramFullName: binding.group_name || `Nhom Zalo ${event.groupId}`,
+          telegramUsername: `zalo_${event.groupId}_${event.senderId}`,
+          telegramFullName: `${event.senderName} · ${groupLabel}`,
           lastMessageText: question,
           lastMessageTime: new Date().toISOString(),
           status: "bot_answered",
-          internalNotes: "Den tu kenh Zalo Group",
+          internalNotes: `Den tu nhom Zalo: ${groupLabel}`,
           messages: [],
         };
         deps.chatSessions.unshift(session);

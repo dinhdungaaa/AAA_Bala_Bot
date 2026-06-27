@@ -79,14 +79,28 @@ describe("createZaloMessageHandler", () => {
     expect(sent.length).toBe(1);
   });
 
-  it("luu session vao chatSessions voi key zalo:<groupId>", async () => {
+  it("luu session voi key rieng tung nguoi zalo:<groupId>:<senderId>", async () => {
     const { deps, sessions } = baseDeps();
     const h = createZaloMessageHandler(deps);
-    await h(ev({}));
+    await h(ev({ senderId: "u1" }));
     expect(sessions.length).toBe(1);
-    expect(sessions[0].telegramUserId).toBe("zalo:g1");
+    expect(sessions[0].telegramUserId).toBe("zalo:g1:u1");
     expect(sessions[0].messages.some((m) => m.sender === "user")).toBe(true);
     expect(sessions[0].messages.some((m) => m.sender === "bot")).toBe(true);
+  });
+
+  it("tach ngu canh rieng cho 2 nguoi khac nhau trong cung nhom", async () => {
+    const { deps, sessions } = baseDeps();
+    const h = createZaloMessageHandler(deps);
+    await h(ev({ senderId: "u1", senderName: "An" }));
+    await h(ev({ senderId: "u2", senderName: "Binh" }));
+    expect(sessions.length).toBe(2);
+    const keys = sessions.map((s) => s.telegramUserId).sort();
+    expect(keys).toEqual(["zalo:g1:u1", "zalo:g1:u2"]);
+    // moi session chi chua tin cua dung nguoi do (1 user + 1 bot)
+    for (const s of sessions) {
+      expect(s.messages.filter((m) => m.sender === "user").length).toBe(1);
+    }
   });
 
   it("khong throw khi generateRAGAnswer loi", async () => {
