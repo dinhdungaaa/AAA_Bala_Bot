@@ -1267,3 +1267,37 @@ export async function dbGetUsageBulk(yearMonth: string): Promise<Record<string, 
   } catch (e: any) { console.warn("dbGetUsageBulk failed:", e?.message || e); return {}; }
 }
 
+// ================= FREE ALLOWLIST =================
+// Email/domain được phép dùng gói Free. Trả về { entries, ok } để phân biệt
+// "bảng rỗng" (ok=true, enforce) với "DB lỗi" (ok=false, fail-open không enforce).
+export async function dbGetFreeAllowlist(): Promise<{ entries: string[]; ok: boolean }> {
+  const client = getSupabaseClient();
+  if (!client) return { entries: [], ok: false };
+  try {
+    const { data, error } = await client.from("free_allowlist").select("entry");
+    if (error) { console.warn("dbGetFreeAllowlist error:", error.message); return { entries: [], ok: false }; }
+    const entries = ((data as { entry: string }[]) || []).map(r => String(r.entry || "").toLowerCase()).filter(Boolean);
+    return { entries, ok: true };
+  } catch (e: any) { console.warn("dbGetFreeAllowlist failed:", e?.message || e); return { entries: [], ok: false }; }
+}
+
+export async function dbAddFreeAllowlist(entry: string, note?: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client || !entry) return false;
+  try {
+    const { error } = await client.from("free_allowlist").upsert({ entry: entry.toLowerCase(), note: note || null }, { onConflict: "entry" });
+    if (error) { console.warn("dbAddFreeAllowlist error:", error.message); return false; }
+    return true;
+  } catch (e: any) { console.warn("dbAddFreeAllowlist failed:", e?.message || e); return false; }
+}
+
+export async function dbRemoveFreeAllowlist(entry: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client || !entry) return false;
+  try {
+    const { error } = await client.from("free_allowlist").delete().eq("entry", entry.toLowerCase());
+    if (error) { console.warn("dbRemoveFreeAllowlist error:", error.message); return false; }
+    return true;
+  } catch (e: any) { console.warn("dbRemoveFreeAllowlist failed:", e?.message || e); return false; }
+}
+

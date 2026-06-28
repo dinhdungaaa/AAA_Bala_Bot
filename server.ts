@@ -56,7 +56,10 @@ import {
   dbIncrementUsage,
   dbGetUsageBulk,
   dbGetProfilePlan,
-  dbUpdateProfilePlan
+  dbUpdateProfilePlan,
+  dbGetFreeAllowlist,
+  dbAddFreeAllowlist,
+  dbRemoveFreeAllowlist
 } from "./supabaseService.js";
 import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
 import { resolveLimitForOwner } from "./billingResolve.js";
@@ -877,7 +880,37 @@ app.get("/api/usage/me", async (req, res) => {
   if (!ownerKey) return res.json({ count: 0, limit: 0, tier: "free", verdict: "ok", yearMonth: currentYearMonth() });
   const { tier, limit } = await resolveOwnerPlan(ownerKey, email);
   const count = await dbGetUsage(ownerKey, currentYearMonth());
-  res.json({ count, limit, tier, verdict: usageVerdict(count, limit), yearMonth: currentYearMonth() });
+  // tier "none" = chưa được cấp gói Free (ngoài allowlist) & chưa mua → coi như bị chặn.
+  const verdict = tier === "none" ? "blocked" : usageVerdict(count, limit);
+  res.json({ count, limit, tier, verdict, yearMonth: currentYearMonth() });
+});
+
+// ---- Admin: quản lý allowlist gói Free (chỉ owner) ----
+app.get("/api/admin/free-allowlist", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const { entries, ok } = await getFreeAllowlistCached(true);
+  res.json({ entries, ok });
+});
+
+app.post("/api/admin/free-allowlist", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const entry = String(req.body?.entry || "").trim().toLowerCase();
+  const note = req.body?.note ? String(req.body.note) : undefined;
+  if (!entry) return res.status(400).json({ error: "Thiếu email hoặc domain." });
+  const okAdd = await dbAddFreeAllowlist(entry, note);
+  invalidateFreeAllowlistCache();
+  if (!okAdd) return res.status(500).json({ error: "Không lưu được (kiểm tra bảng free_allowlist đã tạo chưa)." });
+  const { entries } = await getFreeAllowlistCached(true);
+  res.json({ ok: true, entries });
+});
+
+app.delete("/api/admin/free-allowlist/:entry", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const entry = decodeURIComponent(req.params.entry || "").trim().toLowerCase();
+  await dbRemoveFreeAllowlist(entry);
+  invalidateFreeAllowlistCache();
+  const { entries } = await getFreeAllowlistCached(true);
+  res.json({ ok: true, entries });
 });
 
 app.post("/api/bots", async (req, res) => {
@@ -2956,8 +2989,37 @@ async function attachChunkEmbedding(chunk: KnowledgeChunk): Promise<KnowledgeChu
 // ================= USAGE METERING / BILLING =================
 const BLOCK_MESSAGE = "Dạ hệ thống tạm đạt giới hạn phục vụ trong tháng, mong anh/chị thông cảm và liên hệ lại sau ạ.";
 
+// ---- Free allowlist (chỉ cộng đồng được cấp mới dùng gói Free) ----
+let _freeAllowCache: { entries: string[]; ok: boolean; at: number } | null = null;
+const FREE_ALLOW_TTL_MS = 60_000;
+async function getFreeAllowlistCached(force = false): Promise<{ entries: string[]; ok: boolean }> {
+  const now = Date.now();
+  if (!force && _freeAllowCache && now - _freeAllowCache.at < FREE_ALLOW_TTL_MS) {
+    return { entries: _freeAllowCache.entries, ok: _freeAllowCache.ok };
+  }
+  const r = await dbGetFreeAllowlist();
+  _freeAllowCache = { ...r, at: now };
+  return r;
+}
+function invalidateFreeAllowlistCache() { _freeAllowCache = null; }
+
+// Khớp email theo email cụ thể HOẶC domain. Entry "a@b.com" -> khớp email; "b.com"/"@b.com" -> khớp domain.
+function isFreeAllowed(email: string, entries: string[]): boolean {
+  const e = (email || "").toLowerCase();
+  if (!e) return false;
+  const domain = e.split("@")[1] || "";
+  for (const raw of entries) {
+    const v = (raw || "").replace(/^@/, "");
+    if (!v) continue;
+    if (v === e) return true;                            // email cụ thể
+    if (!v.includes("@") && domain && v === domain) return true; // domain
+  }
+  return false;
+}
+
 // Phân giải gói (tier + hạn mức) cho 1 chủ sở hữu, ưu tiên theo độ bền:
 //  1) saasCustomers (admin override trong phiên) → 2) profiles Supabase (bền) → 3) đặc cách admin = enterprise → 4) free.
+// Gói Free bị GIỚI HẠN theo allowlist: ai không thuộc allowlist (và chưa mua gói) -> tier "none" (chặn).
 async function resolveOwnerPlan(ownerKey: string, emailHint?: string): Promise<{ tier: string; limit: number }> {
   const keyLc = (ownerKey || "").toLowerCase();
   const emailLc = (emailHint || "").toLowerCase();
@@ -2978,9 +3040,21 @@ async function resolveOwnerPlan(ownerKey: string, emailHint?: string): Promise<{
   }
 
   // Admin không bao giờ bị giới hạn.
-  if (email === ADMIN_EMAIL || keyLc === ADMIN_EMAIL) {
+  const isAdmin = email === ADMIN_EMAIL || keyLc === ADMIN_EMAIL;
+  if (isAdmin) {
     tier = "enterprise";
     if (!limit || limit <= 0) limit = PLAN_LIMITS.enterprise.messages;
+  }
+
+  // Người dùng "mặc định Free" (chưa mua gói trả phí, không phải admin) → gate theo allowlist.
+  const isPaid = !!tier && tier !== "free" && !!PLAN_LIMITS[tier as keyof typeof PLAN_LIMITS];
+  if (!isAdmin && !isPaid) {
+    const allow = await getFreeAllowlistCached();
+    // CHỈ enforce khi đọc được allowlist & có cấu hình; nếu không -> fail-open (vẫn cho Free).
+    // Nếu không xác định được email -> không chặn (không thể kiểm tra).
+    if (allow.ok && allow.entries.length > 0 && email && !isFreeAllowed(email, allow.entries)) {
+      return { tier: "none", limit: 0 };
+    }
   }
 
   const effTier = (tier as keyof typeof PLAN_LIMITS) || "free";
@@ -2992,7 +3066,9 @@ async function resolveOwnerPlan(ownerKey: string, emailHint?: string): Promise<{
 async function checkUsageGate(bot: BotConfig): Promise<{ allowed: boolean; verdict: "ok" | "warn" | "blocked"; count: number; limit: number }> {
   const ownerKey = bot.userId || "";
   if (!ownerKey) return { allowed: true, verdict: "ok", count: 0, limit: 0 };
-  const { limit } = await resolveOwnerPlan(ownerKey);
+  const { tier, limit } = await resolveOwnerPlan(ownerKey);
+  // Chủ bot không thuộc allowlist Free và chưa mua gói → chặn (bot không trả lời).
+  if (tier === "none") return { allowed: false, verdict: "blocked", count: 0, limit: 0 };
   const count = await dbGetUsage(ownerKey, currentYearMonth());
   const verdict = usageVerdict(count, limit);
   return { allowed: verdict !== "blocked", verdict, count, limit };

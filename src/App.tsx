@@ -94,6 +94,10 @@ export default function App() {
   const [sbSyncResult, setSbSyncResult] = useState<any | null>(null);
   const [sbStorageFiles, setSbStorageFiles] = useState<any[]>([]);
   const [sbLoadingStorage, setSbLoadingStorage] = useState(false);
+  // Allowlist gói Free (admin quản lý)
+  const [freeAllowlist, setFreeAllowlist] = useState<string[]>([]);
+  const [newAllowEntry, setNewAllowEntry] = useState('');
+  const [allowlistLoading, setAllowlistLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   // Supabase Auth Integration States
@@ -537,6 +541,42 @@ export default function App() {
       .then(d => setUsage(d))
       .catch(() => setUsage(null));
   }, [sbUser?.id, activeTab]);
+
+  // Admin: nạp allowlist gói Free khi mở tab Gói cước.
+  useEffect(() => {
+    if (activeTab !== 'billing') return;
+    if ((sbUser?.email || '').toLowerCase() !== ADMIN_EMAIL) return;
+    fetch('/api/admin/free-allowlist', { headers: getScopedApiHeaders() })
+      .then(r => r.json())
+      .then(d => setFreeAllowlist(Array.isArray(d.entries) ? d.entries : []))
+      .catch(() => { /* bỏ qua */ });
+  }, [activeTab, sbUser?.email]);
+
+  const addAllowEntry = async () => {
+    const entry = newAllowEntry.trim().toLowerCase();
+    if (!entry) return;
+    setAllowlistLoading(true);
+    try {
+      const r = await fetch('/api/admin/free-allowlist', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
+        body: JSON.stringify({ entry })
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || 'Không thêm được. Đã chạy SQL tạo bảng free_allowlist chưa?'); }
+      else { setFreeAllowlist(d.entries || []); setNewAllowEntry(''); }
+    } catch { alert('Lỗi mạng khi thêm allowlist.'); }
+    finally { setAllowlistLoading(false); }
+  };
+
+  const removeAllowEntry = async (entry: string) => {
+    setAllowlistLoading(true);
+    try {
+      const r = await fetch(`/api/admin/free-allowlist/${encodeURIComponent(entry)}`, { method: 'DELETE', headers: getScopedApiHeaders() });
+      const d = await r.json();
+      setFreeAllowlist(d.entries || []);
+    } catch { /* bỏ qua */ }
+    finally { setAllowlistLoading(false); }
+  };
 
   // Rehydrate Supabase Auth Session & Restore User Config
   useEffect(() => {
@@ -1328,14 +1368,16 @@ export default function App() {
   // Lấy từ /api/usage/me (đã phân giải admin=enterprise ở backend); admin/khách nâng gói
   // KHÔNG bao giờ bị kẹt ở Free. Số bot lấy theo PLAN_LIMITS (business/enterprise = vô hạn).
   const isAdminUser = (sbUser?.email || '').toLowerCase() === ADMIN_EMAIL;
+  // tier "none" = chưa được cấp gói Free (ngoài allowlist cộng đồng) & chưa mua gói → CHƯA KÍCH HOẠT.
+  const isNoPlan = usage?.tier === 'none';
   const myPlanTier = ((usage?.tier as keyof typeof PLAN_LIMITS) || (isAdminUser ? 'enterprise' : 'free'));
-  const planMeta = PLAN_LIMITS[myPlanTier] || PLAN_LIMITS.free;
+  const planMeta = isNoPlan ? { messages: 0, bots: 0, channels: 0 as number } : (PLAN_LIMITS[myPlanTier] || PLAN_LIMITS.free);
   const planLabelMap: Record<string, string> = { free: 'Free Standard', starter: 'Starter', pro: 'Premium Pro', business: 'Business', enterprise: 'Enterprise' };
-  const myPlanLabel = planLabelMap[myPlanTier] || 'Free Standard';
+  const myPlanLabel = isNoPlan ? 'Chưa kích hoạt' : (planLabelMap[myPlanTier] || 'Free Standard');
   const myBotLimit = planMeta.bots;                                   // number | Infinity
   const myBotLimitFinite = Number.isFinite(myBotLimit);
   const myBotReached = myBotLimitFinite && bots.length >= (myBotLimit as number);
-  const myMsgLimit = usage?.limit || planMeta.messages || 150;
+  const myMsgLimit = isNoPlan ? 0 : (usage?.limit || planMeta.messages || 150);
   const myMsgCount = usage?.count ?? 0;
   const myMsgPct = myMsgLimit > 0 ? Math.min(100, (myMsgCount / myMsgLimit) * 100) : 0;
 
@@ -2093,16 +2135,22 @@ export default function App() {
                   <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
                     <div>
                       <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Mức dùng tháng này</span>
-                      <span className="font-bold text-slate-800">Gói <span className="uppercase">{usage.tier}</span> — {usage.count.toLocaleString()} / {usage.limit ? usage.limit.toLocaleString() : '∞'} tin</span>
+                      {usage.tier === 'none'
+                        ? <span className="font-bold text-rose-700">Tài khoản chưa được kích hoạt gói</span>
+                        : <span className="font-bold text-slate-800">Gói <span className="uppercase">{usage.tier}</span> — {usage.count.toLocaleString()} / {usage.limit ? usage.limit.toLocaleString() : '∞'} tin</span>}
                     </div>
                     <button onClick={() => setShowUpgrade(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold">Nâng gói</button>
                   </div>
                   <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
                     <div className={`h-full rounded-full transition-all ${usage.verdict === 'blocked' ? 'bg-rose-500' : usage.verdict === 'warn' ? 'bg-amber-500' : 'bg-green-500'}`}
-                      style={{ width: `${usage.limit > 0 ? Math.min(100, Math.round(usage.count / usage.limit * 100)) : 0}%` }} />
+                      style={{ width: `${usage.tier === 'none' ? 100 : (usage.limit > 0 ? Math.min(100, Math.round(usage.count / usage.limit * 100)) : 0)}%` }} />
                   </div>
-                  {usage.verdict === 'warn' && <p className="text-[11px] text-amber-600 mt-1.5 font-medium">Sắp đạt giới hạn — cân nhắc nâng gói để bot không bị tạm dừng.</p>}
-                  {usage.verdict === 'blocked' && <p className="text-[11px] text-rose-600 mt-1.5 font-medium">Đã đạt giới hạn tháng này — bot tạm dừng trả lời AI. Vui lòng nâng gói.</p>}
+                  {usage.tier === 'none'
+                    ? <p className="text-[11px] text-rose-600 mt-1.5 font-medium">Gói Free chỉ dành cho thành viên cộng đồng Peace Solution. Tài khoản của bạn chưa được cấp quyền — bot sẽ KHÔNG trả lời khách cho tới khi bạn mua gói hoặc được cấp quyền. Vui lòng liên hệ để kích hoạt.</p>
+                    : <>
+                        {usage.verdict === 'warn' && <p className="text-[11px] text-amber-600 mt-1.5 font-medium">Sắp đạt giới hạn — cân nhắc nâng gói để bot không bị tạm dừng.</p>}
+                        {usage.verdict === 'blocked' && <p className="text-[11px] text-rose-600 mt-1.5 font-medium">Đã đạt giới hạn tháng này — bot tạm dừng trả lời AI. Vui lòng nâng gói.</p>}
+                      </>}
                 </div>
               )}
 
@@ -4277,6 +4325,59 @@ export default function App() {
                 </div>
 
               </div>
+
+              {/* ADMIN: Allowlist gói Free (chỉ owner thấy) */}
+              {isAdminUser && (
+                <div className="bg-white border border-emerald-200 rounded-xl p-5 shadow-xs space-y-4">
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-emerald-600" />
+                      Allowlist gói Free — cộng đồng Peace Solution
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Chỉ email/domain trong danh sách này mới được dùng gói <strong>Free</strong>. Người ngoài (chưa mua gói) sẽ bị chặn bot trả lời.
+                      Thêm <strong>email cụ thể</strong> (vd <code className="bg-slate-100 px-1 rounded">an@gmail.com</code>) hoặc cả <strong>domain</strong> (vd <code className="bg-slate-100 px-1 rounded">@peacesolution.org</code>).
+                      {' '}Danh sách trống = chưa bật giới hạn (mọi người vẫn dùng Free).
+                    </p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newAllowEntry}
+                      onChange={(e) => setNewAllowEntry(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') addAllowEntry(); }}
+                      placeholder="email@domain.com hoặc @domain.com"
+                      className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                    <button
+                      onClick={addAllowEntry}
+                      disabled={allowlistLoading || !newAllowEntry.trim()}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer"
+                    >
+                      + Thêm
+                    </button>
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-3">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Đang cho phép ({freeAllowlist.length})</span>
+                    {freeAllowlist.length === 0 ? (
+                      <p className="text-xs text-amber-600 mt-2 font-medium">Chưa có mục nào — giới hạn Free CHƯA bật (mọi tài khoản vẫn dùng được Free).</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {freeAllowlist.map((entry) => (
+                          <span key={entry} className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium px-2.5 py-1 rounded-full">
+                            {entry.includes('@') && !entry.startsWith('@') ? entry : `@${entry.replace(/^@/, '')} (domain)`}
+                            <button onClick={() => removeAllowEntry(entry)} disabled={allowlistLoading} className="text-emerald-500 hover:text-rose-600 cursor-pointer" title="Gỡ">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* SIMULATED DISASTER CHECKOUT ZONE (Render when active) */}
               {checkoutPlan && (
