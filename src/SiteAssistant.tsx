@@ -15,9 +15,34 @@ export default function SiteAssistant() {
   const [messages, setMessages] = useState<Msg[]>([WELCOME]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  // Lead capture
+  const [showLead, setShowLead] = useState(false);
+  const [leadName, setLeadName] = useState('');
+  const [leadContact, setLeadContact] = useState('');
+  const [leadSending, setLeadSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading, open]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading, open, showLead]);
+
+  const submitLead = async () => {
+    if (!leadContact.trim() || leadSending) return;
+    setLeadSending(true);
+    try {
+      const lastUser = [...messages].reverse().find(m => m.role === 'user')?.text || '';
+      const r = await fetch('/api/site-assistant/lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: leadName, contact: leadContact, note: lastUser, page: typeof window !== 'undefined' ? window.location.href : '' }),
+      });
+      const d = await r.json();
+      setShowLead(false); setLeadName(''); setLeadContact('');
+      setMessages(prev => [...prev, { role: 'bot', text: d.message || 'Cảm ơn anh/chị! Bên em sẽ liên hệ sớm ạ.' }]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'bot', text: 'Gửi liên hệ chưa được ạ, anh/chị thử lại giúp em nhé.' }]);
+    } finally {
+      setLeadSending(false);
+    }
+  };
 
   const send = async (text: string) => {
     const q = text.trim();
@@ -113,6 +138,33 @@ export default function SiteAssistant() {
             <div ref={endRef} />
           </div>
 
+          {/* Form để lại liên hệ */}
+          {showLead && (
+            <div className="px-3 py-3 border-t border-indigo-100 bg-indigo-50/60 shrink-0 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-800">Để lại liên hệ — bên em gọi tư vấn & hỗ trợ setup</span>
+                <button onClick={() => setShowLead(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer"><X className="w-4 h-4" /></button>
+              </div>
+              <input
+                value={leadName} onChange={(e) => setLeadName(e.target.value)}
+                placeholder="Tên của anh/chị (tuỳ chọn)"
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[13px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+              <input
+                value={leadContact} onChange={(e) => setLeadContact(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitLead(); }}
+                placeholder="Số điện thoại / Zalo / email *"
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[13px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+              <button
+                onClick={submitLead} disabled={leadSending || !leadContact.trim()}
+                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg text-xs font-bold cursor-pointer"
+              >
+                {leadSending ? 'Đang gửi...' : 'Gửi liên hệ'}
+              </button>
+            </div>
+          )}
+
           {/* Nhập */}
           <div className="p-2.5 border-t border-slate-200 bg-white shrink-0">
             <div className="flex items-end gap-2">
@@ -133,7 +185,15 @@ export default function SiteAssistant() {
                 <Send className="w-4 h-4" />
               </button>
             </div>
-            <div className="text-[9px] text-slate-400 text-center mt-1.5">Trợ lý AI có thể trả lời chưa chính xác 100%.</div>
+            <div className="flex items-center justify-center gap-2 mt-1.5">
+              {!showLead && (
+                <button onClick={() => setShowLead(true)} className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 hover:underline cursor-pointer">
+                  📞 Để lại liên hệ để được tư vấn
+                </button>
+              )}
+              <span className="text-[9px] text-slate-300">·</span>
+              <span className="text-[9px] text-slate-400">AI có thể chưa chính xác 100%</span>
+            </div>
           </div>
         </div>
       )}

@@ -99,6 +99,8 @@ export default function App() {
   const [freeAllowlist, setFreeAllowlist] = useState<string[]>([]);
   const [newAllowEntry, setNewAllowEntry] = useState('');
   const [allowlistLoading, setAllowlistLoading] = useState(false);
+  // Leads khách để lại qua trợ lý web
+  const [leadsList, setLeadsList] = useState<any[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   // Supabase Auth Integration States
@@ -550,6 +552,10 @@ export default function App() {
     fetch('/api/admin/free-allowlist', { headers: getScopedApiHeaders() })
       .then(r => r.json())
       .then(d => setFreeAllowlist(Array.isArray(d.entries) ? d.entries : []))
+      .catch(() => { /* bỏ qua */ });
+    fetch('/api/admin/leads', { headers: getScopedApiHeaders() })
+      .then(r => r.json())
+      .then(d => setLeadsList(Array.isArray(d.leads) ? d.leads : []))
       .catch(() => { /* bỏ qua */ });
   }, [activeTab, sbUser?.email]);
 
@@ -5712,6 +5718,46 @@ WHERE email = 'customer-email@example.com';`}
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* LEADS — khách để lại liên hệ qua Trợ lý web */}
+              <div className="bg-white border border-indigo-200 rounded-xl p-5 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-indigo-600" />
+                    Khách để lại liên hệ (Leads) <span className="text-xs font-bold text-indigo-600">{leadsList.length}</span>
+                  </h3>
+                  <button
+                    onClick={() => fetch('/api/admin/leads', { headers: getScopedApiHeaders() }).then(r => r.json()).then(d => setLeadsList(Array.isArray(d.leads) ? d.leads : [])).catch(() => {})}
+                    className="text-xs text-indigo-600 hover:underline cursor-pointer"
+                  >Làm mới</button>
+                </div>
+                {leadsList.length === 0 ? (
+                  <p className="text-xs text-slate-400">Chưa có liên hệ nào. Khách bấm "Để lại liên hệ" trong popup trợ lý sẽ hiện ở đây.</p>
+                ) : (
+                  <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="text-slate-400 uppercase text-[10px] sticky top-0 bg-white">
+                        <tr className="text-left border-b border-slate-100">
+                          <th className="py-1.5 pr-3 font-bold">Thời gian</th>
+                          <th className="py-1.5 pr-3 font-bold">Tên</th>
+                          <th className="py-1.5 pr-3 font-bold">Liên hệ</th>
+                          <th className="py-1.5 font-bold">Nhu cầu / câu hỏi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-slate-700">
+                        {leadsList.map((l) => (
+                          <tr key={l.id} className="border-b border-slate-50 align-top">
+                            <td className="py-1.5 pr-3 whitespace-nowrap text-slate-400">{l.created_at ? new Date(l.created_at).toLocaleString('vi-VN') : ''}</td>
+                            <td className="py-1.5 pr-3">{l.name || '—'}</td>
+                            <td className="py-1.5 pr-3 font-bold text-indigo-700">{l.contact}</td>
+                            <td className="py-1.5 text-slate-500">{l.note || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               {/* TOP AGGREGATE STATS STRIP */}

@@ -59,7 +59,9 @@ import {
   dbUpdateProfilePlan,
   dbGetFreeAllowlist,
   dbAddFreeAllowlist,
-  dbRemoveFreeAllowlist
+  dbRemoveFreeAllowlist,
+  dbAddLead,
+  dbGetLeads
 } from "./supabaseService.js";
 import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
 import { resolveLimitForOwner } from "./billingResolve.js";
@@ -944,7 +946,21 @@ Nền tảng SaaS chatbot AI chăm sóc khách hàng & bán hàng ĐA KÊNH (omn
 1) Đăng nhập tài khoản. 2) Bấm "Tạo Bot", đặt tên & chọn tone. 3) Nạp tri thức (PDF/Excel/URL/FAQ). 4) Chat thử ở Playground. 5) Kết nối kênh: lấy token Telegram từ @BotFather (hoặc kết nối Facebook/quét QR Zalo). 6) Bot chạy 24/7.
 
 # 8. Liên hệ / hỗ trợ
-Email & hỗ trợ nâng/đổi gói: ox102.crypto@gmail.com.`;
+Email & hỗ trợ nâng/đổi gói: ox102.crypto@gmail.com.
+
+# 9. Xử lý các thắc mắc/băn khoăn thường gặp (trả lời tự tin, ngắn gọn)
+- "Có dùng thử không / có mất phí setup không": có thể bắt đầu với gói thấp, tự tạo bot ngay, không tính phí cài đặt; gói Pro có hỗ trợ chuyên gia giúp setup.
+- "Khác gì các nền tảng khác / ManyChat": BalaBot đa kênh (kể cả Zalo nhóm bằng nick cá nhân), trả lời theo TRI THỨC riêng của bạn (RAG) nên sát nghiệp vụ, có can thiệp người thật, đặt lịch nhắc, giá Việt hợp lý.
+- "Bot có tự bịa không / có chính xác không": bot bám tri thức bạn nạp; nếu không có dữ liệu sẽ xin phép chuyển người thật thay vì bịa.
+- "Dữ liệu có an toàn không": gói Pro trở lên cho kết nối Supabase/Cloud riêng của bạn để tự sở hữu dữ liệu.
+- "Cài khó không / mất bao lâu": vài bước, lấy token Telegram từ @BotFather là chạy; thường dưới 15-30 phút.
+- "Huỷ/đổi gói được không": có, liên hệ để đổi/huỷ; hạn mức reset hằng tháng.
+- Nếu gặp câu em KHÔNG chắc chắn: thành thật nói chưa có thông tin và mời để lại liên hệ để đội ngũ hỗ trợ.
+
+# 10. Cách hành xử như một trợ lý hữu ích
+- LUÔN kết thúc bằng một bước hành động cụ thể (tạo bot, hỏi thêm nhu cầu, hoặc để lại liên hệ).
+- Khi khách thể hiện quan tâm/muốn mua/cần tư vấn kỹ/cần hỗ trợ setup → CHỦ ĐỘNG mời để lại liên hệ: "Anh/chị có thể bấm 'Để lại liên hệ' ngay dưới khung chat (hoặc gửi em SĐT/Zalo) để bên em liên hệ tư vấn kỹ và hỗ trợ cài đặt miễn phí nhé ạ." (Trong giao diện popup có sẵn nút 'Để lại liên hệ'.)
+- Ngắn gọn, không lan man; ưu tiên đúng trọng tâm câu hỏi; chủ động gợi mở bước tiếp theo phù hợp.`;
 
 const siteAssistantRate = new Map<string, { n: number; reset: number }>();
 function siteAssistantAllow(ip: string): boolean {
@@ -979,6 +995,26 @@ app.post("/api/site-assistant", async (req, res) => {
     console.warn("[SiteAssistant] error:", e?.message || e);
     res.json({ answer: "Hệ thống đang bận, anh/chị thử lại sau ít phút hoặc liên hệ ox102.crypto@gmail.com nhé ạ." });
   }
+});
+
+// Khách để lại liên hệ qua trợ lý web (công khai, dùng chung rate-limit).
+app.post("/api/site-assistant/lead", async (req, res) => {
+  const ip = ((req.headers["x-forwarded-for"] as string) || "").split(",")[0].trim() || req.ip || "unknown";
+  if (!siteAssistantAllow(ip)) return res.status(429).json({ ok: false, error: "Anh/chị thao tác hơi nhanh, thử lại sau chút nhé." });
+  const name = String(req.body?.name || "").trim().slice(0, 120);
+  const contact = String(req.body?.contact || "").trim().slice(0, 120);
+  const note = String(req.body?.note || "").trim().slice(0, 1000);
+  const page = String(req.body?.page || "").trim().slice(0, 300);
+  if (!contact) return res.status(400).json({ ok: false, error: "Vui lòng để lại số điện thoại / Zalo / email ạ." });
+  const ok = await dbAddLead({ id: "lead-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), name, contact, note, page });
+  res.json({ ok, message: "Cảm ơn anh/chị! Bên em sẽ liên hệ trong thời gian sớm nhất ạ." });
+});
+
+// ---- Admin: xem danh sách leads (chỉ owner) ----
+app.get("/api/admin/leads", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const leads = await dbGetLeads(300);
+  res.json({ leads });
 });
 
 // ---- Admin: quản lý allowlist gói Free (chỉ owner) ----

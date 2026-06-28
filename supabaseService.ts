@@ -1301,3 +1301,28 @@ export async function dbRemoveFreeAllowlist(entry: string): Promise<boolean> {
   } catch (e: any) { console.warn("dbRemoveFreeAllowlist failed:", e?.message || e); return false; }
 }
 
+// ================= LEADS (khách để lại liên hệ qua trợ lý web) =================
+export interface LeadRow { id: string; name?: string; contact?: string; note?: string; page?: string; status?: string; created_at?: string; }
+const memLeads: LeadRow[] = []; // fallback khi chưa cấu hình Supabase
+
+export async function dbAddLead(lead: LeadRow): Promise<boolean> {
+  const row: LeadRow = { status: "new", created_at: new Date().toISOString(), ...lead };
+  const client = getSupabaseClient();
+  if (!client) { memLeads.unshift(row); return true; }
+  try {
+    const { error } = await client.from("leads").insert(row);
+    if (error) { console.warn("dbAddLead error:", error.message); memLeads.unshift(row); return false; }
+    return true;
+  } catch (e: any) { console.warn("dbAddLead failed:", e?.message || e); memLeads.unshift(row); return false; }
+}
+
+export async function dbGetLeads(limit = 200): Promise<LeadRow[]> {
+  const client = getSupabaseClient();
+  if (!client) return memLeads.slice(0, limit);
+  try {
+    const { data, error } = await client.from("leads").select("*").order("created_at", { ascending: false }).limit(limit);
+    if (error) { console.warn("dbGetLeads error:", error.message); return memLeads.slice(0, limit); }
+    return (data as LeadRow[]) || [];
+  } catch (e: any) { console.warn("dbGetLeads failed:", e?.message || e); return memLeads.slice(0, limit); }
+}
+
