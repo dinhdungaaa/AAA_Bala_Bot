@@ -2945,7 +2945,7 @@ async function attachChunkEmbedding(chunk: KnowledgeChunk): Promise<KnowledgeChu
   const h = hashText(text);
   if (chunk.embedding && chunk.embeddingHash === h) return chunk; // khong doi -> bo qua
   try {
-    chunk.embedding = await embedText(ai, text);
+    chunk.embedding = await embedText(ai, text, 2); // bulk: ít retry hơn để đỡ phồng request
     chunk.embeddingHash = h;
   } catch (e: any) {
     console.warn("[RAG] embed chunk failed:", e?.message || e);
@@ -3146,7 +3146,7 @@ app.post("/api/rag/reembed", async (req, res) => {
     const h = hashText(text);
     if (c.embedding && c.embeddingHash === h) { skipped++; continue; }
     try {
-      const vec = await embedText(ai, text);
+      const vec = await embedText(ai, text, 2); // bulk re-embed: ít retry hơn
       await dbUpdateChunk(c.id, { embedding: vec, embeddingHash: h } as any);
       const mem = knowledgeChunks.find(x => x.id === c.id);
       if (mem) { mem.embedding = vec; mem.embeddingHash = h; }

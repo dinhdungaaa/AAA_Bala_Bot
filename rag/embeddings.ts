@@ -45,8 +45,10 @@ function extractVectors(res: any): number[][] {
   return arr.map((e: any) => (Array.isArray(e?.values) ? e.values : Array.isArray(e) ? e : []));
 }
 
-export async function embedText(ai: GoogleGenAI, text: string): Promise<number[]> {
-  const res = await withRetry(() => ai.models.embedContent({ model: EMBED_MODEL, contents: text } as any));
+// tries: số lần thử khi gặp 503/429. Tương tác (answer khách) để mặc định 3 cho ổn định;
+// thao tác HÀNG LOẠT (train/re-embed) nên truyền 2 để đỡ phồng request khi Gemini sập.
+export async function embedText(ai: GoogleGenAI, text: string, tries = 3): Promise<number[]> {
+  const res = await withRetry(() => ai.models.embedContent({ model: EMBED_MODEL, contents: text } as any), tries);
   return extractVector(res);
 }
 
