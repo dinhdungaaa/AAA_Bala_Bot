@@ -4538,8 +4538,8 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* THE 3 COLUMNS CARD GRID */}
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                {/* PLAN CARD GRID — 4 gói cân đối 1 hàng trên màn rộng */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 items-stretch">
                       
                   {/* CARD 1: EXTREMELY POLISHED FREE PLAN */}
                   <div className="bg-white rounded-2xl border-2 border-emerald-500 p-6 shadow-sm space-y-5 flex flex-col justify-between relative overflow-hidden text-left hover:shadow-md transition-shadow">
@@ -4678,8 +4678,8 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* CARD 2: PRO PLAN FOR HEAVY GROWTH */}
-                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5 flex flex-col justify-between text-left hover:shadow-md transition-shadow relative overflow-hidden group">
+                  {/* CARD 2: PRO PLAN FOR HEAVY GROWTH (khuyên dùng — nổi bật) */}
+                  <div className="bg-white rounded-2xl border-2 border-indigo-400 ring-2 ring-indigo-500/20 p-6 shadow-lg space-y-5 flex flex-col justify-between text-left hover:shadow-xl transition-shadow relative overflow-hidden group">
                     <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[9px] font-extrabold px-3 py-1 rounded-bl uppercase tracking-widest font-sans group-hover:bg-indigo-700 transition-colors">
                       PHÙ HỢP CHO DOANH NGHIỆP
                     </div>
