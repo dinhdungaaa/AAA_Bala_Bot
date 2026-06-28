@@ -1319,6 +1319,21 @@ export default function App() {
     s.contentSummary.toLowerCase().includes(kbSearchQuery.toLowerCase())
   );
 
+  // === Gói HIỆU LỰC của user đang đăng nhập (tab Gói cước) ===
+  // Lấy từ /api/usage/me (đã phân giải admin=enterprise ở backend); admin/khách nâng gói
+  // KHÔNG bao giờ bị kẹt ở Free. Số bot lấy theo PLAN_LIMITS (business/enterprise = vô hạn).
+  const isAdminUser = (sbUser?.email || '').toLowerCase() === ADMIN_EMAIL;
+  const myPlanTier = ((usage?.tier as keyof typeof PLAN_LIMITS) || (isAdminUser ? 'enterprise' : 'free'));
+  const planMeta = PLAN_LIMITS[myPlanTier] || PLAN_LIMITS.free;
+  const planLabelMap: Record<string, string> = { free: 'Free Standard', starter: 'Starter', pro: 'Premium Pro', business: 'Business', enterprise: 'Enterprise' };
+  const myPlanLabel = planLabelMap[myPlanTier] || 'Free Standard';
+  const myBotLimit = planMeta.bots;                                   // number | Infinity
+  const myBotLimitFinite = Number.isFinite(myBotLimit);
+  const myBotReached = myBotLimitFinite && bots.length >= (myBotLimit as number);
+  const myMsgLimit = usage?.limit || planMeta.messages || 150;
+  const myMsgCount = usage?.count ?? 0;
+  const myMsgPct = myMsgLimit > 0 ? Math.min(100, (myMsgCount / myMsgLimit) * 100) : 0;
+
   if (!sbUser) {
     return (
       <div className="min-h-screen bg-[#0F172A] text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950 overflow-x-hidden">
@@ -4173,7 +4188,7 @@ export default function App() {
                   <div className="space-y-2 relative z-10">
                     <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase block font-sans">Gói cước đang dùng</span>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-black text-slate-900">BalaBot Free Standard</h3>
+                      <h3 className="text-lg font-black text-slate-900">BalaBot {myPlanLabel}</h3>
                       <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                         Đang dùng
@@ -4198,7 +4213,7 @@ export default function App() {
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase block font-sans">Số lượng Bot hoạt động</span>
                       <span className="text-xs font-mono font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-                        {bots.length} / {freeBotsLimit} Bot
+                        {bots.length} / {myBotLimitFinite ? myBotLimit : '∞'} Bot
                       </span>
                     </div>
                     <p className="text-xs text-slate-550">
@@ -4209,17 +4224,19 @@ export default function App() {
                   {/* Visual scale */}
                   <div className="space-y-1.5 mt-4">
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-500 ${bots.length >= freeBotsLimit ? 'bg-amber-500' : 'bg-blue-600'}`}
-                        style={{ width: `${Math.min(100, (bots.length / freeBotsLimit) * 100)}%` }}
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${myBotReached ? 'bg-amber-500' : myBotLimitFinite ? 'bg-blue-600' : 'bg-emerald-500'}`}
+                        style={{ width: `${myBotLimitFinite ? Math.min(100, (bots.length / (myBotLimit as number)) * 100) : 100}%` }}
                       ></div>
                     </div>
                     <div className="flex justify-between text-[10.5px] font-medium text-slate-400">
                       <span>Đã tạo {bots.length} Bot</span>
-                      {bots.length >= freeBotsLimit ? (
+                      {!myBotLimitFinite ? (
+                        <span className="text-emerald-600 font-bold">Không giới hạn</span>
+                      ) : myBotReached ? (
                         <span className="text-amber-600 font-bold">Chạm giới hạn tối đa !</span>
                       ) : (
-                        <span>Còn {(freeBotsLimit - bots.length)} lượt miễn phí</span>
+                        <span>Còn {((myBotLimit as number) - bots.length)} lượt</span>
                       )}
                     </div>
                   </div>
@@ -4231,7 +4248,7 @@ export default function App() {
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase block font-sans">Hạn mức tin nhắn tháng này</span>
                       <span className="text-xs font-mono font-extrabold text-purple-600 bg-purple-50 px-2 py-0.5 rounded">
-                        342 / {freeQueriesLimit.toLocaleString()} tin
+                        {myMsgCount.toLocaleString()} / {myMsgLimit.toLocaleString()} tin
                       </span>
                     </div>
                     <p className="text-xs text-slate-550">
@@ -4242,14 +4259,14 @@ export default function App() {
                   {/* Visual scale */}
                   <div className="space-y-1.5 mt-4">
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div 
+                      <div
                         className="h-full rounded-full bg-indigo-600 transition-all duration-500"
-                        style={{ width: `${Math.min(100, (342 / freeQueriesLimit) * 100)}%` }}
+                        style={{ width: `${myMsgPct}%` }}
                       ></div>
                     </div>
                     <div className="flex justify-between text-[10.5px] font-medium text-slate-400">
-                      <span>Đã sử dụng 34.2%</span>
-                      <span>Còn {(freeQueriesLimit - 342).toLocaleString()} tin nhắn</span>
+                      <span>Đã sử dụng {myMsgPct.toFixed(1)}%</span>
+                      <span>Còn {Math.max(0, myMsgLimit - myMsgCount).toLocaleString()} tin nhắn</span>
                     </div>
                   </div>
                 </div>
@@ -4471,12 +4488,12 @@ export default function App() {
                       <div className="space-y-3 text-[12px] border-t border-slate-100 pt-4">
                         <div className="flex items-center gap-2.5 text-slate-700">
                           <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                          <span>Hạn mức tối đa <strong>{freeQueriesLimit.toLocaleString()}</strong> tin nhắn/tháng</span>
+                          <span>Hạn mức tối đa <strong>{PLAN_LIMITS.free.messages.toLocaleString()}</strong> tin nhắn/tháng (hoặc tự dùng key Gemini riêng)</span>
                         </div>
 
                         <div className="flex items-center gap-2.5 text-slate-700">
                           <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                          <span>Vận hành đồng thời <strong>{freeBotsLimit} bot</strong> AI hỗ trợ bán hàng</span>
+                          <span>Vận hành đồng thời <strong>{PLAN_LIMITS.free.bots} bot</strong> AI hỗ trợ bán hàng</span>
                         </div>
 
                         <div className="flex items-center gap-2.5 text-slate-700">
@@ -4539,7 +4556,7 @@ export default function App() {
                       <div className="my-4">
                         <div className="flex items-baseline gap-1">
                           <span className="text-3xl font-black text-indigo-600">
-                            {billingCycle === 'yearly' ? '332.000 VNĐ' : '499.000 VNĐ'}
+                            {billingCycle === 'yearly' ? '519.000 VNĐ' : '649.000 VNĐ'}
                           </span>
                           <span className="text-slate-400 text-xs font-semibold">/ tháng</span>
                         </div>
@@ -4551,12 +4568,12 @@ export default function App() {
                       <div className="space-y-3 text-[12px] border-t border-slate-100 pt-4">
                         <div className="flex items-center gap-2.5 text-slate-700">
                           <CheckCircle2 className="w-4 h-4 text-indigo-500 shrink-0" />
-                          <span>Mở khóa <strong>25.000 tin nhắn sỉ / tháng</strong> (Phản hồi tức thì)</span>
+                          <span>Mở khóa <strong>{PLAN_LIMITS.pro.messages.toLocaleString()} tin nhắn sỉ / tháng</strong> (Phản hồi tức thì)</span>
                         </div>
 
                         <div className="flex items-center gap-2.5 text-slate-700">
                           <CheckCircle2 className="w-4 h-4 text-indigo-500 shrink-0" />
-                          <span><strong>Không giới hạn</strong> số lượng Bot AI khởi tạo cùng lúc</span>
+                          <span>Tối đa <strong>{PLAN_LIMITS.pro.bots} Bot AI</strong> khởi tạo cùng lúc</span>
                         </div>
 
                         <div className="flex items-center gap-2.5 text-slate-700">
