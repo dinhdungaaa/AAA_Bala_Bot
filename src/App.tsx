@@ -4555,11 +4555,16 @@ export default function App() {
 
                       <div className="my-4">
                         <span className="text-3xl font-black text-slate-900">0 VNĐ</span>
-                        <span className="text-xs text-slate-400 font-semibold block mt-1">Cam kết miễn phí hào phóng trọn đời</span>
+                        <span className="text-xs text-slate-400 font-semibold block mt-1">Miễn phí — chỉ dành cho thành viên cộng đồng Peace Solution</span>
                       </div>
 
                       {/* FEATURE LIST */}
                       <div className="space-y-3 text-[12px] border-t border-slate-100 pt-4">
+                        <div className="flex items-center gap-2.5 text-emerald-700">
+                          <Shield className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span><strong>Chỉ dành cho thành viên cộng đồng Peace Solution</strong> (cần được cấp quyền)</span>
+                        </div>
+
                         <div className="flex items-center gap-2.5 text-slate-700">
                           <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
                           <span>Hạn mức tối đa <strong>{PLAN_LIMITS.free.messages.toLocaleString()}</strong> tin nhắn/tháng (hoặc tự dùng key Gemini riêng)</span>
@@ -4739,64 +4744,6 @@ export default function App() {
                         className="w-full py-2.5 bg-indigo-600 hover:bg-slate-900 hover:text-white text-white rounded-lg text-xs font-bold transition-all cursor-pointer text-center font-sans tracking-wide"
                       >
                         Nâng Cấp Bản Pro Ngay
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* CARD: BUSINESS PLAN */}
-                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5 flex flex-col justify-between text-left hover:shadow-md transition-shadow relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 bg-violet-600 text-white text-[9px] font-extrabold px-3 py-1 rounded-bl uppercase tracking-widest font-sans group-hover:bg-violet-700 transition-colors">
-                      QUY MÔ LỚN
-                    </div>
-
-                    <div>
-                      <div>
-                        <span className="text-[10px] text-violet-500 font-extrabold uppercase tracking-wider block font-sans">VẬN HÀNH CHUYÊN NGHIỆP</span>
-                        <h4 className="font-extrabold text-slate-800 text-lg mt-0.5">BalaBot Business</h4>
-                      </div>
-
-                      <div className="my-4">
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-3xl font-black text-violet-600">
-                            {billingCycle === 'yearly' ? '1.192.000 VNĐ' : '1.490.000 VNĐ'}
-                          </span>
-                          <span className="text-slate-400 text-xs font-semibold">/ tháng</span>
-                        </div>
-                        <span className="text-xs text-slate-400 font-semibold block mt-1">
-                          {billingCycle === 'yearly' ? 'Tiết kiệm 20% (Thanh toán hằng năm)' : 'Cho doanh nghiệp nhiều bot, tải cao'}
-                        </span>
-                      </div>
-
-                      <div className="space-y-3 text-[12px] border-t border-slate-100 pt-4">
-                        <div className="flex items-center gap-2.5 text-slate-700">
-                          <CheckCircle2 className="w-4 h-4 text-violet-500 shrink-0" />
-                          <span>Hạn mức <strong>{PLAN_LIMITS.business.messages.toLocaleString()} tin nhắn / tháng</strong></span>
-                        </div>
-                        <div className="flex items-center gap-2.5 text-slate-700">
-                          <CheckCircle2 className="w-4 h-4 text-violet-500 shrink-0" />
-                          <span><strong>Không giới hạn</strong> số lượng Bot AI</span>
-                        </div>
-                        <div className="flex items-center gap-2.5 text-slate-700">
-                          <CheckCircle2 className="w-4 h-4 text-violet-500 shrink-0" />
-                          <span>Tri thức <strong>không giới hạn</strong> nguồn / đoạn</span>
-                        </div>
-                        <div className="flex items-center gap-2.5 text-slate-700">
-                          <CheckCircle2 className="w-4 h-4 text-violet-500 shrink-0" />
-                          <span>Gỡ thương hiệu "BalaBot" (White-label)</span>
-                        </div>
-                        <div className="flex items-center gap-2.5 text-slate-700">
-                          <CheckCircle2 className="w-4 h-4 text-violet-500 shrink-0" />
-                          <span>Hỗ trợ ưu tiên kèm cam kết <strong>SLA</strong></span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="pt-4 border-t border-slate-100 mt-4">
-                      <button
-                        onClick={() => setShowUpgrade(true)}
-                        className="w-full py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer text-center font-sans tracking-wide"
-                      >
-                        Đăng Ký Gói Business
                       </button>
                     </div>
                   </div>
