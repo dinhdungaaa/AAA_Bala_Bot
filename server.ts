@@ -885,6 +885,73 @@ app.get("/api/usage/me", async (req, res) => {
   res.json({ count, limit, tier, verdict, yearMonth: currentYearMonth() });
 });
 
+// ===== Trợ lý tư vấn về CHÍNH nền tảng BalaBot (widget popup công khai) =====
+const SITE_ASSISTANT_KNOWLEDGE = `Bạn là "Trợ lý BalaBot" — chatbot tư vấn về CHÍNH nền tảng AAA BalaBot, hiển thị ngay trên website.
+Nhiệm vụ: trả lời thân thiện, NGẮN GỌN bằng tiếng Việt cho khách truy cập muốn tìm hiểu/đăng ký BalaBot.
+Chỉ tư vấn về BalaBot. Câu hỏi ngoài phạm vi → lịch sự từ chối và kéo về chủ đề BalaBot.
+Không bịa tính năng/giá. Không chắc → khuyên liên hệ ox102.crypto@gmail.com. Không dùng markdown (*, **).
+
+# BalaBot là gì
+Nền tảng AI chatbot chăm sóc khách hàng & bán hàng ĐA KÊNH cho doanh nghiệp/shop Việt Nam. Bot tự trả lời khách 24/7 dựa trên tri thức bạn nạp (RAG — trả lời đúng theo dữ liệu của bạn, hạn chế bịa).
+
+# Kênh tích hợp
+Telegram (bot riêng qua @BotFather), Facebook Messenger (Page), Zalo (nhóm, qua nick cá nhân + quét QR). Bot trực nhóm, nhận diện tên từng người, gợi ý sản phẩm phù hợp.
+
+# Tính năng chính
+- Tạo nhiều bot, chọn tone giọng (bán hàng / CSKH / tư vấn kiến thức).
+- Nạp tri thức: PDF, Excel, văn bản, URL, FAQ.
+- Can thiệp (takeover): nhân viên trả lời thay bot, tự @tag tên & trích dẫn tin của khách.
+- Đặt lịch nhắc tự động (nhóm Telegram). Báo cáo phân tích hội thoại.
+
+# Bảng giá (VND / tháng; trả theo năm giảm 20%)
+- Free 0đ: 150 tin/tháng, 1 bot, kênh Telegram. CHỈ dành cho thành viên cộng đồng Peace Solution (cần được cấp quyền).
+- Starter 249.000đ: 3.000 tin, 3 bot, đủ kênh (Telegram/Facebook/Zalo), 10 nguồn tri thức, đặt lịch nhắc, hỗ trợ email.
+- Pro 649.000đ (khuyên dùng): 10.000 tin, 10 bot, Supabase riêng, white-label, hỗ trợ chuyên gia 24/7.
+- Enterprise: liên hệ — tuỳ biến & vô giới hạn, hạ tầng riêng, SLA.
+Thanh toán: chuyển khoản, kích hoạt trong vòng 24h. Vượt hạn mức → nhắc nâng gói.
+
+# Cách bắt đầu
+1) Đăng nhập → bấm "Tạo Bot". 2) Cấu hình tên/tone. 3) Nạp tri thức (PDF/Excel/URL/FAQ).
+4) Lấy token Telegram từ @BotFather dán vào mục Tích hợp Telegram (hoặc kết nối Facebook/Zalo). 5) Bot chạy 24/7.
+
+# Liên hệ / hỗ trợ
+Email: ox102.crypto@gmail.com.`;
+
+const siteAssistantRate = new Map<string, { n: number; reset: number }>();
+function siteAssistantAllow(ip: string): boolean {
+  const now = Date.now();
+  const r = siteAssistantRate.get(ip);
+  if (!r || now > r.reset) { siteAssistantRate.set(ip, { n: 1, reset: now + 60_000 }); return true; }
+  if (r.n >= 20) return false;
+  r.n++; return true;
+}
+
+app.post("/api/site-assistant", async (req, res) => {
+  const ip = ((req.headers["x-forwarded-for"] as string) || "").split(",")[0].trim() || req.ip || "unknown";
+  if (!siteAssistantAllow(ip)) return res.status(429).json({ answer: "Anh/chị hỏi hơi nhanh ạ, vui lòng thử lại sau một chút nhé." });
+  const question = String(req.body?.question || "").trim().slice(0, 1000);
+  const history = Array.isArray(req.body?.history) ? req.body.history.slice(-6) : [];
+  if (!question) return res.status(400).json({ answer: "Em chưa nhận được câu hỏi ạ." });
+  const ai = getAIClient();
+  if (!ai) return res.json({ answer: "Trợ lý đang tạm bận, anh/chị vui lòng liên hệ ox102.crypto@gmail.com để được hỗ trợ nhé ạ." });
+  try {
+    const hist = history
+      .map((m: any) => `${m.role === "bot" ? "Trợ lý" : "Khách"}: ${String(m.text || "").slice(0, 500)}`)
+      .join("\n");
+    const contents = (hist ? `Lịch sử hội thoại:\n${hist}\n\n` : "") + `Khách hỏi: ${question}`;
+    const response = await ai.models.generateContent({
+      model: GEN_MODEL,
+      contents,
+      config: { systemInstruction: SITE_ASSISTANT_KNOWLEDGE, temperature: 0.5, thinkingConfig: { thinkingBudget: 0 } },
+    });
+    const answer = (response.text || "").trim() || "Dạ anh/chị có thể nói rõ hơn để em tư vấn chính xác hơn không ạ?";
+    res.json({ answer });
+  } catch (e: any) {
+    console.warn("[SiteAssistant] error:", e?.message || e);
+    res.json({ answer: "Hệ thống đang bận, anh/chị thử lại sau ít phút hoặc liên hệ ox102.crypto@gmail.com nhé ạ." });
+  }
+});
+
 // ---- Admin: quản lý allowlist gói Free (chỉ owner) ----
 app.get("/api/admin/free-allowlist", async (req, res) => {
   if (!requireOwnerAdmin(req, res)) return;

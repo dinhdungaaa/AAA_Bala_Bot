@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSummary, SaasCustomer, ScheduleItem, ReminderLog } from './types';
 import { PLAN_LIMITS } from '../billing';
+import SiteAssistant from './SiteAssistant';
 
 const ADMIN_EMAIL = 'ox102.crypto@gmail.com';
 
@@ -1747,12 +1748,14 @@ export default function App() {
         <footer className="h-16 border-t border-slate-800 text-slate-500 text-xs flex items-center justify-center gap-2 shrink-0 bg-slate-950/40">
           <span>© 2026 AAA BalaBot Omnichannel AI SaaS. Bảo lưu mọi quyền.</span>
         </footer>
+        <SiteAssistant />
       </div>
     );
   }
 
   return (
     <div className="flex h-screen w-full bg-[#F8FAFC] overflow-hidden text-[#1E293B] relative">
+      <SiteAssistant />
       
       {/* MOBILE BACKDROP OVERLAY */}
       {isMobileMenuOpen && (
