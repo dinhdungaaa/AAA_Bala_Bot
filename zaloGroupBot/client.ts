@@ -344,6 +344,34 @@ export function getRuntimeStatus(ownerEmail: string): ZaloRuntimeStatus {
   };
 }
 
+// Gửi tin CAN THIỆP của operator vào nhóm Zalo qua phiên zca-js của đúng chủ sở hữu.
+// @tag tên khách (mention theo uid). Lưu ý: zca-js quote cần object tin gốc (ta chỉ có id)
+// nên KHÔNG trích dẫn được — chỉ tag tên. Tin gửi được ghi nhớ để bot không tự trả lời lại.
+export async function sendOperatorMessage(
+  ownerEmail: string,
+  groupId: string,
+  text: string,
+  opts?: { mentionUid?: string; mentionName?: string }
+): Promise<{ ok: boolean; error?: string }> {
+  const s = registry.get(ownerEmail);
+  if (!s || !s.api) return { ok: false, error: "zalo_session_not_active" };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let content: any = text;
+    if (opts?.mentionUid && opts?.mentionName) {
+      const tag = `@${opts.mentionName}`;
+      // msg chứa sẵn "@Tên" để dù metadata mention bị bỏ qua thì tên vẫn hiển thị.
+      content = { msg: `${tag} ${text}`, mentions: [{ pos: 0, len: tag.length, uid: opts.mentionUid }] };
+    }
+    const res = await s.api.sendMessage(content, groupId, ThreadType.Group);
+    const sentId = res?.message?.msgId;
+    if (sentId != null) rememberSentMessage(s, String(sentId));
+    return { ok: true };
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function logoutZalo(ownerEmail: string): Promise<void> {
   const s = registry.get(ownerEmail);
   if (s) {

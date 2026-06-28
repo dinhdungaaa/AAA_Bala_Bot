@@ -63,6 +63,7 @@ import { resolveLimitForOwner } from "./billingResolve.js";
 import {
   startQrLogin, getQrLoginResult, getRuntimeStatus,
   logoutZalo, listBindings, upsertBinding, initZaloGroupBot,
+  sendOperatorMessage as sendZaloOperatorMessage,
 } from "./zaloGroupBot/index.js";
 
 // Helper for type compatibility (since we'll import types in types.ts but write server)
@@ -1214,6 +1215,68 @@ app.put("/api/conversations/:sessId", async (req, res) => {
   res.json(idx !== -1 ? chatSessions[idx] : updates);
 });
 
+// Gửi tin CAN THIỆP của operator RA đúng kênh của khách, kèm @tag tên + trích dẫn tin gần nhất.
+// Best-effort: ưu tiên field định tuyến trong RAM; nếu thiếu (vd sau restart) thì suy luận từ telegramUserId.
+async function deliverOperatorReply(session: ChatSession, text: string): Promise<{ delivered: boolean; channel?: string; error?: string }> {
+  try {
+    const allBots = await dbGetBots(bots);
+    const bot = allBots.find(b => b.id === session.botId);
+    if (!bot) return { delivered: false, error: "bot_not_found" };
+
+    // Tin gần nhất của KHÁCH → lấy id để trích dẫn + tên để @tag.
+    const lastUser = [...session.messages].reverse().find(m => m.sender === "user");
+    const quoteId = lastUser?.channelMsgId;
+    const customerName = (lastUser?.fullName || session.telegramFullName || "").trim();
+
+    // Định tuyến: field RAM trước, suy luận từ telegramUserId nếu trống.
+    let channel = session.channel;
+    let chatId = session.channelChatId;
+    let isGroup = session.channelIsGroup;
+    let senderId = session.channelSenderId;
+    const ownerEmail = session.channelOwnerEmail;
+    const key = session.telegramUserId || "";
+    if (!channel) {
+      if (key.startsWith("facebook:")) { channel = "facebook"; chatId = chatId || key.slice("facebook:".length); senderId = senderId || chatId; isGroup = false; }
+      else if (key.startsWith("zalo:")) { const p = key.split(":"); channel = "zalo"; chatId = chatId || p[1]; senderId = senderId || p[2]; isGroup = true; }
+      else { channel = "telegram"; chatId = chatId || key; senderId = senderId || key; }
+    }
+
+    if (channel === "telegram") {
+      if (!bot.telegramToken || !chatId) return { delivered: false, error: "telegram_not_configured" };
+      const body: any = { chat_id: chatId, text };
+      if (quoteId && /^-?\d+$/.test(quoteId)) body.reply_parameters = { message_id: Number(quoteId), allow_sending_without_reply: true };
+      // @tag tên khách trong NHÓM bằng text_mention (cần user id số).
+      if (isGroup && customerName && senderId && /^\d+$/.test(senderId)) {
+        body.text = `${customerName} ${text}`;
+        body.entities = [{ type: "text_mention", offset: 0, length: customerName.length, user: { id: Number(senderId) } }];
+      }
+      const r = await fetch(`https://api.telegram.org/bot${bot.telegramToken}/sendMessage`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+      });
+      const d = await r.json();
+      return d.ok ? { delivered: true, channel } : { delivered: false, channel, error: d.description || "telegram_send_failed" };
+    }
+
+    if (channel === "facebook") {
+      if (!chatId) return { delivered: false, error: "facebook_no_recipient" };
+      // Messenger không hỗ trợ @tag/quote → gọi tên ở đầu cho rõ ai.
+      const finalText = customerName ? `${customerName} ơi, ${text}` : text;
+      await sendFacebookTextMessage(bot, chatId, finalText);
+      return { delivered: true, channel };
+    }
+
+    if (channel === "zalo") {
+      if (!ownerEmail || !chatId) return { delivered: false, channel, error: "zalo_no_route" };
+      const res = await sendZaloOperatorMessage(ownerEmail, chatId, text, { mentionUid: senderId, mentionName: customerName });
+      return res.ok ? { delivered: true, channel } : { delivered: false, channel, error: res.error };
+    }
+
+    return { delivered: false, error: "unknown_channel" };
+  } catch (e: any) {
+    return { delivered: false, error: e?.message || String(e) };
+  }
+}
+
 // Send custom support agent message into session (answering Telegram user)
 app.post("/api/conversations/:sessId/messages", async (req, res) => {
   const idx = chatSessions.findIndex(s => s.id === req.params.sessId);
@@ -1225,6 +1288,9 @@ app.post("/api/conversations/:sessId/messages", async (req, res) => {
     text,
     timestamp: new Date().toISOString()
   };
+
+  // Session dùng để chuyển tiếp tin can thiệp ra kênh khách.
+  let targetSession: ChatSession | null = idx !== -1 ? chatSessions[idx] : null;
 
   if (idx !== -1) {
     chatSessions[idx].messages.push(newMsg);
@@ -1251,11 +1317,20 @@ app.post("/api/conversations/:sessId/messages", async (req, res) => {
           lastMessageTime: newMsg.timestamp,
           status: calculatedStatus
         });
+        // Dựng session tạm (kèm messages đã lưu) để định tuyến gửi ra kênh khách.
+        targetSession = { ...(sessData as ChatSession), messages: updatedMsgs };
       }
     }
   }
 
-  res.status(201).json(newMsg);
+  // Tin của operator/agent → chuyển tiếp RA kênh khách (Telegram/Zalo/Facebook) kèm @tag + trích dẫn.
+  let delivery: { delivered: boolean; channel?: string; error?: string } = { delivered: false };
+  if ((sender || "agent") === "agent" && targetSession) {
+    delivery = await deliverOperatorReply(targetSession, text);
+    if (!delivery.delivered) console.warn(`[Operator Takeover] Không gửi được ra kênh (${delivery.channel || "?"}):`, delivery.error);
+  }
+
+  res.status(201).json({ ...newMsg, delivery });
 });
 
 // Get Webhook status and information from Telegram
@@ -1648,6 +1723,13 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
       chatSessions.unshift(session);
     }
 
+    // Định tuyến kênh cho operator can thiệp: lưu chat.id (đích gửi) + có phải nhóm + id khách.
+    // Cập nhật mỗi tin để luôn mới (kể cả session tạo trước khi có các field này).
+    session.channel = "telegram";
+    session.channelChatId = String(chat.id);
+    session.channelIsGroup = chat.type === "group" || chat.type === "supergroup";
+    session.channelSenderId = tUserId;
+
     const hasPriorBotReply = session.messages.some(msg => msg.sender === "bot");
 
     // Save actual user message
@@ -1657,7 +1739,8 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
       username: tUsername,
       fullName: tFullName,
       text,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      channelMsgId: message.message_id != null ? String(message.message_id) : undefined
     };
     session.messages.push(userMsg);
     session.lastMessageText = text;
@@ -1956,6 +2039,12 @@ async function processFacebookIncomingMessage(bot: BotConfig, event: any, option
     chatSessions.unshift(session);
   }
 
+  // Định tuyến kênh cho operator can thiệp (Messenger là 1-1, không nhóm).
+  session.channel = "facebook";
+  session.channelChatId = senderId;
+  session.channelIsGroup = false;
+  session.channelSenderId = senderId;
+
   const hasPriorBotReply = session.messages.some(msg => msg.sender === "bot");
   const userMsg: Message = {
     id: "m-fb-" + Math.random().toString(36).substr(2, 9),
@@ -1963,7 +2052,8 @@ async function processFacebookIncomingMessage(bot: BotConfig, event: any, option
     username,
     fullName,
     text,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    channelMsgId: messageId || undefined
   };
   session.messages.push(userMsg);
   session.lastMessageText = text;

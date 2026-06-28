@@ -80,6 +80,9 @@ export interface Message {
   feedbackCorrect?: boolean;
   fallbackTriggered?: boolean;
   isEscalated?: boolean;
+  // ID gốc của tin nhắn trên kênh (Telegram message_id / Zalo msgId / FB mid) —
+  // dùng để operator trích dẫn (reply/quote) đúng tin của khách khi can thiệp.
+  channelMsgId?: string;
 }
 
 export interface ChatSession {
@@ -93,6 +96,12 @@ export interface ChatSession {
   status: 'bot_answered' | 'failed' | 'escalated' | 'resolved' | 'needs_review';
   internalNotes: string;
   messages: Message[];
+  // Định tuyến kênh để operator gửi tin can thiệp tới đúng nơi (kèm tag tên + trích dẫn).
+  channel?: 'telegram' | 'facebook' | 'zalo';
+  channelChatId?: string;     // đích gửi: Telegram chat.id / Zalo groupId / FB psid
+  channelIsGroup?: boolean;   // true nếu là nhóm (cần @tag + reply rõ người)
+  channelSenderId?: string;   // id khách trên kênh (để @mention)
+  channelOwnerEmail?: string; // chủ session Zalo (để gửi qua đúng phiên zca-js)
 }
 
 export interface FAQItem {

@@ -1288,6 +1288,11 @@ export default function App() {
         } : c));
       }
       setOperatorReply('');
+      // Báo nếu KHÔNG gửi được ra kênh khách (vd phiên Zalo chưa đăng nhập, thiếu token).
+      const d = newMsg?.delivery;
+      if (d && d.delivered === false) {
+        alert(`Đã lưu tin, nhưng CHƯA gửi được ra kênh khách${d.channel ? ` (${d.channel})` : ''}: ${d.error || 'không rõ'}.\nKiểm tra kết nối kênh rồi thử lại.`);
+      }
     }
   };
 

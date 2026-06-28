@@ -65,6 +65,13 @@ export function createZaloMessageHandler(
         deps.analytics.totalUsers += 1;
       }
 
+      // Định tuyến kênh để operator can thiệp gửi vào đúng nhóm Zalo, @tag đúng người, trích dẫn đúng tin.
+      session.channel = "zalo";
+      session.channelChatId = event.groupId;
+      session.channelIsGroup = true;
+      session.channelSenderId = event.senderId;
+      session.channelOwnerEmail = binding.owner_email;
+
       const hasPriorBotReply = session.messages.some((m) => m.sender === "bot");
       const userMsg: Message = {
         id: rid("m-zalo-"),
@@ -73,6 +80,7 @@ export function createZaloMessageHandler(
         fullName: event.senderName,
         text: question,
         timestamp: new Date().toISOString(),
+        channelMsgId: event.messageId,
       };
       session.messages.push(userMsg);
       session.lastMessageText = question;
