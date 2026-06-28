@@ -913,6 +913,29 @@ app.delete("/api/admin/free-allowlist/:entry", async (req, res) => {
   res.json({ ok: true, entries });
 });
 
+// Thêm hàng loạt từ file (mảng email/domain). Chuẩn hoá + lọc trùng/không hợp lệ.
+app.post("/api/admin/free-allowlist/bulk", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const raw = Array.isArray(req.body?.entries) ? req.body.entries : [];
+  // Chuẩn hoá: lowercase, bỏ khoảng trắng; chỉ giữ email hợp lệ hoặc domain (có dấu chấm).
+  const seen = new Set<string>();
+  const valid: string[] = [];
+  for (const item of raw) {
+    const v = String(item || "").trim().toLowerCase();
+    if (!v || seen.has(v)) continue;
+    const isEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);     // a@gmail.com
+    const isDomain = /^@?[a-z0-9.-]+\.[a-z]{2,}$/.test(v);    // peacesolution.org hoặc @peacesolution.org
+    if (!isEmail && !isDomain) continue;
+    seen.add(v);
+    valid.push(v.replace(/^@/, "")); // domain lưu không kèm @ ; email giữ nguyên
+  }
+  let added = 0;
+  for (const v of valid) { if (await dbAddFreeAllowlist(v)) added++; }
+  invalidateFreeAllowlistCache();
+  const { entries } = await getFreeAllowlistCached(true);
+  res.json({ ok: true, added, totalParsed: raw.length, valid: valid.length, entries });
+});
+
 app.post("/api/bots", async (req, res) => {
   const botData = req.body;
   if (!botData.userId) {
