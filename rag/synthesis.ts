@@ -105,7 +105,8 @@ export async function synthesizeAnswer(
   const res: any = await withRetry(() => ai.models.generateContent({
     model: GEN_MODEL,
     contents: query,
-    config: { systemInstruction, temperature: 0.4 },
+    // RAG đã có ngữ cảnh tri thức → tắt "thinking" để cắt ~50% token output (giảm cost).
+    config: { systemInstruction, temperature: 0.4, thinkingConfig: { thinkingBudget: 0 } },
   } as any));
   const text = (res?.text || "").trim();
   if (!text) throw new Error("empty synthesis response");

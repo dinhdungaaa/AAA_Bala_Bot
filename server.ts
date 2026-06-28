@@ -5,6 +5,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { embedText, hashText } from "./rag/embeddings.js";
+import { GEN_MODEL } from "./rag/constants.js";
 import { rankBySimilarity, buildEmbedQuery } from "./rag/retriever.js";
 import { synthesizeAnswer } from "./rag/synthesis.js";
 import { TOP_K, SIM_THRESHOLD } from "./rag/constants.js";
@@ -1144,8 +1145,9 @@ YẾU CẦU ĐỊNH DẠNG ĐẦU RA: Trả về một chuỗi JSON hợp lệ c
 Lưu ý mã_nhóm_tiếng_anh chỉ được là 1 trong 6 mã: "product", "pricing", "policy", "shipping", "warranty", "faq". Trả về định dạng JSON thuần văn bản, không bọc khối code markdown \`\`\`json.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: GEN_MODEL,
       contents: prompt,
+      config: { thinkingConfig: { thinkingBudget: 0 } },
     });
 
     let cleanedText = response.text ? response.text.trim() : "{}";
@@ -3470,9 +3472,9 @@ Yêu cầu:
 - Viết thuần văn bản, trả ra duy nhất nội dung tin nhắn`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: GEN_MODEL,
       contents: prompt,
-      config: { temperature: 0.8 }
+      config: { temperature: 0.8, thinkingConfig: { thinkingBudget: 0 } }
     });
 
     const text = (response.text || "").trim();
@@ -3727,9 +3729,9 @@ Ví dụ output:
 Chỉ trả về JSON array thuần, KHÔNG bọc trong markdown code block.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: GEN_MODEL,
       contents: prompt,
-      config: { temperature: 0.2 }
+      config: { temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } }
     });
 
     let resultText = (response.text || "").trim();
