@@ -6,9 +6,9 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { embedText, hashText } from "./rag/embeddings.js";
 import { GEN_MODEL } from "./rag/constants.js";
-import { rankBySimilarity, buildEmbedQuery } from "./rag/retriever.js";
+import { rankBySimilarity, buildEmbedQuery, isShortFollowUp, condenseFollowUpQuery } from "./rag/retriever.js";
 import { synthesizeAnswer } from "./rag/synthesis.js";
-import { TOP_K, SIM_THRESHOLD } from "./rag/constants.js";
+import { TOP_K, RETRIEVE_FLOOR } from "./rag/constants.js";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult, TelegramGroup } from "./src/types.js";
 import {
   getSupabaseConfig,
@@ -3053,10 +3053,14 @@ function detectOffTopicChitChat(query: string): "romantic" | "greeting" | "thank
   const compact = normalized.replace(/\s+/g, " ").trim();
   if (!compact) return null;
   if (/(anh yeu em|em yeu anh|chi yeu em|yeu em|yeu anh|thuong em|nho em|hon em|crush|love you|i love you)/i.test(compact)) return "romantic";
+  // Có tín hiệu hỏi về kinh doanh (giá/mua/sản phẩm...) → KHÔNG phải tán gẫu, để RAG xử lý.
+  // Tránh bắt nhầm "ủa có giá mà em" thành casual chỉ vì chứa từ "ua".
+  if (/\b(gia|bao nhieu|mua|ban|san pham|dich vu|khoa hoc|goi|ship|bao hanh|doi tra|size|mau|con hang|dat hang|tu van|chinh sach|khuyen mai|uu dai)\b/i.test(compact)) return null;
   if (/^(hi|hello|helo|alo|chao|xin chao|hey|yo|em oi|bot oi|shop oi|ad oi)(\s|$)/i.test(compact)) return "greeting";
   if (/(cam on|thanks|thank you|tks|thank|ok cam on|tot qua|hay qua)/i.test(compact)) return "thanks";
   if (/(ke chuyen cuoi|noi cau vui|ke truyen vui|joke|vui len|hat cho|doc tho)/i.test(compact)) return "joke";
-  if (compact.length <= 18 && /(haha|hihi|hehe|test|thu xem|ok|oke|uh|ua|wow)/i.test(compact)) return "casual";
+  // Casual: chỉ khi TOÀN BỘ câu là từ đệm (neo đầu-cuối), không bắt khi từ đệm lẫn trong câu có nội dung.
+  if (compact.length <= 18 && /^(haha|hihi|hehe|test|thu xem|ok|oke|uh|ua|wow|uki|hmm)[\s.!?]*$/i.test(compact)) return "casual";
   return null;
 }
 
@@ -3303,14 +3307,21 @@ async function generateRAGAnswer(
 
   let topChunks: Array<{ chunk: KnowledgeChunk; score: number }> = [];
   try {
-    const qVec = await embedText(ai, buildEmbedQuery(query, lastUserText));
+    // Câu follow-up ngắn ("có giá không em") thiếu chủ đề → viết lại thành câu
+    // tìm kiếm độc lập dựa trên hội thoại (kể cả lượt bot) để retrieval trúng đoạn.
+    let searchText = buildEmbedQuery(query, lastUserText);
+    if (isShortFollowUp(query) && history.length > 0) {
+      searchText = await condenseFollowUpQuery(ai, query, history);
+    }
+    const qVec = await embedText(ai, searchText);
     topChunks = rankBySimilarity(qVec, botChunks, TOP_K);
   } catch (e: any) {
     console.warn("[RAG] retrieve failed:", e?.message || e);
   }
 
-  const maxScore = topChunks[0]?.score ?? 0;
-  const grounded = maxScore >= SIM_THRESHOLD ? topChunks : [];
+  // Sàn mềm: đưa MỌI đoạn vượt sàn cho model TỰ phán đoán liên quan, thay vì chặn
+  // cứng bằng ngưỡng cao (câu ngắn điểm thấp vẫn có thể chứa câu trả lời trong đoạn).
+  const grounded = topChunks.filter(c => c.score >= RETRIEVE_FLOOR);
 
   // 3. Insufficient evidence -> low-conf synthesis + fallback flag
   if (grounded.length === 0) {
