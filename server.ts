@@ -3245,7 +3245,7 @@ async function generateRAGAnswer(
   bot: BotConfig, 
   query: string,
   userInfo?: { fullName?: string; username?: string; id?: string },
-  replyOptions?: { shouldGreet?: boolean; recentMessages?: Message[] }
+  replyOptions?: { shouldGreet?: boolean; recentMessages?: Message[]; expand?: boolean }
 ): Promise<{ text: string; sources: any[]; fallbackTriggered: boolean }> {
   // Determine gender/pronoun and first name for xưng hô
   let pronoun = DEFAULT_CUSTOMER_PRONOUN;
@@ -3278,7 +3278,8 @@ async function generateRAGAnswer(
   const lastUserText = [...priorMessages].reverse().find(m => m.sender === "user")?.text;
   // Mode "reference": cho phép gợi ý sản phẩm khi khách hỏi liên quan nếu owner bật allowProductConsulting.
   const allowProductIntro = bot.allowProductConsulting !== false;
-  const synthCtx = { customer: customerCtx, history, allowProductIntro };
+  const expand = replyOptions?.expand === true;
+  const synthCtx = { customer: customerCtx, history, allowProductIntro, expand };
 
   const chitChatKind = detectOffTopicChitChat(query);
   if (chitChatKind) {
@@ -3323,14 +3324,15 @@ async function generateRAGAnswer(
   // cứng bằng ngưỡng cao (câu ngắn điểm thấp vẫn có thể chứa câu trả lời trong đoạn).
   const grounded = topChunks.filter(c => c.score >= RETRIEVE_FLOOR);
 
-  // 3. Insufficient evidence -> low-conf synthesis + fallback flag
+  // 3. Insufficient evidence -> low-conf synthesis + fallback flag.
+  //    Ở chế độ mở rộng: vẫn trả lời bằng kiến thức chung trong lĩnh vực (không coi là fallback).
   if (grounded.length === 0) {
     const lowConf = await synthesizeAnswer(ai, bot, query, [], { answerStyle, ...synthCtx })
       .catch(() => bot.fallbackMessage || "Dạ thông tin này em chưa có trong tài liệu, em xin phép chuyển nhân viên hỗ trợ mình ạ.");
     return {
       text: postProcessBotReply(lowConf, replyOptions),
       sources: [],
-      fallbackTriggered: true,
+      fallbackTriggered: !expand,
     };
   }
 
@@ -3354,7 +3356,7 @@ async function generateRAGAnswer(
 
 // REST Endpoint for Playground test chat
 app.post("/api/bots/:botId/playgroundChat", async (req, res) => {
-  const { text, recentMessages = [] } = req.body;
+  const { text, recentMessages = [], expand = false } = req.body;
   const botId = req.params.botId;
   const allBots = await dbGetBots(bots);
   const bot = allBots.find(b => b.id === botId);
@@ -3367,7 +3369,7 @@ app.post("/api/bots/:botId/playgroundChat", async (req, res) => {
       bot,
       text,
       undefined,
-      { shouldGreet: !hasPriorBotReply, recentMessages: safeRecentMessages }
+      { shouldGreet: !hasPriorBotReply, recentMessages: safeRecentMessages, expand: expand === true }
     );
     res.json(response);
   } catch (error: any) {

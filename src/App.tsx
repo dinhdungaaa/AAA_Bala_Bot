@@ -1219,6 +1219,41 @@ export default function App() {
     }
   };
 
+  // Nút "Mở rộng trả lời": hỏi lại đúng câu hỏi đã sinh ra câu trả lời này, nhưng bật
+  // chế độ mở rộng (bot được dùng kiến thức chung trong lĩnh vực, vẫn bám sản phẩm/dịch vụ).
+  const handleExpandAnswer = async (botMsg: Message) => {
+    if (!selectedBotId || isPlaygroundTyping) return;
+    const idx = playgroundMessages.findIndex(m => m.id === botMsg.id);
+    if (idx < 0) return;
+    const question = [...playgroundMessages.slice(0, idx)].reverse().find(m => m.sender === 'user')?.text;
+    if (!question) return;
+    const recentMessages = playgroundMessages.slice(0, idx + 1).slice(-8);
+    setIsPlaygroundTyping(true);
+    try {
+      const res = await fetch(`/api/bots/${selectedBotId}/playgroundChat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: question, recentMessages, expand: true })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const expandedMsg: Message = {
+          id: 'p-bot-exp-' + Date.now(),
+          sender: 'bot',
+          username: activeBot?.name || 'BalaBot',
+          text: data.text,
+          timestamp: new Date().toISOString(),
+          sourcesUsed: data.sources,
+          expanded: true
+        };
+        setPlaygroundMessages(prev => [...prev, expandedMsg]);
+        setLastCitation(data.sources || []);
+      }
+    } finally {
+      setIsPlaygroundTyping(false);
+    }
+  };
+
   const handlePlaygroundSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!playgroundInput.trim() || !selectedBotId) return;
@@ -2845,11 +2880,16 @@ export default function App() {
 
                 {/* MESSAGES WATERFALL */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                  {playgroundMessages.map((msg) => (
+                  {playgroundMessages.map((msg, mi) => (
                     <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[80%] rounded-2xl p-4 shadow-3xs text-sm leading-relaxed ${msg.sender === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-slate-100 text-slate-800 rounded-tl-none font-medium'}`}>
+                        {msg.sender === 'bot' && msg.expanded && (
+                          <div className="mb-1.5 inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded uppercase tracking-wide">
+                            <Sparkles className="w-3 h-3" /> Mở rộng
+                          </div>
+                        )}
                         {renderFormattedText(msg.text, msg.sender === 'user')}
-                        
+
                         {/* sources helper in playground msg */}
                         {msg.sourcesUsed && msg.sourcesUsed.length > 0 && (
                           <div className="mt-2 pt-2 border-t border-slate-200/50 text-[10px] font-semibold text-slate-500 flex flex-wrap items-center gap-1.5">
@@ -2859,6 +2899,20 @@ export default function App() {
                                 {src.name} ({(src.score * 100).toFixed(0)}%)
                               </span>
                             ))}
+                          </div>
+                        )}
+
+                        {/* Nút mở rộng trả lời — chỉ hiện ở câu trả lời gốc của bot, khi đã có câu hỏi trước đó */}
+                        {msg.sender === 'bot' && !msg.expanded && playgroundMessages.slice(0, mi).some(m => m.sender === 'user') && (
+                          <div className="mt-2 pt-2 border-t border-slate-200/50">
+                            <button
+                              onClick={() => handleExpandAnswer(msg)}
+                              disabled={isPlaygroundTyping}
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-40 cursor-pointer"
+                              title="Bot trả lời thêm bằng kiến thức trong lĩnh vực, vẫn bám sản phẩm/dịch vụ"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" /> Mở rộng trả lời
+                            </button>
                           </div>
                         )}
                       </div>

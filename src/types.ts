@@ -83,6 +83,8 @@ export interface Message {
   // ID gốc của tin nhắn trên kênh (Telegram message_id / Zalo msgId / FB mid) —
   // dùng để operator trích dẫn (reply/quote) đúng tin của khách khi can thiệp.
   channelMsgId?: string;
+  // Câu trả lời này là kết quả của nút "Mở rộng trả lời" (có dùng kiến thức ngoài tài liệu).
+  expanded?: boolean;
 }
 
 export interface ChatSession {
