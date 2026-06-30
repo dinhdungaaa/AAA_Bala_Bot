@@ -1458,14 +1458,16 @@ export default function App() {
               <span className="text-[10px] text-emerald-400 font-mono tracking-wider font-bold">OMNICHANNEL AI SAAS</span>
             </div>
           </div>
-          <div className="hidden md:flex items-center gap-6 text-sm text-slate-400 font-medium">
-            <a href="#features" className="hover:text-white transition-colors">Tính Năng</a>
-            <a href="#how-it-works" className="hover:text-white transition-colors">Cách Hoạt Động</a>
-            <div className="h-4 w-px bg-slate-800"></div>
-            <span className="text-emerald-400 font-mono text-xs flex items-center gap-1.5 bg-emerald-900/40 px-3 py-1 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-              Sẵn sàng tích hợp 24/7
-            </span>
+          <div className="flex items-center gap-4 md:gap-6 text-sm text-slate-400 font-medium">
+            <a href="#features" className="hidden md:inline hover:text-white transition-colors">Tính Năng</a>
+            <a href="#how-it-works" className="hidden md:inline hover:text-white transition-colors">Cách Hoạt Động</a>
+            <div className="hidden md:block h-4 w-px bg-slate-800"></div>
+            <a
+              href="#auth-portal"
+              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg transition-colors shadow-md shadow-emerald-500/20"
+            >
+              Đăng nhập
+            </a>
           </div>
         </header>
 
@@ -1485,6 +1487,39 @@ export default function App() {
               <p className="text-slate-400 text-sm md:text-base leading-relaxed max-w-2xl">
                 BalaBot biến tài liệu của bạn thành trợ lý AI bám sát tri thức (RAG): tự hiểu sản phẩm, báo giá đúng theo tài liệu và trả lời khách trên <strong className="text-slate-300">Telegram, Facebook và nhóm Zalo</strong> — liền mạch, không nghỉ. Khi cần, bạn nhảy vào trò chuyện trực tiếp thay bot chỉ trong một cú nhấp.
               </p>
+
+              {/* CTA + DẢI KÊNH */}
+              <div className="space-y-5">
+                <div className="flex flex-wrap items-center gap-3">
+                  <a
+                    href="#auth-portal"
+                    className="px-5 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-sm rounded-xl transition-colors shadow-lg shadow-emerald-500/20 inline-flex items-center gap-2"
+                  >
+                    Tạo bot miễn phí
+                    <ArrowRight className="w-4 h-4" />
+                  </a>
+                  <a
+                    href="#how-it-works"
+                    className="px-5 py-3 border border-slate-700 hover:border-slate-500 text-slate-200 font-semibold text-sm rounded-xl transition-colors"
+                  >
+                    Xem cách hoạt động
+                  </a>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] text-slate-500 font-medium mr-0.5">Hoạt động trên</span>
+                  {[
+                    { icon: <Send className="w-3.5 h-3.5" />, label: 'Telegram' },
+                    { icon: <MessageCircle className="w-3.5 h-3.5" />, label: 'Messenger' },
+                    { icon: <MessageSquare className="w-3.5 h-3.5" />, label: 'Zalo' },
+                  ].map((c) => (
+                    <span key={c.label} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-300 bg-slate-900/80 border border-slate-800 px-2.5 py-1 rounded-full">
+                      <span className="text-emerald-400">{c.icon}</span>
+                      {c.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
 
               {/* LIVE SIMULATION MOCKUP CARD */}
               <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-2xl relative overflow-hidden max-w-xl">
@@ -1702,7 +1737,7 @@ export default function App() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
 
               {/* Feature 1 — Đa kênh */}
-              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
+              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/30 hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-500/5 transition-all duration-200">
                 <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
                   <MessageCircle className="w-5 h-5" />
                 </div>
@@ -1713,7 +1748,7 @@ export default function App() {
               </div>
 
               {/* Feature 2 — RAG */}
-              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
+              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/30 hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-500/5 transition-all duration-200">
                 <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
                   <GraduationCap className="w-5 h-5" />
                 </div>
@@ -1724,7 +1759,7 @@ export default function App() {
               </div>
 
               {/* Feature 3 — Takeover */}
-              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
+              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/30 hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-500/5 transition-all duration-200">
                 <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
                   <History className="w-5 h-5" />
                 </div>
@@ -1735,7 +1770,7 @@ export default function App() {
               </div>
 
               {/* Feature 4 — Đa bot */}
-              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
+              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/30 hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-500/5 transition-all duration-200">
                 <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
                   <Bot className="w-5 h-5" />
                 </div>
@@ -1746,7 +1781,7 @@ export default function App() {
               </div>
 
               {/* Feature 5 — Sandbox */}
-              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
+              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/30 hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-500/5 transition-all duration-200">
                 <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
                   <Search className="w-5 h-5" />
                 </div>
@@ -1757,7 +1792,7 @@ export default function App() {
               </div>
 
               {/* Feature 6 — Analytics */}
-              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
+              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/30 hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-500/5 transition-all duration-200">
                 <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
                   <BarChart3 className="w-5 h-5" />
                 </div>
