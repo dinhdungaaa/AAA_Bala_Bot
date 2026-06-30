@@ -52,7 +52,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
           const cleanText = numMatch[2];
           return (
             <div key={idx} className="flex items-start gap-2 pl-1 my-1 animate-in fade-in duration-100">
-              <span className={`shrink-0 font-bold text-xs mt-0.5 ${isUser ? 'text-white/95' : 'text-blue-600'}`}>{num}.</span>
+              <span className={`shrink-0 font-bold text-xs mt-0.5 ${isUser ? 'text-white/95' : 'text-emerald-700'}`}>{num}.</span>
               <span className="flex-1 text-sm leading-relaxed">{cleanText}</span>
             </div>
           );
@@ -2169,7 +2169,7 @@ export default function App() {
 
             <button
               onClick={() => setIsCreatingBot(true)}
-              className="p-2 sm:px-2.5 sm:py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-xs shadow-blue-500/10 shrink-0"
+              className="p-2 sm:px-2.5 sm:py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-xs shadow-emerald-500/10 shrink-0"
               title="Tạo Bot Mới"
             >
               <Plus className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
@@ -2231,7 +2231,7 @@ export default function App() {
           {/* EMPTY STATE FOR NEWLY REGISTERED/LOGGED IN USERS WITH NO BOTS */}
           {bots.length === 0 && activeTab !== 'supabase' && (
             <div className="bg-white rounded-2xl border border-slate-200 p-8 md:p-12 text-center max-w-xl mx-auto my-12 shadow-md space-y-6 animate-fade-in">
-              <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
+              <div className="w-16 h-16 bg-blue-50 text-emerald-700 rounded-full flex items-center justify-center mx-auto shadow-sm">
                 <Bot className="w-8 h-8 animate-pulse" />
               </div>
               <div className="space-y-2">
@@ -2243,15 +2243,15 @@ export default function App() {
               <div className="bg-slate-50 p-5 rounded-2xl text-left border border-slate-200/60 border-dashed space-y-3">
                 <span className="text-xs font-bold text-slate-705 block uppercase tracking-wider">Các bước để bắt đầu:</span>
                 <ul className="text-xs text-slate-650 list-decimal list-inside space-y-2 leading-relaxed">
-                  <li>Nhấp nút <strong className="text-blue-600">"Tạo Bot Mới"</strong> ở góc trên bên phải</li>
+                  <li>Nhấp nút <strong className="text-emerald-700">"Tạo Bot Mới"</strong> ở góc trên bên phải</li>
                   <li>Cấu hình thông tin cơ bản và chọn tone giọng phù hợp</li>
-                  <li>Nạp tài liệu hữu ích vào <strong className="text-blue-600">Kho tri thức</strong> của Bot</li>
+                  <li>Nạp tài liệu hữu ích vào <strong className="text-emerald-700">Kho tri thức</strong> của Bot</li>
                   <li>Lấy Token từ Telegram BotFather để đưa Bot trực tuyến 24/7!</li>
                 </ul>
               </div>
               <button
                 onClick={() => setIsCreatingBot(true)}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-500/10 inline-flex items-center gap-1.5 cursor-pointer"
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-500/10 inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 Tạo Trợ Lý Ảo Đầu Tiên Ngay
@@ -2272,7 +2272,7 @@ export default function App() {
                         ? <span className="font-bold text-rose-700">Tài khoản chưa được kích hoạt gói</span>
                         : <span className="font-bold text-slate-800">Gói <span className="uppercase">{usage.tier}</span> — {usage.count.toLocaleString()} / {usage.limit ? usage.limit.toLocaleString() : '∞'} tin</span>}
                     </div>
-                    <button onClick={() => setShowUpgrade(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold">Nâng gói</button>
+                    <button onClick={() => setShowUpgrade(true)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold">Nâng gói</button>
                   </div>
                   <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
                     <div className={`h-full rounded-full transition-all ${usage.verdict === 'blocked' ? 'bg-rose-500' : usage.verdict === 'warn' ? 'bg-amber-500' : 'bg-green-500'}`}
@@ -2372,7 +2372,7 @@ export default function App() {
                           <tr key={b.id} className="hover:bg-slate-50 transition-colors">
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs uppercase shrink-0">
+                                <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-emerald-700 font-bold text-xs uppercase shrink-0">
                                   {b.name.charAt(0)}
                                 </div>
                                 <div className="overflow-hidden">
@@ -2399,7 +2399,7 @@ export default function App() {
                                   setSelectedBotId(b.id);
                                   setActiveTab('config');
                                 }}
-                                className="text-xs text-blue-600 font-bold hover:underline"
+                                className="text-xs text-emerald-700 font-bold hover:underline"
                               >
                                 Cài đặt
                               </button>
@@ -2459,7 +2459,7 @@ export default function App() {
                   <div className="mt-6 border-t border-slate-800 pt-4">
                     <button
                       onClick={() => setActiveTab('playground')}
-                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-blue-500/10"
+                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-emerald-500/10"
                     >
                       <Play className="w-3.5 h-3.5" /> Thử Nghiệm Sandbox Chat
                     </button>
@@ -2485,7 +2485,7 @@ export default function App() {
                     <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Tên Đại Diện Của Trực Trụ</label>
                     <input
                       type="text"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                       value={activeBot.name}
                       onChange={(e) => handleUpdateBotSettings({ name: e.target.value })}
                     />
@@ -2495,7 +2495,7 @@ export default function App() {
                     <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Lĩnh vực hoạt động</label>
                     <input
                       type="text"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                       value={activeBot.field}
                       onChange={(e) => handleUpdateBotSettings({ field: e.target.value })}
                     />
@@ -2505,7 +2505,7 @@ export default function App() {
                     <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Mô tả mục tiêu</label>
                     <textarea
                       rows={3}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                       value={activeBot.description}
                       onChange={(e) => handleUpdateBotSettings({ description: e.target.value })}
                     />
@@ -2515,7 +2515,7 @@ export default function App() {
                     <div>
                       <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Tone giọng chủ đạo</label>
                       <select
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         value={activeBot.tone}
                         onChange={(e) => handleUpdateBotSettings({ tone: e.target.value as any })}
                       >
@@ -2530,7 +2530,7 @@ export default function App() {
                     <div>
                       <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Báo giá bán lẻ</label>
                       <select
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         value={activeBot.allowPricing ? 'yes' : 'no'}
                         onChange={(e) => handleUpdateBotSettings({ allowPricing: e.target.value === 'yes' })}
                       >
@@ -2543,7 +2543,7 @@ export default function App() {
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Kiểu Bot (mục đích trả lời)</label>
                     <select
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500"
                       value={activeBot.answerStyle || 'sales'}
                       onChange={(e) => handleUpdateBotSettings({ answerStyle: e.target.value as 'sales' | 'reference' })}
                     >
@@ -2581,7 +2581,7 @@ export default function App() {
                     <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Lời chào mở đầu (Welcome Trợ Lý)</label>
                     <textarea
                       rows={2}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                       value={activeBot.welcomeMessage}
                       onChange={(e) => handleUpdateBotSettings({ welcomeMessage: e.target.value })}
                     />
@@ -2592,7 +2592,7 @@ export default function App() {
                     <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Hành động khi "Chưa học được tri thức"</label>
                     <textarea
                       rows={3}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-medium focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                       value={activeBot.fallbackMessage}
                       onChange={(e) => handleUpdateBotSettings({ fallbackMessage: e.target.value })}
                     />
@@ -2604,7 +2604,7 @@ export default function App() {
                       <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Sđt Fallback</label>
                       <input
                         type="text"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         value={activeBot.fallbackPhone}
                         onChange={(e) => handleUpdateBotSettings({ fallbackPhone: e.target.value })}
                       />
@@ -2613,7 +2613,7 @@ export default function App() {
                       <label className="text-xs font-bold text-slate-700 block mb-1 uppercase tracking-wider">Link Zalo hỗ trợ</label>
                       <input
                         type="text"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         value={activeBot.fallbackZalo}
                         onChange={(e) => handleUpdateBotSettings({ fallbackZalo: e.target.value })}
                       />
@@ -2630,7 +2630,7 @@ export default function App() {
                   </div>
                   <button
                     onClick={() => handleUpdateBotSettings({ limitToKnowledge: !activeBot.limitToKnowledge })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${activeBot.limitToKnowledge ? 'bg-blue-600' : 'bg-slate-350'}`}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${activeBot.limitToKnowledge ? 'bg-emerald-600' : 'bg-slate-350'}`}
                   >
                     <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out ${activeBot.limitToKnowledge ? 'translate-x-5' : 'translate-x-0'}`}></span>
                   </button>
@@ -2643,7 +2643,7 @@ export default function App() {
                     alert('Các thông tin cấu hình Bot đã được lưu trữ và kích hoạt đồng trục tự động lên API server!');
                     setActiveTab('dashboard');
                   }}
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-md"
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-md"
                 >
                   Lưu & Áp Dụng Toàn Hệ Thống
                 </button>
@@ -2667,25 +2667,25 @@ export default function App() {
                   <div className="flex overflow-x-auto whitespace-nowrap scrollbar-none border-b border-slate-200 mb-6 gap-1 md:gap-2 pb-1.5">
                     <button
                       onClick={() => setTrainType('file')}
-                      className={`pb-3 text-xs font-bold uppercase tracking-wider px-3 transition-colors ${trainType === 'file' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                      className={`pb-3 text-xs font-bold uppercase tracking-wider px-3 transition-colors ${trainType === 'file' ? 'border-b-2 border-emerald-500 text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                       Tải File Tài Liệu
                     </button>
                     <button
                       onClick={() => setTrainType('text')}
-                      className={`pb-3 text-xs font-bold uppercase tracking-wider px-3 transition-colors ${trainType === 'text' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                      className={`pb-3 text-xs font-bold uppercase tracking-wider px-3 transition-colors ${trainType === 'text' ? 'border-b-2 border-emerald-500 text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                       Nhập Văn Bản Trực Tiếp
                     </button>
                     <button
                       onClick={() => setTrainType('faq')}
-                      className={`pb-3 text-xs font-bold uppercase tracking-wider px-3 transition-colors ${trainType === 'faq' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                      className={`pb-3 text-xs font-bold uppercase tracking-wider px-3 transition-colors ${trainType === 'faq' ? 'border-b-2 border-emerald-500 text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                       Tạo FAQ Câu Hỏi/Đáp
                     </button>
                     <button
                       onClick={() => setTrainType('url')}
-                      className={`pb-3 text-xs font-bold uppercase tracking-wider px-3 transition-colors ${trainType === 'url' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                      className={`pb-3 text-xs font-bold uppercase tracking-wider px-3 transition-colors ${trainType === 'url' ? 'border-b-2 border-emerald-500 text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                       Crawl URL Website
                     </button>
@@ -2754,7 +2754,7 @@ export default function App() {
                           <input
                             type="text"
                             placeholder="Ví dụ: Bên mình có hỗ trợ triển khai cho khách ở tỉnh thành khác không?"
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
                             value={faqQ}
                             onChange={(e) => setFaqQ(e.target.value)}
                           />
@@ -2764,7 +2764,7 @@ export default function App() {
                           <textarea
                             rows={4}
                             placeholder="Dạ, hiện tại bên em hỗ trợ triển khai trên toàn quốc; tùy khu vực sẽ có phương án phù hợp ạ..."
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
                             value={faqA}
                             onChange={(e) => setFaqA(e.target.value)}
                           />
@@ -2793,7 +2793,7 @@ export default function App() {
                       <button
                         type="submit"
                         disabled={isSubmittingTrain}
-                        className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs tracking-wide transition-all shadow-md shadow-blue-500/10 flex items-center gap-2"
+                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs tracking-wide transition-all shadow-md shadow-emerald-500/10 flex items-center gap-2"
                       >
                         {isSubmittingTrain ? (
                           <>
@@ -2874,7 +2874,7 @@ export default function App() {
                   <input
                     type="text"
                     placeholder="Tìm kiếm tri thức..."
-                    className="pl-9 pr-4 py-2 w-full bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="pl-9 pr-4 py-2 w-full bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
                     value={kbSearchQuery}
                     onChange={(e) => setKbSearchQuery(e.target.value)}
                   />
@@ -3002,13 +3002,13 @@ export default function App() {
                     type="text"
                     disabled={isPlaygroundTyping}
                     placeholder="Ví dụ: Gói dịch vụ tiêu chuẩn báo giá thế nào, thời gian triển khai bao lâu?"
-                    className="flex-1 bg-white border border-slate-250 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="flex-1 bg-white border border-slate-250 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
                     value={playgroundInput}
                     onChange={(e) => setPlaygroundInput(e.target.value)}
                   />
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors flex items-center justify-center shrink-0 shadow-xs"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-colors flex items-center justify-center shrink-0 shadow-xs"
                   >
                     <Send className="w-4 h-4" />
                   </button>
@@ -3037,7 +3037,7 @@ export default function App() {
                             <div key={citation.id} className="p-3 bg-blue-50/50 border border-blue-100 rounded-lg">
                               <div className="flex justify-between text-xs font-bold text-blue-900 mb-1">
                                 <span className="truncate max-w-[155px]">{citation.name}</span>
-                                <span className="font-mono text-blue-600">{(citation.score * 100).toFixed(0)}% Match</span>
+                                <span className="font-mono text-emerald-700">{(citation.score * 100).toFixed(0)}% Match</span>
                               </div>
                               <span className="text-[10px] bg-blue-200/65 px-1 py-0.5 rounded text-blue-800 uppercase font-bold tracking-tight">Đã xác minh</span>
                             </div>
@@ -3109,7 +3109,7 @@ export default function App() {
                 <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-3 text-xs leading-relaxed text-slate-700">
                   <h4 className="font-bold text-slate-900 text-sm">Hướng dẫn các bước lấy Token qua BotFather:</h4>
                   <ol className="list-decimal pl-4 space-y-2">
-                    <li>Mở app Telegram, tìm kiếm tài khoản hệ thống chính chủ của Telegram: <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold hover:underline">@BotFather</a>.</li>
+                    <li>Mở app Telegram, tìm kiếm tài khoản hệ thống chính chủ của Telegram: <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-emerald-700 font-bold hover:underline">@BotFather</a>.</li>
                     <li>Gửi tin nhắn <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono font-semibold">/newbot</code>, sau đó nhập Tên của Bot và Username của Bot theo hướng dẫn (ví dụ kết thúc bằng chữ "bot", VD: yourcompany_bot).</li>
                     <li>Copy chuỗi mã HTTP API Token (chuỗi ký tự dài chứa dấu hai chấm, VD: <code className="bg-slate-200 px-1 py-0.5 rounded">7123456789:AFF_...</code>) rồi nhập vào Form bên dưới.</li>
                   </ol>
@@ -3127,7 +3127,7 @@ export default function App() {
                         <input
                           type="text"
                           placeholder="Ví dụ: 7123456789:AAExampleToken_YourCompanyBot"
-                          className="pl-9 pr-4 py-2.5 w-full bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                          className="pl-9 pr-4 py-2.5 w-full bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
                           value={inputToken}
                           onChange={(e) => setInputToken(e.target.value)}
                         />
@@ -3170,7 +3170,7 @@ export default function App() {
                           type="button"
                           onClick={fetchWebhookDetails}
                           disabled={isFetchingWebhook}
-                          className="text-[10px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 cursor-pointer"
+                          className="text-[10px] text-emerald-700 hover:text-blue-800 font-bold flex items-center gap-1 cursor-pointer"
                         >
                           <RefreshCw className={`w-3 h-3 ${isFetchingWebhook ? 'animate-spin' : ''}`} />
                           Tải lại trạng thái Telegram
@@ -3269,7 +3269,7 @@ export default function App() {
                           type="button"
                           onClick={handleManualRegisterWebhook}
                           disabled={isFetchingWebhook}
-                          className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs tracking-wider uppercase shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs tracking-wider uppercase shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                         >
                           <RefreshCw className={`w-3.5 h-3.5 ${isFetchingWebhook ? 'animate-spin' : ''}`} />
                           Đồng Bộ & Ký Webhook Với Domain Hiện Tại
@@ -3303,7 +3303,7 @@ export default function App() {
                       <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Họ Tên Khách Hàng</label>
                       <input
                         type="text"
-                        className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-blue-500 font-medium"
+                        className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium"
                         value={simUserFullName}
                         onChange={(e) => setSimUserFullName(e.target.value)}
                         placeholder="Ví dụ: Đỗ Thị Quỳnh"
@@ -3313,7 +3313,7 @@ export default function App() {
                       <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Username Telegram</label>
                       <input
                         type="text"
-                        className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-blue-500 font-medium"
+                        className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium"
                         value={simUserUsername}
                         onChange={(e) => setSimUserUsername(e.target.value)}
                         placeholder="Ví dụ: quynh_dt"
@@ -3337,7 +3337,7 @@ export default function App() {
                   <button
                     onClick={handleSimulateTelegramMsg}
                     disabled={isSimulatingMessage || !simMessageText.trim()}
-                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-transform shadow-md flex items-center justify-center gap-2"
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-transform shadow-md flex items-center justify-center gap-2"
                   >
                     {isSimulatingMessage ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                     Gửi webhook mô phỏng sang Server
@@ -3362,7 +3362,7 @@ export default function App() {
                     type="button"
                     onClick={fetchFacebookDetails}
                     disabled={isFetchingFacebook}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 shrink-0"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 shrink-0"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isFetchingFacebook ? 'animate-spin' : ''}`} />
                     Tải cấu hình
@@ -3414,7 +3414,7 @@ export default function App() {
                       <input
                         type="text"
                         placeholder="Dán Page Access Token của Fanpage..."
-                        className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                        className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
                         value={inputFacebookToken}
                         onChange={(e) => setInputFacebookToken(e.target.value)}
                       />
@@ -3422,7 +3422,7 @@ export default function App() {
                         type="button"
                         onClick={handleConnectFacebook}
                         disabled={isConnectingFacebook || !inputFacebookToken.trim()}
-                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs whitespace-nowrap flex items-center gap-2"
+                        className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs whitespace-nowrap flex items-center gap-2"
                       >
                         {isConnectingFacebook ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
                         Kết nối
@@ -3470,7 +3470,7 @@ export default function App() {
                   <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Facebook Sender ID mô phỏng</label>
                   <input
                     type="text"
-                    className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-blue-500 font-mono mb-4"
+                    className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono mb-4"
                     value={facebookSimUserId}
                     onChange={(e) => setFacebookSimUserId(e.target.value)}
                   />
@@ -3488,7 +3488,7 @@ export default function App() {
                   <button
                     onClick={handleSimulateFacebookMsg}
                     disabled={isSimulatingFacebook || !facebookSimText.trim()}
-                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-transform shadow-md flex items-center justify-center gap-2"
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-transform shadow-md flex items-center justify-center gap-2"
                   >
                     {isSimulatingFacebook ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                     Gửi tin mô phỏng Facebook
@@ -3634,7 +3634,7 @@ export default function App() {
                       <div
                         key={sess.id}
                         onClick={() => setSelectedSessionId(sess.id)}
-                        className={`p-4 cursor-pointer transition-colors relative hover:bg-slate-50 ${selectedSessionId === sess.id ? 'bg-blue-50/50 border-l-4 border-blue-500' : ''}`}
+                        className={`p-4 cursor-pointer transition-colors relative hover:bg-slate-50 ${selectedSessionId === sess.id ? 'bg-emerald-50/60 border-l-4 border-emerald-500' : ''}`}
                       >
                         <div className="flex justify-between items-start mb-1">
                           <span className="font-bold text-xs text-slate-900 truncate max-w-[140px]">
@@ -3845,7 +3845,7 @@ export default function App() {
                               setManualTextTitle(`Mổ xẻ giải quyết vấn đề ${gap.topic}`);
                               setActiveTab('train');
                             }}
-                            className="text-[10px] text-blue-600 hover:text-blue-800 font-bold mt-2 flex items-center gap-1 hover:underline"
+                            className="text-[10px] text-emerald-700 hover:text-blue-800 font-bold mt-2 flex items-center gap-1 hover:underline"
                           >
                             Hướng đào tạo vá lỗ hổng tri thức <ArrowRight className="w-3 h-3" />
                           </button>
@@ -4197,7 +4197,7 @@ export default function App() {
                     <button
                       onClick={handleSyncToSupabase}
                       disabled={sbSyncing || !sbStatus?.connected}
-                      className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       {sbSyncing ? (
                         <>
@@ -4224,7 +4224,7 @@ export default function App() {
                     <p className="text-xs text-slate-400 mb-4">Cách lấy thông số kết nối trong 2 phút</p>
 
                     <ol className="space-y-3 mt-4 text-xs text-slate-600 list-decimal pl-4">
-                      <li>Truy cập <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">Supabase.com</a>, đăng nhập và nhấn <strong>New Project</strong> để tạo cơ sở dữ liệu miễn phí.</li>
+                      <li>Truy cập <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" className="text-emerald-700 hover:underline font-bold">Supabase.com</a>, đăng nhập và nhấn <strong>New Project</strong> để tạo cơ sở dữ liệu miễn phí.</li>
                       <li>Sau khi project khởi chạy hoàn tất, vào thẻ <strong>SQL Editor</strong>, dán đoạn lệnh SQL Schema bên dưới đây và nhấn <strong>Run</strong> để khởi dựng các bảng cần thiết.</li>
                       <li>Truy cập mục <strong>Settings &gt; API</strong>, sao chép URL và khóa Public Anon dán vào form bên trái để kích hoạt.</li>
                     </ol>
@@ -4273,7 +4273,7 @@ export default function App() {
                     <Upload className="w-8 h-8 text-slate-350 mx-auto mb-2" />
                     <p className="font-semibold text-slate-700">Storage Bucket trống rỗng</p>
                     <p className="mt-1 text-slate-400">Chưa có tập tin đào tạo nào được đẩy lên Supabase Storage.</p>
-                    <p className="mt-2 text-slate-400 text-[11px]">Hãy chuyển sang thẻ <strong className="text-blue-600">Huấn Luyện AI Bot</strong>, tải lên một file tài liệu thật (hoặc file mẫu), hệ thống sẽ tự động đồng bộ hóa lên đám mây của bạn!</p>
+                    <p className="mt-2 text-slate-400 text-[11px]">Hãy chuyển sang thẻ <strong className="text-emerald-700">Huấn Luyện AI Bot</strong>, tải lên một file tài liệu thật (hoặc file mẫu), hệ thống sẽ tự động đồng bộ hóa lên đám mây của bạn!</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -4417,7 +4417,7 @@ export default function App() {
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase block font-sans">Số lượng Bot hoạt động</span>
-                      <span className="text-xs font-mono font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                      <span className="text-xs font-mono font-extrabold text-emerald-700 bg-blue-50 px-2 py-0.5 rounded">
                         {bots.length} / {myBotLimitFinite ? myBotLimit : '∞'} Bot
                       </span>
                     </div>
@@ -5004,7 +5004,7 @@ export default function App() {
                       <div className="space-y-2 bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
                         <div className="flex justify-between items-center text-xs">
                           <span className="font-bold text-slate-700">Hạn mức tin nhắn Free:</span>
-                          <span className="font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded font-extrabold text-xs">
+                          <span className="font-mono text-emerald-700 bg-blue-50 px-2 py-0.5 rounded font-extrabold text-xs">
                             {freeQueriesLimit === 10000 ? "Không giới hạn (10.000+)" : `${freeQueriesLimit.toLocaleString()} tin nhắn`}
                           </span>
                         </div>
@@ -5450,7 +5450,7 @@ WHERE email = 'customer-email@example.com';`}
                               </td>
                               <td className="px-4 py-3 text-xs font-mono font-bold text-teal-600">{sched.time}</td>
                               <td className="px-4 py-3">
-                                <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold border border-blue-200">
+                                <span className="text-[10px] bg-blue-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold border border-blue-200">
                                   {sched.frequency === 'daily' ? 'Hàng ngày' : sched.frequency === 'weekly' ? 'Hàng tuần' : sched.frequency === 'weekdays' ? 'T2-T6' : sched.frequency === 'monthly' ? 'Hàng tháng' : sched.frequency === 'once' ? 'Một lần' : sched.frequency}
                                 </span>
                               </td>
@@ -6402,7 +6402,7 @@ WHERE email = 'customer-email@example.com';`}
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg"
                 >
                   Kích Hoạt Khởi Tạo
                 </button>
