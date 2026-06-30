@@ -1880,12 +1880,12 @@ export default function App() {
       }`}>
         <div className="p-6 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-white shadow-md shadow-blue-500/20">
+            <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center font-black text-slate-950 shadow-md shadow-emerald-500/20">
               A
             </div>
             <div>
               <span className="text-white font-bold text-lg tracking-tight block">AAA BalaBot</span>
-              <span className="text-[10px] text-blue-400 font-mono tracking-wider">OMNICHANNEL AI SAAS</span>
+              <span className="text-[10px] text-emerald-400 font-mono tracking-wider">OMNICHANNEL AI SAAS</span>
             </div>
           </div>
           {/* Close button inside mobile menu */}
@@ -1914,66 +1914,66 @@ export default function App() {
         <nav className="flex-1 px-3 mt-4 space-y-1 overflow-y-auto">
           <button
             onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'dashboard' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'dashboard' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <LayoutDashboard className="w-4 h-4 text-blue-400" />
+            <LayoutDashboard className="w-4 h-4" />
             Bàn điều khiển
           </button>
 
           <button
             onClick={() => { setActiveTab('config'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'config' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'config' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <Settings className="w-4 h-4 text-emerald-400" />
+            <Settings className="w-4 h-4" />
             Cấu hình Bot AI
           </button>
 
           <button
             onClick={() => { setActiveTab('train'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'train' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'train' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <GraduationCap className="w-4 h-4 text-purple-400" />
+            <GraduationCap className="w-4 h-4" />
             Nạp Tri Thức & Train
           </button>
 
           <button
             onClick={() => { setActiveTab('kb'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'kb' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'kb' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <Database className="w-4 h-4 text-amber-400" />
+            <Database className="w-4 h-4" />
             Kho Kiến Thức
           </button>
 
           <button
             onClick={() => { setActiveTab('playground'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'playground' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'playground' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <Play className="w-4 h-4 text-rose-400" />
+            <Play className="w-4 h-4" />
             Playground Chat Thử
           </button>
 
           <button
             onClick={() => { setActiveTab('telegram'); setTelegramPanel('connection'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'telegram' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'telegram' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <Link2 className="w-4 h-4 text-cyan-400" />
+            <Link2 className="w-4 h-4" />
             Tích hợp Telegram
           </button>
 
           <button
             onClick={() => { setActiveTab('facebook'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'facebook' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'facebook' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <MessageCircle className="w-4 h-4 text-blue-500" />
+            <MessageCircle className="w-4 h-4" />
             Tích hợp Facebook
           </button>
 
           {sbUser?.email && (
             <button
               onClick={() => { setActiveTab('zalo'); setIsMobileMenuOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'zalo' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'zalo' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
             >
-              <MessageCircle className="w-4 h-4 text-green-400" />
+              <MessageCircle className="w-4 h-4" />
               Zalo Group Bot
             </button>
           )}
@@ -2006,9 +2006,9 @@ export default function App() {
 
           <button
             onClick={() => { setActiveTab('conversations'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'conversations' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'conversations' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <History className="w-4 h-4 text-orange-400" />
+            <History className="w-4 h-4" />
             Lịch sử & Takeover
             {conversations.filter(c => c.status === 'escalated').length > 0 && (
               <span className="ml-auto bg-rose-600 text-white min-w-4 h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center animate-pulse">
@@ -2019,25 +2019,25 @@ export default function App() {
 
           <button
             onClick={() => { setActiveTab('analytics'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'analytics' ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'analytics' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <BarChart3 className="w-4 h-4 text-sky-400" />
+            <BarChart3 className="w-4 h-4" />
             Báo Cáo & Phân Tích
           </button>
 
           <button
             onClick={() => { setActiveTab('supabase'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'supabase' ? 'bg-blue-600/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'supabase' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <Database className="w-4 h-4 text-emerald-400" />
+            <Database className="w-4 h-4" />
             Kết nối Supabase
           </button>
 
           <button
             onClick={() => { setActiveTab('billing'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'billing' ? 'bg-blue-600/10 text-rose-400 border-l-4 border-rose-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'billing' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
-            <CreditCard className="w-4 h-4 text-rose-400" />
+            <CreditCard className="w-4 h-4" />
             Gói Cước & Bảng Giá
           </button>
 
@@ -2060,9 +2060,9 @@ export default function App() {
           {sbUser?.email === ADMIN_EMAIL && (
             <button
               onClick={() => { setActiveTab('admin'); setIsMobileMenuOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'admin' ? 'bg-blue-600/10 text-amber-500 border-l-4 border-amber-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'admin' ? 'bg-amber-500/10 text-amber-400 border-l-4 border-amber-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
             >
-              <Shield className="w-4 h-4 text-amber-400" />
+              <Shield className="w-4 h-4" />
               Quản Trị Người Dùng
               <span className="ml-auto bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide">Admin</span>
             </button>
