@@ -1477,13 +1477,13 @@ export default function App() {
             <div className="lg:col-span-7 space-y-8 text-left">
               <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-wide uppercase">
                 <Sparkles className="w-3.5 h-3.5" />
-                Nền tảng Telegram Bot AI SaaS Đột Phá
+                Chatbot AI Đa Kênh · Telegram · Facebook · Zalo
               </div>
               <h1 className="text-3xl md:text-5xl font-extrabold text-white leading-tight tracking-tight">
                 Biến Tri Thức Doanh Nghiệp Thành <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">Trợ Lý Ảo Chốt Đơn 24/7</span>
               </h1>
               <p className="text-slate-400 text-sm md:text-base leading-relaxed max-w-2xl">
-                BalaBot sử dụng AI thế hệ mới kết hợp cơ chế nạp tri thức RAG thông minh. Trợ lý tự động thấu hiểu sản phẩm, báo giá chuẩn xác từ tài liệu bạn huấn luyện và phục vụ khách hàng Telegram không ngừng nghỉ.
+                BalaBot biến tài liệu của bạn thành trợ lý AI bám sát tri thức (RAG): tự hiểu sản phẩm, báo giá đúng theo tài liệu và trả lời khách trên <strong className="text-slate-300">Telegram, Facebook và nhóm Zalo</strong> — liền mạch, không nghỉ. Khi cần, bạn nhảy vào trò chuyện trực tiếp thay bot chỉ trong một cú nhấp.
               </p>
 
               {/* LIVE SIMULATION MOCKUP CARD */}
@@ -1499,7 +1499,7 @@ export default function App() {
                         Trợ Lý Tự Động AAA Organic Farm
                         <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1 py-0.2 rounded font-mono">BalaBot</span>
                       </div>
-                      <div className="text-[9px] text-slate-500">Đang hoạt động trên Telegram</div>
+                      <div className="text-[9px] text-slate-500">Đang hoạt động: Telegram · Facebook · Zalo</div>
                     </div>
                   </div>
                   <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
@@ -1539,7 +1539,7 @@ export default function App() {
                 
                 <div className="mb-6 text-center">
                   <h3 className="text-xl font-bold text-white tracking-tight">Cổng Kiểm Thử Trực Tuyến</h3>
-                  <p className="text-xs text-slate-400 mt-1">Đăng nhập hoặc Đăng ký tài khoản Supabase Auth để sử dụng chức năng thiết lập và cấu hình bot Telegram của riêng bạn.</p>
+                  <p className="text-xs text-slate-400 mt-1">Đăng nhập hoặc đăng ký để tạo và cấu hình chatbot AI đa kênh (Telegram · Facebook · Zalo) của riêng bạn.</p>
                 </div>
 
                 {sbStatus !== null && !sbStatus.connected ? (
@@ -1695,42 +1695,75 @@ export default function App() {
           <div id="features" className="space-y-8 pt-12 border-t border-slate-800/60">
             <div className="text-center max-w-2xl mx-auto space-y-3">
               <span className="text-emerald-400 font-mono text-xs font-bold uppercase tracking-widest">Tính năng vượt trội</span>
-              <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Hội Tụ Đầy Đủ Giải Pháp Chăm Sóc Khách Hàng</h2>
-              <p className="text-slate-400 text-sm">Trải nghiệm vận hành bot nhàn nhã với các công nghệ tự động hóa tối tân nhất.</p>
+              <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Mọi Thứ Để Vận Hành Một Trợ Lý AI Thật Sự Hữu Ích</h2>
+              <p className="text-slate-400 text-sm">Bám tri thức, đa kênh, và có người thật can thiệp khi cần — không chỉ là chatbot trả lời máy móc.</p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              
-              {/* Feature 1 */}
+
+              {/* Feature 1 — Đa kênh */}
               <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
                 <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
-                  <Bot className="w-5 h-5" />
+                  <MessageCircle className="w-5 h-5" />
                 </div>
-                <h3 className="font-bold text-base text-white">Chăm Sóc & Chốt Đơn 24/7</h3>
+                <h3 className="font-bold text-base text-white">Một Bot — Ba Kênh</h3>
                 <p className="text-slate-400 text-xs leading-relaxed">
-                  Thiết lập tone giọng thân thiện, linh hoạt tiếp nhận thắc mắc và hỗ trợ chốt đơn mọi thời điểm trong ngày mà không phát sinh thêm nhân lực.
+                  Kết nối một lần, phục vụ khách trên Telegram, Facebook Messenger và nhóm Zalo. Cùng một bộ tri thức, trả lời nhất quán ở mọi nơi.
                 </p>
               </div>
 
-              {/* Feature 2 */}
+              {/* Feature 2 — RAG */}
               <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
                 <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
                   <GraduationCap className="w-5 h-5" />
                 </div>
-                <h3 className="font-bold text-base text-white">Nạp Tri Thức Chọn Lọc (RAG)</h3>
+                <h3 className="font-bold text-base text-white">Trả Lời Bám Tri Thức (RAG)</h3>
                 <p className="text-slate-400 text-xs leading-relaxed">
-                  Tải lên bảng giá, hướng dẫn sử dụng, file PDF để huấn luyện trợ lý. AI bám sát dữ liệu nguồn để trả lời và tuyệt đối không bao giờ bịa đặt thông tin.
+                  Tải lên PDF, Word, Excel hoặc nhập FAQ để huấn luyện. Bot trả lời dựa trên đúng tài liệu của bạn — báo giá chuẩn, không bịa thông tin.
                 </p>
               </div>
 
-              {/* Feature 3 */}
+              {/* Feature 3 — Takeover */}
               <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
                 <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
                   <History className="w-5 h-5" />
                 </div>
-                <h3 className="font-bold text-base text-white">Chuyển Giao Cho Đội Ngũ (Takeover)</h3>
+                <h3 className="font-bold text-base text-white">Can Thiệp Trực Tiếp (Takeover)</h3>
                 <p className="text-slate-400 text-xs leading-relaxed">
-                  Khi khách hàng hỏi chủ đề nhạy cảm hoặc cần can thiệp trực tiếp, quản trị viên dễ dàng takeover cuộc trò chuyện tức khắc qua giao diện admin.
+                  Bất cứ lúc nào bạn nhảy vào trả lời thay bot. Tin nhắn can thiệp tự động tag tên và trích dẫn đúng câu của khách trên mọi kênh.
+                </p>
+              </div>
+
+              {/* Feature 4 — Đa bot */}
+              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
+                <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
+                  <Bot className="w-5 h-5" />
+                </div>
+                <h3 className="font-bold text-base text-white">Quản Lý Nhiều Bot</h3>
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  Tạo bot riêng cho từng cửa hàng hay lĩnh vực. Mỗi bot có kho tri thức tách biệt, cam kết không lẫn dữ liệu giữa các bot.
+                </p>
+              </div>
+
+              {/* Feature 5 — Sandbox */}
+              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
+                <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
+                  <Search className="w-5 h-5" />
+                </div>
+                <h3 className="font-bold text-base text-white">Kiểm Thử Trước Khi Lên Sóng</h3>
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  Chat thử ngay trong trang quản trị (Sandbox) và xem bot trích đúng đoạn tri thức nào để trả lời, tinh chỉnh trước khi phục vụ khách thật.
+                </p>
+              </div>
+
+              {/* Feature 6 — Analytics */}
+              <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-2xl space-y-4 hover:border-emerald-500/20 transition-all duration-200">
+                <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center">
+                  <BarChart3 className="w-5 h-5" />
+                </div>
+                <h3 className="font-bold text-base text-white">Thống Kê & Hạn Mức</h3>
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  Theo dõi lượt hỏi - đáp, hạn mức tin nhắn theo tháng và nâng cấp gói linh hoạt khi nhu cầu kinh doanh tăng lên.
                 </p>
               </div>
 
@@ -1741,7 +1774,7 @@ export default function App() {
           <div id="how-it-works" className="bg-gradient-to-tr from-slate-900 to-slate-950 border border-slate-800/80 p-8 md:p-12 rounded-3xl space-y-8">
             <div className="max-w-xl text-left space-y-3">
               <span className="text-emerald-400 font-bold font-mono text-xs uppercase tracking-wider">Quy Trình Hoạt Động</span>
-              <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Kích hoạt Bot Telegram Chỉ Với 4 Bước Đơn Giản</h2>
+              <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Kích Hoạt Trợ Lý Đa Kênh Chỉ Với 4 Bước Đơn Giản</h2>
               <p className="text-slate-400 text-sm">Cơ chế tự động hóa 100% giúp bạn sở hữu trợ lý ảo cực kỳ nhanh chóng.</p>
             </div>
 
@@ -1766,8 +1799,8 @@ export default function App() {
 
               <div className="space-y-2">
                 <div className="font-mono text-xs font-black text-emerald-400 bg-emerald-500/10 w-6 h-6 rounded-full flex items-center justify-center">4</div>
-                <h4 className="font-bold text-sm text-white">Tích Hợp Telegram</h4>
-                <p className="text-slate-500 text-xs leading-relaxed">Dán Token từ BotFather lên và bấm lưu - Bot của bạn lập tức hoạt động trực tuyến 24/7 tức thì!</p>
+                <h4 className="font-bold text-sm text-white">Kết Nối Kênh</h4>
+                <p className="text-slate-500 text-xs leading-relaxed">Dán token Telegram, kết nối Facebook hoặc đăng nhập Zalo — bot lập tức trực tuyến 24/7 trên kênh bạn chọn.</p>
               </div>
             </div>
 
