@@ -449,9 +449,11 @@ export default function App() {
   const handleOAuthConnectFacebook = () => {
     if (!selectedBotId) return;
     setFacebookActionMsg(null);
-    // Cùng origin-path với các fetch('/api/...') hiện có.
+    // Trên antiantiai.xyz app nằm dưới /balabot — proxy Cloudflare chỉ chuyển
+    // /balabot/api/* về backend, nên popup phải giữ prefix theo path hiện tại.
+    const apiPrefix = window.location.pathname.startsWith('/balabot') ? '/balabot' : '';
     window.open(
-      `/api/facebook-oauth/start?botId=${encodeURIComponent(selectedBotId)}`,
+      `${apiPrefix}/api/facebook-oauth/start?botId=${encodeURIComponent(selectedBotId)}`,
       'balabot-fb-oauth',
       'width=650,height=760'
     );
