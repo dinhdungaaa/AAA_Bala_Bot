@@ -704,7 +704,9 @@ export async function dbSaveConversation(convo: ChatSession): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
   try {
-    const { error } = await client.from('chat_sessions').insert({
+    // upsert (không insert) để lưu lặp cùng 1 session không vỡ khóa chính —
+    // khách nhắn nhiều lượt sẽ cập nhật đúng bản ghi thay vì lỗi trùng id.
+    const { error } = await client.from('chat_sessions').upsert({
       id: convo.id,
       botId: convo.botId,
       telegramUserId: convo.telegramUserId,
@@ -715,7 +717,7 @@ export async function dbSaveConversation(convo: ChatSession): Promise<boolean> {
       status: convo.status,
       internalNotes: convo.internalNotes,
       messages: convo.messages
-    });
+    }, { onConflict: 'id' });
     if (error) throw error;
     return true;
   } catch (err) {
