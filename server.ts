@@ -2532,6 +2532,34 @@ app.get("/api/facebook-oauth/callback", async (req, res) => {
     }
     const rawPages = Array.isArray(pages?.data) ? pages.data : [];
     const list = rawPages.filter((p: any) => p?.id && p?.access_token);
+
+    // Fallback: app kiểu Business mới của Meta đôi khi trả /me/accounts RỖNG dù token
+    // đã được cấp Page (granular_scopes có target_ids) → lấy token trực tiếp theo Page ID.
+    if (!list.length) {
+      try {
+        const dbgRes = await fetch(
+          `https://graph.facebook.com/${ver}/debug_token?input_token=${encodeURIComponent(userToken)}&access_token=${encodeURIComponent(appId)}|${encodeURIComponent(appSecret)}`
+        );
+        const dbg = await dbgRes.json();
+        const gs: any[] = Array.isArray(dbg?.data?.granular_scopes) ? dbg.data.granular_scopes : [];
+        const ids = [...new Set(gs.flatMap((s: any) => Array.isArray(s?.target_ids) ? s.target_ids : []))] as string[];
+        console.warn("[FB OAuth] /me/accounts rỗng → fallback theo granular target_ids:", JSON.stringify(ids));
+        for (const pid of ids) {
+          const pRes = await fetch(
+            `https://graph.facebook.com/${ver}/${encodeURIComponent(pid)}?fields=id,name,access_token&access_token=${encodeURIComponent(userToken)}`
+          );
+          const p = await pRes.json();
+          if (pRes.ok && p?.id && p?.access_token) {
+            list.push(p);
+          } else {
+            console.warn("[FB OAuth] fallback lấy Page thất bại:", pid, p?.error?.message || pRes.status);
+          }
+        }
+      } catch (e: any) {
+        console.warn("[FB OAuth] fallback granular_scopes lỗi:", e?.message || e);
+      }
+    }
+
     if (!list.length) {
       // Chẩn đoán: phân biệt "không có Page" vs "có Page nhưng thiếu page token (thiếu quyền)".
       console.warn(
@@ -2542,14 +2570,6 @@ app.get("/api/facebook-oauth/callback", async (req, res) => {
         const permRes = await fetch(`https://graph.facebook.com/${ver}/me/permissions?access_token=${encodeURIComponent(userToken)}`);
         const perms = await permRes.json();
         console.warn("[FB OAuth] Quyền đã cấp:", JSON.stringify(perms?.data || perms?.error?.message));
-      } catch {}
-      try {
-        // granular_scopes cho biết CHÍNH XÁC Page nào được opt-in cho từng quyền.
-        const dbgRes = await fetch(
-          `https://graph.facebook.com/${ver}/debug_token?input_token=${encodeURIComponent(userToken)}&access_token=${encodeURIComponent(appId)}|${encodeURIComponent(appSecret)}`
-        );
-        const dbg = await dbgRes.json();
-        console.warn("[FB OAuth] granular_scopes:", JSON.stringify(dbg?.data?.granular_scopes ?? dbg?.error?.message ?? dbg));
       } catch {}
       if (rawPages.length > 0) {
         return fail("Đã thấy Fanpage của bạn nhưng Facebook chưa cấp quyền quản lý cho BalaBot. Hãy thử lại: ở màn cấp quyền của Facebook, bấm \"Chỉnh sửa cài đặt\" và BẬT TẤT CẢ các quyền được hỏi (danh sách Trang, nhắn tin, quản lý Trang).");
