@@ -74,13 +74,19 @@ chuyển sang "Kết nối Facebook (1 chạm)" chính chủ đã ship 2026-07-0
 
 ### 3. Dashboard (src/App.tsx)
 
-Trong tab Facebook, thêm card **"Cách 2 — Chạy ngay qua Botcake (không cần chờ Meta duyệt)"**
-dưới card Kết nối 1 chạm:
+Trong tab Facebook, **Botcake bridge là phương án chính**, đặt TRÊN card OAuth:
+
+**Card 1 (chính) — "Kết nối Fanpage qua Botcake (khuyến nghị)":**
 - Nút "Tạo/Hiện Bridge URL" → gọi `bridge-info` → hiện URL đầy đủ (kèm key) + nút copy.
 - Nút "Đổi key" (confirm trước khi đổi).
-- Link mở hướng dẫn `docs/botcake-bridge-guide.md` (hoặc modal tóm tắt 5 bước).
-- Ghi chú rõ: "Kênh này trả lời mọi khách vãng lai ngay; Kết nối 1 chạm (Cách 1) sẽ
-  thay thế khi app được Meta duyệt."
+- Link/ghi chú hướng dẫn `docs/botcake-bridge-guide.md` (5 bước).
+
+**Card 2 — OAuth 1 chạm chuyển "Sắp ra mắt":**
+- Nút "Kết nối Facebook (1 chạm)" → **disabled**, label "Kết nối Facebook (1 chạm) — Sắp ra mắt",
+  badge "Đang chờ Meta phê duyệt".
+- Backend OAuth GIỮ NGUYÊN (đang hoạt động cho admin/tester; bật lại nút chỉ là bỏ disabled
+  khi App Review xong).
+- Giữ nguyên phần "Tùy chọn nâng cao: dán Page Access Token" trong card này.
 
 ### 4. Hướng dẫn khách (docs/botcake-bridge-guide.md)
 

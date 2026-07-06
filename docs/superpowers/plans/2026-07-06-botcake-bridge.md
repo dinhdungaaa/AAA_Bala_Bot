@@ -383,10 +383,10 @@ git commit -m "feat(bridge): endpoint Botcake bridge + bridge key per-bot"
 
 ---
 
-### Task 3: Dashboard — card "Cách 2 — Chạy ngay qua Botcake"
+### Task 3: Dashboard — Botcake là phương án chính, OAuth chuyển "Sắp ra mắt"
 
 **Files:**
-- Modify: `src/App.tsx` — thêm state + 2 handler (cạnh `handleOAuthConnectFacebook`, ~dòng 449) và card UI đặt NGAY SAU card "Kết nối Fanpage" (tìm comment `{/* Kết nối 1 chạm qua Facebook OAuth */}`)
+- Modify: `src/App.tsx` — thêm state + 3 handler (cạnh `handleOAuthConnectFacebook`, ~dòng 449); card Botcake đặt NGAY TRÊN card OAuth hiện có (tìm comment `{/* Kết nối 1 chạm qua Facebook OAuth */}`); sửa card OAuth thành trạng thái "Sắp ra mắt"
 
 **Interfaces:**
 - Consumes: Task 2 endpoints `GET /api/bots/:botId/bridge-info`, `POST /api/bots/:botId/bridge-key/regenerate` → `{ bridgeKey, bridgeUrl }`.
@@ -453,17 +453,17 @@ git commit -m "feat(bridge): endpoint Botcake bridge + bridge key per-bot"
   };
 ```
 
-- [ ] **Step 3: Thêm card UI ngay sau card "Kết nối Fanpage" (sau thẻ đóng `</div>` của card chứa nút OAuth + details token)**
+- [ ] **Step 3: Thêm card Botcake NGAY TRÊN card OAuth (trước comment `{/* Kết nối 1 chạm qua Facebook OAuth */}`)**
 
 ```tsx
-                  {/* Cách 2 — Botcake bridge: chạy ngay cho mọi khách vãng lai, không chờ Meta duyệt */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                  {/* Phương án chính hiện tại — Botcake bridge: chạy ngay cho mọi khách vãng lai */}
+                  <div className="bg-white border border-emerald-200 rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Cách 2 — Chạy ngay qua Botcake</span>
-                      <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold">Không cần chờ Meta duyệt</span>
+                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Kết nối Fanpage qua Botcake</span>
+                      <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold">Khuyến nghị hiện tại</span>
                     </div>
                     <p className="text-[11px] text-slate-500 leading-relaxed">
-                      Kết nối Page vào Botcake (miễn phí) rồi dán Bridge URL bên dưới vào Dynamic Block — bot trả lời <b>mọi khách vãng lai</b> ngay. Cách 1 sẽ thay thế khi app được Meta duyệt.
+                      Kết nối Page vào Botcake (miễn phí) rồi dán Bridge URL bên dưới vào Dynamic Block — bot trả lời <b>mọi khách vãng lai</b> ngay.
                     </p>
                     {!bridgeInfo ? (
                       <button
@@ -495,16 +495,55 @@ git commit -m "feat(bridge): endpoint Botcake bridge + bridge key per-bot"
                   </div>
 ```
 
-- [ ] **Step 4: Lint + build**
+- [ ] **Step 4: Chuyển card OAuth thành "Sắp ra mắt"**
+
+Trong card "Kết nối Fanpage" hiện có (chứa nút OAuth), thay block nút OAuth:
+
+```tsx
+                    <button
+                      type="button"
+                      onClick={handleOAuthConnectFacebook}
+                      disabled={isConnectingFacebook}
+                      className="w-full px-4 py-3 bg-[#1877F2] hover:bg-[#166FE5] disabled:opacity-50 text-white font-bold rounded-lg text-sm flex items-center justify-center gap-2"
+                    >
+                      Kết nối Facebook (1 chạm)
+                    </button>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      Đăng nhập Facebook, chọn Fanpage, xong — hệ thống tự lấy token và tự đăng ký nhận tin nhắn.
+                    </p>
+```
+
+bằng:
+
+```tsx
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Kết nối Facebook (1 chạm)</span>
+                      <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 text-[10px] font-bold">Sắp ra mắt — Đang chờ Meta phê duyệt</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full px-4 py-3 bg-slate-300 text-white font-bold rounded-lg text-sm flex items-center justify-center gap-2 cursor-not-allowed"
+                    >
+                      Kết nối Facebook (1 chạm) — Sắp ra mắt
+                    </button>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      Tính năng kết nối trực tiếp đang chờ Meta phê duyệt. Trong lúc chờ, dùng phương án Botcake ở trên — bot hoạt động đầy đủ với mọi khách.
+                    </p>
+```
+
+Giữ nguyên: handler `handleOAuthConnectFacebook` (không xóa — bật lại sau này), useEffect postMessage listener, nút "Ngắt kết nối Fanpage", `<details>` dán token thủ công, khối "Trạng thái Page". Nếu `npm run lint` báo `handleOAuthConnectFacebook` unused thì thêm dòng `void handleOAuthConnectFacebook;` ngay sau khai báo handler kèm comment `// giữ lại để bật lại nút OAuth khi Meta duyệt` (tsconfig hiện không bật noUnusedLocals nên thường không cần).
+
+- [ ] **Step 5: Lint + build**
 
 Run: `npm run lint && npx vite build`
 Expected: sạch, build OK.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/App.tsx
-git commit -m "feat(ui): card Botcake bridge — tạo/copy Bridge URL, đổi key"
+git commit -m "feat(ui): Botcake bridge thành phương án chính, OAuth 1 chạm chuyển Sắp ra mắt"
 ```
 
 ---
@@ -532,7 +571,7 @@ PUBLIC_BACKEND_ORIGIN=
 2. **5 bước cài đặt cho 1 Fanpage** (viết cho chủ shop không rành kỹ thuật):
    - B1: Tạo tài khoản miễn phí tại botcake.io (đăng nhập bằng Facebook).
    - B2: Kết nối Fanpage (nút kết nối Page chính chủ của Botcake — hiện với mọi tài khoản).
-   - B3: Trong BalaBot dashboard → tab Facebook → card "Cách 2" → bấm "Tạo / Hiện Bridge URL" → Copy.
+   - B3: Trong BalaBot dashboard → tab Facebook → card "Kết nối Fanpage qua Botcake" → bấm "Tạo / Hiện Bridge URL" → Copy.
    - B4: Trong Botcake → Automation → Default Reply (Trả lời mặc định) → xóa nội dung mẫu → thêm block **Dynamic Block** (tên có thể là "Dynamic content"/"JSON API") → Method POST → dán Bridge URL → phần Body điền:
      ```json
      { "text": "{{last user freeform input}}", "psid": "{{messenger user id}}", "name": "{{full name}}" }
