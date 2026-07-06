@@ -2325,26 +2325,29 @@ app.get("/api/bots/:botId/facebook-webhook", async (req, res) => {
   });
 });
 
-// Kết nối Facebook Page per-bot: dán Page Access Token, server tự xác thực,
-// lấy page id/name và tự subscribe webhook events (bỏ bước thủ công trên Meta).
-app.post("/api/bots/:botId/facebook-connect", async (req, res) => {
-  const botId = req.params.botId;
-  const pageAccessToken = (req.body?.pageAccessToken || "").toString().trim();
-  if (!pageAccessToken) {
-    return res.status(400).json({ success: false, error: "Thiếu Page Access Token." });
-  }
+// Lõi kết nối Page cho 1 bot: verify token → lấy Page info → tự subscribe webhook → lưu per-bot.
+// Dùng chung cho route dán token thủ công VÀ luồng OAuth (Task 3).
+async function connectFacebookPageToBot(
+  botId: string,
+  pageAccessToken: string
+): Promise<{
+  success: boolean; status: number; pageId?: string; pageName?: string;
+  subscribed?: boolean; subscribeWarning?: string; message?: string; error?: string;
+}> {
+  const token = (pageAccessToken || "").trim();
+  if (!token) return { success: false, status: 400, error: "Thiếu Page Access Token." };
 
   const allBots = await dbGetBots(bots);
   const bot = allBots.find(b => b.id === botId);
-  if (!bot) return res.status(404).json({ success: false, error: "Bot not found" });
+  if (!bot) return { success: false, status: 404, error: "Bot not found" };
 
   const ver = getFacebookGraphApiVersion();
   try {
     // 1. Xác thực token + lấy thông tin Page.
-    const meRes = await fetch(`https://graph.facebook.com/${ver}/me?fields=id,name&access_token=${encodeURIComponent(pageAccessToken)}`);
+    const meRes = await fetch(`https://graph.facebook.com/${ver}/me?fields=id,name&access_token=${encodeURIComponent(token)}`);
     const me = await meRes.json();
     if (!meRes.ok || !me?.id) {
-      return res.status(400).json({ success: false, error: me?.error?.message || "Token không hợp lệ hoặc không phải Page Access Token." });
+      return { success: false, status: 400, error: me?.error?.message || "Token không hợp lệ hoặc không phải Page Access Token." };
     }
 
     // 2. Tự subscribe app vào Page cho các event tin nhắn (bỏ bước thủ công).
@@ -2352,7 +2355,7 @@ app.post("/api/bots/:botId/facebook-connect", async (req, res) => {
     let subscribeWarning = "";
     try {
       const subRes = await fetch(
-        `https://graph.facebook.com/${ver}/${me.id}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${encodeURIComponent(pageAccessToken)}`,
+        `https://graph.facebook.com/${ver}/${me.id}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${encodeURIComponent(token)}`,
         { method: "POST" }
       );
       const subData = await subRes.json().catch(() => ({}));
@@ -2364,7 +2367,7 @@ app.post("/api/bots/:botId/facebook-connect", async (req, res) => {
 
     // 3. Lưu per-bot (memory + DB).
     const updates = {
-      facebookPageAccessToken: pageAccessToken,
+      facebookPageAccessToken: token,
       facebookPageId: me.id,
       facebookPageName: me.name || "",
       facebookStatus: "connected" as const,
@@ -2374,19 +2377,24 @@ app.post("/api/bots/:botId/facebook-connect", async (req, res) => {
     if (memBot) Object.assign(memBot, updates);
     await dbUpdateBot(botId, updates);
 
-    return res.json({
-      success: true,
-      pageId: me.id,
-      pageName: me.name || "",
-      subscribed,
-      subscribeWarning,
+    return {
+      success: true, status: 200,
+      pageId: me.id, pageName: me.name || "", subscribed, subscribeWarning,
       message: subscribed
         ? `Đã kết nối Page "${me.name}" và tự subscribe webhook thành công.`
         : `Đã kết nối Page "${me.name}". Lưu ý: ${subscribeWarning}`
-    });
+    };
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: "Lỗi gọi Facebook Graph API: " + (err?.message || err) });
+    return { success: false, status: 500, error: "Lỗi gọi Facebook Graph API: " + (err?.message || err) };
   }
+}
+
+// Kết nối Facebook Page per-bot: dán Page Access Token, server tự xác thực,
+// lấy page id/name và tự subscribe webhook events (bỏ bước thủ công trên Meta).
+app.post("/api/bots/:botId/facebook-connect", async (req, res) => {
+  const result = await connectFacebookPageToBot(req.params.botId, (req.body?.pageAccessToken || "").toString());
+  const { status, ...payload } = result;
+  return res.status(status).json(payload);
 });
 
 // Ngắt kết nối Facebook Page khỏi bot.
