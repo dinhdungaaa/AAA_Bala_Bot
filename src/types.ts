@@ -17,7 +17,7 @@ export interface BotConfig {
   facebookPageAccessToken?: string;
   facebookPageId?: string;
   facebookPageName?: string;
-  facebookStatus?: 'not_connected' | 'connected';
+  facebookStatus?: 'not_connected' | 'connected' | 'expired';
   facebookConnectedAt?: string;
   welcomeMessage: string;
   fallbackMessage: string;

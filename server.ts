@@ -8,6 +8,10 @@ import { embedText, hashText } from "./rag/embeddings.js";
 import { GEN_MODEL } from "./rag/constants.js";
 import { rankBySimilarity, buildEmbedQuery, isShortFollowUp, condenseFollowUpQuery } from "./rag/retriever.js";
 import { synthesizeAnswer } from "./rag/synthesis.js";
+import {
+  signOAuthState, verifyOAuthState, buildOAuthDialogUrl, verifyFacebookSignature,
+  groupMessagingEventsByPage, randomToken, renderOAuthResultHtml, renderPageSelectionHtml,
+} from "./facebookOauth.js";
 import { TOP_K, RETRIEVE_FLOOR } from "./rag/constants.js";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult, TelegramGroup } from "./src/types.js";
 import {
@@ -85,7 +89,10 @@ function getPublicBaseUrl(req: express.Request, explicitOrigin?: string) {
   return origin.endsWith("/balabot") ? origin : `${origin}${prefix}`;
 }
 
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({
+  limit: "50mb",
+  verify: (req: any, _res, buf) => { req.rawBody = buf; }, // giữ raw body để verify X-Hub-Signature-256
+}));
 
 const USER_CONFIGS_FILE = path.join(process.cwd(), "supabase-user-configs.json");
 const BOT_CONFIGS_FILE = path.join(process.cwd(), "supabase-bot-configs.json");
@@ -2181,7 +2188,15 @@ async function sendFacebookTextMessage(bot: BotConfig, recipientId: string, text
 
     const data = await response.json().catch(() => ({}));
     results.push(data);
-    if (!response.ok) {
+    if (!response.ok || data.error) {
+      // Token bị thu hồi/hết hạn (khách đổi mật khẩu, gỡ app...) → đánh dấu để dashboard nhắc kết nối lại.
+      if (data.error?.code === 190 && bot.facebookPageAccessToken) {
+        const updates = { facebookStatus: "expired" as const };
+        const memBot = bots.find(b => b.id === bot.id);
+        if (memBot) Object.assign(memBot, updates);
+        await dbUpdateBot(bot.id, updates).catch(() => {});
+        console.warn(`[Facebook] Token Page của bot ${bot.id} đã hết hạn/bị thu hồi (code 190).`);
+      }
       throw new Error(data.error?.message || `Facebook Send API failed with HTTP ${response.status}`);
     }
   }
@@ -2325,26 +2340,30 @@ app.get("/api/bots/:botId/facebook-webhook", async (req, res) => {
   });
 });
 
-// Kết nối Facebook Page per-bot: dán Page Access Token, server tự xác thực,
-// lấy page id/name và tự subscribe webhook events (bỏ bước thủ công trên Meta).
-app.post("/api/bots/:botId/facebook-connect", async (req, res) => {
-  const botId = req.params.botId;
-  const pageAccessToken = (req.body?.pageAccessToken || "").toString().trim();
-  if (!pageAccessToken) {
-    return res.status(400).json({ success: false, error: "Thiếu Page Access Token." });
-  }
+// Lõi kết nối Page cho 1 bot: verify token → lấy Page info → tự subscribe webhook → lưu per-bot.
+// Dùng chung cho route dán token thủ công VÀ luồng OAuth (Task 3).
+async function connectFacebookPageToBot(
+  botId: string,
+  pageAccessToken: string
+): Promise<{
+  success: boolean; status: number; pageId?: string; pageName?: string;
+  subscribed?: boolean; subscribeWarning?: string; message?: string; error?: string;
+}> {
+  const token = (pageAccessToken || "").trim();
+  if (!token) return { success: false, status: 400, error: "Thiếu Page Access Token." };
 
   const allBots = await dbGetBots(bots);
   const bot = allBots.find(b => b.id === botId);
-  if (!bot) return res.status(404).json({ success: false, error: "Bot not found" });
+  if (!bot) return { success: false, status: 404, error: "Không tìm thấy bot. Hãy mở lại từ trang cấu hình bot." };
 
   const ver = getFacebookGraphApiVersion();
   try {
     // 1. Xác thực token + lấy thông tin Page.
-    const meRes = await fetch(`https://graph.facebook.com/${ver}/me?fields=id,name&access_token=${encodeURIComponent(pageAccessToken)}`);
+    const meRes = await fetch(`https://graph.facebook.com/${ver}/me?fields=id,name&access_token=${encodeURIComponent(token)}`);
     const me = await meRes.json();
     if (!meRes.ok || !me?.id) {
-      return res.status(400).json({ success: false, error: me?.error?.message || "Token không hợp lệ hoặc không phải Page Access Token." });
+      console.warn("[FB Connect] Token không hợp lệ:", me?.error?.message || meRes.status);
+      return { success: false, status: 400, error: "Token không hợp lệ hoặc không phải Page Access Token." };
     }
 
     // 2. Tự subscribe app vào Page cho các event tin nhắn (bỏ bước thủ công).
@@ -2352,19 +2371,39 @@ app.post("/api/bots/:botId/facebook-connect", async (req, res) => {
     let subscribeWarning = "";
     try {
       const subRes = await fetch(
-        `https://graph.facebook.com/${ver}/${me.id}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${encodeURIComponent(pageAccessToken)}`,
+        `https://graph.facebook.com/${ver}/${me.id}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${encodeURIComponent(token)}`,
         { method: "POST" }
       );
       const subData = await subRes.json().catch(() => ({}));
       subscribed = !!subData?.success;
-      if (!subscribed) subscribeWarning = subData?.error?.message || "Không tự subscribe được; có thể cần subscribe thủ công trên Meta.";
+      if (!subscribed) {
+        console.warn("[FB Connect] Subscribe thất bại:", subData?.error?.message);
+        subscribeWarning = "Không tự subscribe được; có thể cần subscribe thủ công trên Meta.";
+      }
     } catch (subErr: any) {
-      subscribeWarning = subErr?.message || "Lỗi khi subscribe app vào Page.";
+      console.warn("[FB Connect] Lỗi khi subscribe app vào Page:", subErr?.message || subErr);
+      subscribeWarning = "Không tự subscribe được; có thể cần subscribe thủ công trên Meta.";
+    }
+
+    // Page chỉ được gắn với 1 bot: gỡ liên kết khỏi bot khác còn giữ cùng pageId
+    // để webhook chung không route nhầm tin nhắn về bot cũ.
+    const staleBots = allBots.filter(b => b.id !== botId && b.facebookPageId === me.id);
+    for (const stale of staleBots) {
+      const staleUpdates = {
+        facebookPageAccessToken: "",
+        facebookPageId: "",
+        facebookPageName: "",
+        facebookStatus: "not_connected" as const
+      };
+      const staleMem = bots.find(b => b.id === stale.id);
+      if (staleMem) Object.assign(staleMem, staleUpdates);
+      await dbUpdateBot(stale.id, staleUpdates).catch(() => {});
+      console.warn(`[FB Connect] Page ${me.id} chuyển sang bot ${botId}; đã gỡ khỏi bot ${stale.id}.`);
     }
 
     // 3. Lưu per-bot (memory + DB).
     const updates = {
-      facebookPageAccessToken: pageAccessToken,
+      facebookPageAccessToken: token,
       facebookPageId: me.id,
       facebookPageName: me.name || "",
       facebookStatus: "connected" as const,
@@ -2374,19 +2413,25 @@ app.post("/api/bots/:botId/facebook-connect", async (req, res) => {
     if (memBot) Object.assign(memBot, updates);
     await dbUpdateBot(botId, updates);
 
-    return res.json({
-      success: true,
-      pageId: me.id,
-      pageName: me.name || "",
-      subscribed,
-      subscribeWarning,
+    return {
+      success: true, status: 200,
+      pageId: me.id, pageName: me.name || "", subscribed, subscribeWarning,
       message: subscribed
         ? `Đã kết nối Page "${me.name}" và tự subscribe webhook thành công.`
         : `Đã kết nối Page "${me.name}". Lưu ý: ${subscribeWarning}`
-    });
+    };
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: "Lỗi gọi Facebook Graph API: " + (err?.message || err) });
+    console.error("[FB Connect] Lỗi gọi Facebook Graph API:", err?.message || err);
+    return { success: false, status: 500, error: "Lỗi kết nối Facebook. Vui lòng thử lại sau." };
   }
+}
+
+// Kết nối Facebook Page per-bot: dán Page Access Token, server tự xác thực,
+// lấy page id/name và tự subscribe webhook events (bỏ bước thủ công trên Meta).
+app.post("/api/bots/:botId/facebook-connect", async (req, res) => {
+  const result = await connectFacebookPageToBot(req.params.botId, (req.body?.pageAccessToken || "").toString());
+  const { status, ...payload } = result;
+  return res.status(status).json(payload);
 });
 
 // Ngắt kết nối Facebook Page khỏi bot.
@@ -2402,6 +2447,192 @@ app.post("/api/bots/:botId/facebook-disconnect", async (req, res) => {
   if (memBot) Object.assign(memBot, updates);
   const ok = await dbUpdateBot(botId, updates);
   return res.json({ success: ok, message: ok ? "Đã ngắt kết nối Facebook Page." : "Không cập nhật được DB." });
+});
+
+// ===== Facebook OAuth 1 chạm (app chung BalaBot) =====
+function getFacebookAppCreds() {
+  const appId = process.env.FACEBOOK_APP_ID || "";
+  const appSecret = process.env.FACEBOOK_APP_SECRET || "";
+  return { appId, appSecret, configured: !!(appId && appSecret) };
+}
+
+// Phiên chọn Page (khi khách quản lý nhiều Fanpage): giữ page tokens server-side, TTL 10'.
+const fbOauthPendingSelections = new Map<string, {
+  botId: string;
+  pages: Array<{ id: string; name: string; access_token: string }>;
+  at: number;
+}>();
+const FB_OAUTH_SELECTION_TTL_MS = 10 * 60 * 1000;
+
+function cleanupFbOauthSelections() {
+  const now = Date.now();
+  for (const [k, v] of fbOauthPendingSelections) {
+    if (now - v.at > FB_OAUTH_SELECTION_TTL_MS) fbOauthPendingSelections.delete(k);
+  }
+}
+
+// Bước 1: dashboard mở popup vào đây → redirect sang màn cấp quyền của Facebook.
+app.get("/api/facebook-oauth/start", async (req, res) => {
+  const { appId, appSecret, configured } = getFacebookAppCreds();
+  const botId = String(req.query.botId || "").trim();
+  if (!configured) {
+    return res.status(400).send(renderOAuthResultHtml({ success: false, message: "Server chưa cấu hình FACEBOOK_APP_ID / FACEBOOK_APP_SECRET. Liên hệ quản trị viên BalaBot." }));
+  }
+  if (!botId) {
+    return res.status(400).send(renderOAuthResultHtml({ success: false, message: "Thiếu botId. Hãy mở lại từ trang cấu hình bot." }));
+  }
+  const redirectUri = `${getPublicBaseUrl(req)}/api/facebook-oauth/callback`;
+  const state = signOAuthState(botId, appSecret);
+  return res.redirect(buildOAuthDialogUrl({ appId, redirectUri, state, graphVersion: getFacebookGraphApiVersion() }));
+});
+
+// Bước 2: Facebook redirect về đây với ?code&state → đổi token → lấy Page → kết nối.
+app.get("/api/facebook-oauth/callback", async (req, res) => {
+  const { appId, appSecret, configured } = getFacebookAppCreds();
+  const fail = (message: string, status = 400) =>
+    res.status(status).send(renderOAuthResultHtml({ success: false, message }));
+
+  if (!configured) return fail("Server chưa cấu hình Facebook App.");
+  if (req.query.error) {
+    return fail("Bạn đã từ chối cấp quyền. Hãy bấm Kết nối Facebook lại và chọn Cho phép để bot đọc/trả lời tin nhắn Fanpage.");
+  }
+  const st = verifyOAuthState(String(req.query.state || ""), appSecret);
+  if (!st) return fail("Phiên kết nối không hợp lệ hoặc đã quá 10 phút. Hãy đóng cửa sổ và bấm Kết nối Facebook lại.");
+  const code = String(req.query.code || "");
+  if (!code) return fail("Thiếu mã xác thực từ Facebook. Hãy thử lại.");
+
+  const ver = getFacebookGraphApiVersion();
+  const redirectUri = `${getPublicBaseUrl(req)}/api/facebook-oauth/callback`;
+  try {
+    // 1. code → short-lived user token.
+    const tokRes = await fetch(
+      `https://graph.facebook.com/${ver}/oauth/access_token?client_id=${encodeURIComponent(appId)}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${encodeURIComponent(appSecret)}&code=${encodeURIComponent(code)}`
+    );
+    const tok = await tokRes.json();
+    if (!tokRes.ok || !tok?.access_token) {
+      console.warn("[FB OAuth] Đổi code thất bại:", tok?.error?.message || tokRes.status);
+      return fail("Không đổi được mã xác thực với Facebook. Hãy đóng cửa sổ và thử lại.");
+    }
+
+    // 2. → long-lived user token (page token sinh từ đây sẽ không hết hạn).
+    const llRes = await fetch(
+      `https://graph.facebook.com/${ver}/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(tok.access_token)}`
+    );
+    const ll = await llRes.json().catch(() => ({}));
+    const userToken = ll?.access_token || tok.access_token;
+
+    // 3. Danh sách Page khách quản lý + Page Access Token từng Page.
+    const pagesRes = await fetch(
+      `https://graph.facebook.com/${ver}/me/accounts?fields=id,name,access_token&limit=100&access_token=${encodeURIComponent(userToken)}`
+    );
+    const pages = await pagesRes.json();
+    if (!pagesRes.ok) {
+      console.warn("[FB OAuth] Lấy danh sách Page thất bại:", pages?.error?.message || pagesRes.status);
+      return fail("Không lấy được danh sách Fanpage. Hãy thử lại sau ít phút.");
+    }
+    const list = (pages?.data || []).filter((p: any) => p?.id && p?.access_token);
+    if (!list.length) {
+      return fail("Tài khoản của bạn chưa quản lý Fanpage nào, hoặc bạn chưa chọn Page nào ở bước cấp quyền. Hãy thử lại và tick chọn Fanpage.");
+    }
+
+    // 1 Page → kết nối luôn. Nhiều Page → cho chọn.
+    if (list.length === 1) {
+      const result = await connectFacebookPageToBot(st.botId, list[0].access_token);
+      return res.status(result.status).send(renderOAuthResultHtml({
+        success: result.success,
+        message: result.success ? (result.message || `Đã kết nối Fanpage "${result.pageName}".`) : (result.error || "Kết nối thất bại."),
+        pageName: result.pageName,
+      }));
+    }
+
+    cleanupFbOauthSelections();
+    const selectionId = randomToken();
+    fbOauthPendingSelections.set(selectionId, { botId: st.botId, pages: list, at: Date.now() });
+    return res.send(renderPageSelectionHtml({
+      selectionId,
+      pages: list.map((p: any) => ({ id: p.id, name: p.name || p.id })),
+      actionPath: `${getPublicBaseUrl(req)}/api/facebook-oauth/select`,
+    }));
+  } catch (err: any) {
+    console.error("[FB OAuth] Lỗi callback:", err?.message || err);
+    return fail("Có lỗi khi kết nối với Facebook. Hãy thử lại sau ít phút.", 500);
+  }
+});
+
+// Bước 3 (chỉ khi nhiều Page): nhận Page khách chọn → kết nối.
+app.post("/api/facebook-oauth/select", express.urlencoded({ extended: false }), async (req, res) => {
+  cleanupFbOauthSelections();
+  const selectionId = String(req.body?.selectionId || "");
+  const pageId = String(req.body?.pageId || "");
+  const pending = fbOauthPendingSelections.get(selectionId);
+  if (!pending) {
+    return res.status(400).send(renderOAuthResultHtml({ success: false, message: "Phiên chọn Fanpage đã hết hạn. Hãy bấm Kết nối Facebook lại." }));
+  }
+  const page = pending.pages.find(p => p.id === pageId);
+  if (!page) {
+    return res.status(400).send(renderOAuthResultHtml({ success: false, message: "Fanpage không hợp lệ. Hãy bấm Kết nối Facebook lại." }));
+  }
+  fbOauthPendingSelections.delete(selectionId);
+  try {
+    const result = await connectFacebookPageToBot(pending.botId, page.access_token);
+    return res.status(result.status).send(renderOAuthResultHtml({
+      success: result.success,
+      message: result.success ? (result.message || `Đã kết nối Fanpage "${result.pageName}".`) : (result.error || "Kết nối thất bại."),
+      pageName: result.pageName,
+    }));
+  } catch (err: any) {
+    console.error("[FB OAuth] Lỗi select:", err?.message || err);
+    return res.status(500).send(renderOAuthResultHtml({ success: false, message: "Có lỗi khi kết nối Fanpage. Hãy bấm Kết nối Facebook lại." }));
+  }
+});
+
+// Webhook CHUNG cho app Meta của BalaBot (Meta chỉ cho 1 callback URL/app).
+// Route theo entry[].id (Page ID) → bot có facebookPageId tương ứng.
+app.get("/api/facebook-webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  if (mode === "subscribe" && token === getFacebookVerifyToken()) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
+app.post("/api/facebook-webhook", async (req, res) => {
+  // Verify chữ ký khi có app secret (bỏ qua ở môi trường dev chưa cấu hình).
+  const { appSecret } = getFacebookAppCreds();
+  if (appSecret) {
+    const ok = verifyFacebookSignature(
+      (req as any).rawBody,
+      req.headers["x-hub-signature-256"] as string | undefined,
+      appSecret
+    );
+    if (!ok) {
+      console.warn("[Facebook Webhook] Chữ ký X-Hub-Signature-256 không hợp lệ — bỏ qua request.");
+      return res.sendStatus(403);
+    }
+  }
+
+  if (req.body?.object !== "page") return res.sendStatus(404);
+  res.status(200).send("EVENT_RECEIVED"); // luôn 200 sớm để Meta không retry
+
+  try {
+    const groups = groupMessagingEventsByPage(req.body);
+    if (!groups.length) return;
+    const allBots = await dbGetBots(bots);
+    for (const g of groups) {
+      const bot = allBots.find(b => b.facebookPageId === g.pageId);
+      if (!bot) {
+        console.warn(`[Facebook Webhook] Không tìm thấy bot cho Page ${g.pageId} — bỏ qua.`);
+        continue;
+      }
+      for (const event of g.events) {
+        await processFacebookIncomingMessage(bot, event);
+      }
+    }
+  } catch (err) {
+    console.error("[Facebook Webhook] Lỗi xử lý webhook chung:", err);
+  }
 });
 
 // Facebook Messenger webhook verification endpoint for Meta Developer dashboard.
