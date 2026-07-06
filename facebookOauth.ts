@@ -42,6 +42,9 @@ export function buildOAuthDialogUrl(opts: { appId: string; redirectUri: string; 
     state: opts.state,
     response_type: "code",
     scope: "pages_show_list,pages_messaging,pages_manage_metadata",
+    // Ép Facebook hiện lại màn cấp quyền + chọn Page mỗi lần (tránh dùng lại
+    // lần cấp quyền cũ bị thiếu Page → /me/accounts trả rỗng).
+    auth_type: "rerequest",
   });
   return `https://www.facebook.com/${opts.graphVersion}/dialog/oauth?${p.toString()}`;
 }
