@@ -446,6 +446,17 @@ export default function App() {
     }
   };
 
+  const handleOAuthConnectFacebook = () => {
+    if (!selectedBotId) return;
+    setFacebookActionMsg(null);
+    // Cùng origin-path với các fetch('/api/...') hiện có.
+    window.open(
+      `/api/facebook-oauth/start?botId=${encodeURIComponent(selectedBotId)}`,
+      'balabot-fb-oauth',
+      'width=650,height=760'
+    );
+  };
+
   const handleSimulateFacebookMsg = async () => {
     if (!selectedBotId || !facebookSimText.trim()) return;
     setIsSimulatingFacebook(true);
@@ -535,6 +546,22 @@ export default function App() {
       window.fetch = originalFetch;
     };
   }, [sbUser?.email, sbUrl, sbKey]);
+
+  // Nhận kết quả kết nối Facebook từ popup OAuth.
+  useEffect(() => {
+    const onFbOauthMessage = (e: MessageEvent) => {
+      const data = e.data;
+      if (!data || data.type !== 'balabot-facebook-connected') return;
+      if (data.success) {
+        setFacebookActionMsg({ status: 'success', text: data.pageName ? `Đã kết nối Fanpage "${data.pageName}".` : 'Kết nối Facebook Page thành công.' });
+      } else {
+        setFacebookActionMsg({ status: 'error', text: data.message || 'Kết nối Facebook thất bại.' });
+      }
+      fetchFacebookDetails();
+    };
+    window.addEventListener('message', onFbOauthMessage);
+    return () => window.removeEventListener('message', onFbOauthMessage);
+  }, [selectedBotId]);
 
   // Nạp mức dùng tháng này của user đăng nhập (thẻ usage + nâng gói).
   useEffect(() => {
@@ -3399,35 +3426,33 @@ export default function App() {
                     </div>
                     <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
                       <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Trạng thái Page</span>
-                      <div className={`text-xs font-bold rounded-lg p-3 border ${facebookDetails?.facebookStatus === 'connected' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                      <div className={`text-xs font-bold rounded-lg p-3 border ${
+                        facebookDetails?.facebookStatus === 'connected' ? 'bg-green-50 text-green-700 border-green-200'
+                        : facebookDetails?.facebookStatus === 'expired' ? 'bg-rose-50 text-rose-700 border-rose-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
                         {facebookDetails?.facebookStatus === 'connected'
                           ? `Đã kết nối: ${facebookDetails?.facebookPageName || facebookDetails?.facebookPageId || 'Page'}`
+                          : facebookDetails?.facebookStatus === 'expired'
+                          ? 'Kết nối đã hết hạn — bấm "Kết nối Facebook" để kết nối lại'
                           : 'Chưa kết nối Fanpage'}
                       </div>
                     </div>
                   </div>
 
-                  {/* Per-bot Page Access Token connect */}
+                  {/* Kết nối 1 chạm qua Facebook OAuth */}
                   <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Page Access Token</span>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="Dán Page Access Token của Fanpage..."
-                        className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
-                        value={inputFacebookToken}
-                        onChange={(e) => setInputFacebookToken(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleConnectFacebook}
-                        disabled={isConnectingFacebook || !inputFacebookToken.trim()}
-                        className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs whitespace-nowrap flex items-center gap-2"
-                      >
-                        {isConnectingFacebook ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
-                        Kết nối
-                      </button>
-                    </div>
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Kết nối Fanpage</span>
+                    <button
+                      type="button"
+                      onClick={handleOAuthConnectFacebook}
+                      disabled={isConnectingFacebook}
+                      className="w-full px-4 py-3 bg-[#1877F2] hover:bg-[#166FE5] disabled:opacity-50 text-white font-bold rounded-lg text-sm flex items-center justify-center gap-2"
+                    >
+                      Kết nối Facebook (1 chạm)
+                    </button>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      Đăng nhập Facebook, chọn Fanpage, xong — hệ thống tự lấy token và tự đăng ký nhận tin nhắn.
+                    </p>
                     {facebookDetails?.facebookStatus === 'connected' && (
                       <button
                         type="button"
@@ -3438,9 +3463,31 @@ export default function App() {
                         Ngắt kết nối Fanpage
                       </button>
                     )}
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Token được lưu riêng cho từng bot. Khi bấm Kết nối, hệ thống tự xác thực với Facebook và tự đăng ký nhận tin nhắn.
-                    </p>
+
+                    <details className="pt-1">
+                      <summary className="text-[11px] font-bold text-slate-500 cursor-pointer select-none">Tùy chọn nâng cao: dán Page Access Token thủ công</summary>
+                      <div className="flex gap-2 mt-3">
+                        <input
+                          type="text"
+                          placeholder="Dán Page Access Token của Fanpage..."
+                          className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                          value={inputFacebookToken}
+                          onChange={(e) => setInputFacebookToken(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleConnectFacebook}
+                          disabled={isConnectingFacebook || !inputFacebookToken.trim()}
+                          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs whitespace-nowrap flex items-center gap-2"
+                        >
+                          {isConnectingFacebook ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                          Kết nối
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed mt-2">
+                        Token được lưu riêng cho từng bot. Khi bấm Kết nối, hệ thống tự xác thực với Facebook và tự đăng ký nhận tin nhắn.
+                      </p>
+                    </details>
                   </div>
 
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-600 leading-relaxed">
