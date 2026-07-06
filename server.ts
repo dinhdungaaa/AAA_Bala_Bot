@@ -2492,7 +2492,8 @@ app.post("/api/bridge/botcake/:botId", async (req, res) => {
   const bot = allBots.find(b => b.id === req.params.botId);
   const key = String(req.query.key || req.body?.key || "");
   if (!bot || !bot.botcakeBridgeKey || key !== bot.botcakeBridgeKey) {
-    return res.status(403).json(buildBridgeResponse("Bridge key không hợp lệ. Vui lòng copy lại Bridge URL mới nhất từ dashboard BalaBot."));
+    // Lỗi auth vẫn trả 200 để Botcake hiển thị thông báo cho người cấu hình (Botcake chỉ show body của response 200).
+    return res.status(200).json(buildBridgeResponse("Bridge key không hợp lệ. Vui lòng copy lại Bridge URL mới nhất từ dashboard BalaBot."));
   }
 
   const payload = parseBridgePayload(req.body);
@@ -2501,11 +2502,30 @@ app.post("/api/bridge/botcake/:botId", async (req, res) => {
     return res.json({ messages: [] });
   }
   if (!payload.psid) {
-    console.warn("[Botcake Bridge] Thiếu psid — dùng session chung 'anon'. payload keys:", JSON.stringify(Object.keys(req.body || {})));
+    console.warn("[Botcake Bridge] Thiếu psid — trả lời stateless (không dùng session chung, chống lẫn ngữ cảnh giữa các khách). payload keys:", JSON.stringify(Object.keys(req.body || {})));
+    try {
+      const gate = await checkUsageGate(bot);
+      let aiAnswer: { text: string; sources: any[]; fallbackTriggered: boolean };
+      if (!gate.allowed) {
+        aiAnswer = { text: BLOCK_MESSAGE, sources: [], fallbackTriggered: true };
+      } else {
+        aiAnswer = await generateRAGAnswer(
+          bot,
+          payload.text,
+          { fullName: payload.fullName || "Khách hàng Facebook", username: "botcake_unknown", id: "botcake:unknown" },
+          { shouldGreet: true, recentMessages: [] }
+        );
+        await recordUsageForBot(bot);
+      }
+      return res.json(buildBridgeResponse(aiAnswer.text));
+    } catch (err: any) {
+      console.error("[Botcake Bridge] Lỗi xử lý (stateless):", err?.message || err);
+      return res.json(buildBridgeResponse(bot.fallbackMessage || "Dạ em xin phép kết nối nhân viên hỗ trợ mình ngay ạ."));
+    }
   }
 
   try {
-    const psid = payload.psid || "anon";
+    const psid = payload.psid;
     const userKey = `botcake:${psid}`;
     const username = `botcake_${psid}`;
     const fullName = payload.fullName || "Khách hàng Facebook";
