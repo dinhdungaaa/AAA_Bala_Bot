@@ -120,9 +120,10 @@ export async function synthesizeAnswer(
   const res: any = await withRetry(() => ai.models.generateContent({
     model: GEN_MODEL,
     contents: query,
-    // RAG đã có ngữ cảnh tri thức → tắt "thinking" để cắt ~50% token output (giảm cost).
-    // Mode mở rộng: nới temperature để câu trả lời phong phú, tự nhiên hơn.
-    config: { systemInstruction, temperature: opts.expand ? 0.6 : 0.4, thinkingConfig: { thinkingBudget: 0 } },
+    // Bật "thinking" ở mức vừa để câu trả lời mạch lạc, đầy đặn hơn (trước đây tắt hẳn
+    // để tiết kiệm token khiến bot trả lời cụt). Budget cố định để kiểm soát cost.
+    // Mode mở rộng: nới temperature + budget để câu trả lời phong phú, tự nhiên hơn.
+    config: { systemInstruction, temperature: opts.expand ? 0.6 : 0.4, thinkingConfig: { thinkingBudget: opts.expand ? 2048 : 1024 } },
   } as any));
   const text = (res?.text || "").trim();
   if (!text) throw new Error("empty synthesis response");
