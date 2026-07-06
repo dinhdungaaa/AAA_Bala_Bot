@@ -2543,6 +2543,14 @@ app.get("/api/facebook-oauth/callback", async (req, res) => {
         const perms = await permRes.json();
         console.warn("[FB OAuth] Quyền đã cấp:", JSON.stringify(perms?.data || perms?.error?.message));
       } catch {}
+      try {
+        // granular_scopes cho biết CHÍNH XÁC Page nào được opt-in cho từng quyền.
+        const dbgRes = await fetch(
+          `https://graph.facebook.com/${ver}/debug_token?input_token=${encodeURIComponent(userToken)}&access_token=${encodeURIComponent(appId)}|${encodeURIComponent(appSecret)}`
+        );
+        const dbg = await dbgRes.json();
+        console.warn("[FB OAuth] granular_scopes:", JSON.stringify(dbg?.data?.granular_scopes ?? dbg?.error?.message ?? dbg));
+      } catch {}
       if (rawPages.length > 0) {
         return fail("Đã thấy Fanpage của bạn nhưng Facebook chưa cấp quyền quản lý cho BalaBot. Hãy thử lại: ở màn cấp quyền của Facebook, bấm \"Chỉnh sửa cài đặt\" và BẬT TẤT CẢ các quyền được hỏi (danh sách Trang, nhắn tin, quản lý Trang).");
       }
