@@ -813,12 +813,13 @@ export default function App() {
     fetchBots(sbUser?.id);
   }, [sbUser?.id]);
 
+  // Xóa Bridge URL đang hiển thị khi đổi bot (không xóa khi chỉ chuyển tab).
+  useEffect(() => {
+    setBridgeInfo(null);
+  }, [selectedBotId]);
+
   // Fetch bot-specific resources when dynamic bot or tab changes
   useEffect(() => {
-    // Bridge URL/key là dữ liệu riêng từng bot — reset ngay khi đổi bot để tránh
-    // hiện nhầm URL của bot cũ trong lúc chờ người dùng bấm tải lại.
-    setBridgeInfo(null);
-
     if (!selectedBotId) {
       setSources([]);
       setFaqs([]);
