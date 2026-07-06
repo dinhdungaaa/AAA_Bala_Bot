@@ -17,6 +17,9 @@ export type SynthesisOpts = {
   // Chế độ "mở rộng": cho phép bổ sung kiến thức chung TRONG CÙNG lĩnh vực của bot,
   // hòa quyện tự nhiên, vẫn kéo về sản phẩm/dịch vụ — không bịa thông tin riêng của shop.
   expand?: boolean;
+  // Chế độ "nhanh": tắt thinking để cắt độ trễ (dùng cho kênh bridge phải trả lời
+  // đồng bộ trong thời gian chờ giới hạn của nền tảng thứ 3, vd Botcake ~5s).
+  fast?: boolean;
 };
 
 // Quy tắc giọng theo kiểu bot. Mode "reference" (tra cứu kiến thức) tách 2 nhánh:
@@ -123,7 +126,7 @@ export async function synthesizeAnswer(
     // Bật "thinking" ở mức vừa để câu trả lời mạch lạc, đầy đặn hơn (trước đây tắt hẳn
     // để tiết kiệm token khiến bot trả lời cụt). Budget cố định để kiểm soát cost.
     // Mode mở rộng: nới temperature + budget để câu trả lời phong phú, tự nhiên hơn.
-    config: { systemInstruction, temperature: opts.expand ? 0.6 : 0.4, thinkingConfig: { thinkingBudget: opts.expand ? 2048 : 1024 } },
+    config: { systemInstruction, temperature: opts.expand ? 0.6 : 0.4, thinkingConfig: { thinkingBudget: opts.fast ? 0 : (opts.expand ? 2048 : 1024) } },
   } as any));
   const text = (res?.text || "").trim();
   if (!text) throw new Error("empty synthesis response");

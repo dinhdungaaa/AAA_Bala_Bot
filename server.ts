@@ -2513,7 +2513,7 @@ app.post("/api/bridge/botcake/:botId", async (req, res) => {
           bot,
           payload.text,
           { fullName: payload.fullName || "Khách hàng Facebook", username: "botcake_unknown", id: "botcake:unknown" },
-          { shouldGreet: true, recentMessages: [] }
+          { shouldGreet: true, recentMessages: [], fast: true }
         );
         await recordUsageForBot(bot);
       }
@@ -2573,7 +2573,7 @@ app.post("/api/bridge/botcake/:botId", async (req, res) => {
         bot,
         payload.text,
         { fullName, username, id: userKey },
-        { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8, -1) }
+        { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8, -1), fast: true }
       );
       await recordUsageForBot(bot);
     }
@@ -3675,7 +3675,7 @@ async function generateRAGAnswer(
   bot: BotConfig, 
   query: string,
   userInfo?: { fullName?: string; username?: string; id?: string },
-  replyOptions?: { shouldGreet?: boolean; recentMessages?: Message[]; expand?: boolean }
+  replyOptions?: { shouldGreet?: boolean; recentMessages?: Message[]; expand?: boolean; fast?: boolean }
 ): Promise<{ text: string; sources: any[]; fallbackTriggered: boolean }> {
   // Determine gender/pronoun and first name for xưng hô
   let pronoun = DEFAULT_CUSTOMER_PRONOUN;
@@ -3709,7 +3709,8 @@ async function generateRAGAnswer(
   // Mode "reference": cho phép gợi ý sản phẩm khi khách hỏi liên quan nếu owner bật allowProductConsulting.
   const allowProductIntro = bot.allowProductConsulting !== false;
   const expand = replyOptions?.expand === true;
-  const synthCtx = { customer: customerCtx, history, allowProductIntro, expand };
+  const fast = replyOptions?.fast === true;
+  const synthCtx = { customer: customerCtx, history, allowProductIntro, expand, fast };
 
   const chitChatKind = detectOffTopicChitChat(query);
   if (chitChatKind) {
@@ -3741,7 +3742,8 @@ async function generateRAGAnswer(
     // Câu follow-up ngắn ("có giá không em") thiếu chủ đề → viết lại thành câu
     // tìm kiếm độc lập dựa trên hội thoại (kể cả lượt bot) để retrieval trúng đoạn.
     let searchText = buildEmbedQuery(query, lastUserText);
-    if (isShortFollowUp(query) && history.length > 0) {
+    // Chế độ nhanh (bridge): bỏ bước viết lại câu hỏi bằng LLM để tiết kiệm 1 lượt gọi mạng.
+    if (!fast && isShortFollowUp(query) && history.length > 0) {
       searchText = await condenseFollowUpQuery(ai, query, history);
     }
     const qVec = await embedText(ai, searchText);
