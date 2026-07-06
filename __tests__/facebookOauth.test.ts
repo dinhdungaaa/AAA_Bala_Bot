@@ -50,7 +50,7 @@ describe("buildOAuthDialogUrl", () => {
     expect(u.searchParams.get("client_id")).toBe("123");
     expect(u.searchParams.get("redirect_uri")).toBe("https://x.vn/api/facebook-oauth/callback");
     expect(u.searchParams.get("state")).toBe("abc.def");
-    expect(u.searchParams.get("scope")).toBe("pages_show_list,pages_messaging,pages_manage_metadata");
+    expect(u.searchParams.get("scope")).toBe("pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement");
   });
 });
 

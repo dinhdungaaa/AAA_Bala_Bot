@@ -41,7 +41,9 @@ export function buildOAuthDialogUrl(opts: { appId: string; redirectUri: string; 
     redirect_uri: opts.redirectUri,
     state: opts.state,
     response_type: "code",
-    scope: "pages_show_list,pages_messaging,pages_manage_metadata",
+    // pages_read_engagement: bắt buộc để đọc Page + lấy page token trực tiếp
+    // theo Page ID (app kiểu Business mới trả /me/accounts rỗng).
+    scope: "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement",
     // Ép Facebook hiện lại màn cấp quyền + chọn Page mỗi lần (tránh dùng lại
     // lần cấp quyền cũ bị thiếu Page → /me/accounts trả rỗng).
     auth_type: "rerequest",

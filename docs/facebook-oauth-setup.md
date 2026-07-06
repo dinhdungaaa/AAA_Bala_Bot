@@ -122,10 +122,11 @@ Khi việc kinh doanh đã ổn định và có **hộ kinh doanh / pháp nhân*
 Các bước tổng quát (làm khi cần, không gấp):
 
 1. **Meta Business Verification**: vào Business Settings trên Meta Business Suite → xác minh danh tính doanh nghiệp (cần giấy phép kinh doanh/hộ kinh doanh, thông tin liên hệ công ty).
-2. **App Review**: trong App Dashboard → **App Review** → **Permissions and Features** → xin cấp **Advanced Access** cho 3 quyền:
+2. **App Review**: trong App Dashboard → **App Review** → **Permissions and Features** → xin cấp **Advanced Access** cho 4 quyền:
    - `pages_messaging`
    - `pages_show_list`
    - `pages_manage_metadata`
+   - `pages_read_engagement`
    
    Với mỗi quyền, Meta yêu cầu quay video demo ngắn cho thấy tính năng dùng quyền đó (ví dụ: video bấm "Kết nối Facebook", chọn Page, sau đó bot trả lời tin nhắn Messenger) và mô tả use case bằng tiếng Anh.
 3. Chờ Meta xét duyệt (thường 1–5 ngày làm việc, có thể lâu hơn nếu cần bổ sung thông tin).
