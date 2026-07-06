@@ -2346,7 +2346,7 @@ async function connectFacebookPageToBot(
 
   const allBots = await dbGetBots(bots);
   const bot = allBots.find(b => b.id === botId);
-  if (!bot) return { success: false, status: 404, error: "Bot not found" };
+  if (!bot) return { success: false, status: 404, error: "Không tìm thấy bot. Hãy mở lại từ trang cấu hình bot." };
 
   const ver = getFacebookGraphApiVersion();
   try {
@@ -2354,7 +2354,8 @@ async function connectFacebookPageToBot(
     const meRes = await fetch(`https://graph.facebook.com/${ver}/me?fields=id,name&access_token=${encodeURIComponent(token)}`);
     const me = await meRes.json();
     if (!meRes.ok || !me?.id) {
-      return { success: false, status: 400, error: me?.error?.message || "Token không hợp lệ hoặc không phải Page Access Token." };
+      console.warn("[FB Connect] Token không hợp lệ:", me?.error?.message || meRes.status);
+      return { success: false, status: 400, error: "Token không hợp lệ hoặc không phải Page Access Token." };
     }
 
     // 2. Tự subscribe app vào Page cho các event tin nhắn (bỏ bước thủ công).
@@ -2367,9 +2368,13 @@ async function connectFacebookPageToBot(
       );
       const subData = await subRes.json().catch(() => ({}));
       subscribed = !!subData?.success;
-      if (!subscribed) subscribeWarning = subData?.error?.message || "Không tự subscribe được; có thể cần subscribe thủ công trên Meta.";
+      if (!subscribed) {
+        console.warn("[FB Connect] Subscribe thất bại:", subData?.error?.message);
+        subscribeWarning = "Không tự subscribe được; có thể cần subscribe thủ công trên Meta.";
+      }
     } catch (subErr: any) {
-      subscribeWarning = subErr?.message || "Lỗi khi subscribe app vào Page.";
+      console.warn("[FB Connect] Lỗi khi subscribe app vào Page:", subErr?.message || subErr);
+      subscribeWarning = "Không tự subscribe được; có thể cần subscribe thủ công trên Meta.";
     }
 
     // 3. Lưu per-bot (memory + DB).
@@ -2392,7 +2397,8 @@ async function connectFacebookPageToBot(
         : `Đã kết nối Page "${me.name}". Lưu ý: ${subscribeWarning}`
     };
   } catch (err: any) {
-    return { success: false, status: 500, error: "Lỗi gọi Facebook Graph API: " + (err?.message || err) };
+    console.error("[FB Connect] Lỗi gọi Facebook Graph API:", err?.message || err);
+    return { success: false, status: 500, error: "Lỗi kết nối Facebook. Vui lòng thử lại sau." };
   }
 }
 
@@ -2479,7 +2485,10 @@ app.get("/api/facebook-oauth/callback", async (req, res) => {
       `https://graph.facebook.com/${ver}/oauth/access_token?client_id=${encodeURIComponent(appId)}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${encodeURIComponent(appSecret)}&code=${encodeURIComponent(code)}`
     );
     const tok = await tokRes.json();
-    if (!tokRes.ok || !tok?.access_token) return fail(tok?.error?.message || "Không đổi được mã xác thực với Facebook.");
+    if (!tokRes.ok || !tok?.access_token) {
+      console.warn("[FB OAuth] Đổi code thất bại:", tok?.error?.message || tokRes.status);
+      return fail("Không đổi được mã xác thực với Facebook. Hãy đóng cửa sổ và thử lại.");
+    }
 
     // 2. → long-lived user token (page token sinh từ đây sẽ không hết hạn).
     const llRes = await fetch(
@@ -2493,7 +2502,10 @@ app.get("/api/facebook-oauth/callback", async (req, res) => {
       `https://graph.facebook.com/${ver}/me/accounts?fields=id,name,access_token&limit=100&access_token=${encodeURIComponent(userToken)}`
     );
     const pages = await pagesRes.json();
-    if (!pagesRes.ok) return fail(pages?.error?.message || "Không lấy được danh sách Fanpage.");
+    if (!pagesRes.ok) {
+      console.warn("[FB OAuth] Lấy danh sách Page thất bại:", pages?.error?.message || pagesRes.status);
+      return fail("Không lấy được danh sách Fanpage. Hãy thử lại sau ít phút.");
+    }
     const list = (pages?.data || []).filter((p: any) => p?.id && p?.access_token);
     if (!list.length) {
       return fail("Tài khoản của bạn chưa quản lý Fanpage nào, hoặc bạn chưa chọn Page nào ở bước cấp quyền. Hãy thử lại và tick chọn Fanpage.");
@@ -2518,7 +2530,8 @@ app.get("/api/facebook-oauth/callback", async (req, res) => {
       actionPath: `${getPublicBaseUrl(req)}/api/facebook-oauth/select`,
     }));
   } catch (err: any) {
-    return fail("Lỗi gọi Facebook: " + (err?.message || err), 500);
+    console.error("[FB OAuth] Lỗi callback:", err?.message || err);
+    return fail("Có lỗi khi kết nối với Facebook. Hãy thử lại sau ít phút.", 500);
   }
 });
 
@@ -2536,12 +2549,17 @@ app.post("/api/facebook-oauth/select", express.urlencoded({ extended: false }), 
     return res.status(400).send(renderOAuthResultHtml({ success: false, message: "Fanpage không hợp lệ. Hãy bấm Kết nối Facebook lại." }));
   }
   fbOauthPendingSelections.delete(selectionId);
-  const result = await connectFacebookPageToBot(pending.botId, page.access_token);
-  return res.status(result.status).send(renderOAuthResultHtml({
-    success: result.success,
-    message: result.success ? (result.message || `Đã kết nối Fanpage "${result.pageName}".`) : (result.error || "Kết nối thất bại."),
-    pageName: result.pageName,
-  }));
+  try {
+    const result = await connectFacebookPageToBot(pending.botId, page.access_token);
+    return res.status(result.status).send(renderOAuthResultHtml({
+      success: result.success,
+      message: result.success ? (result.message || `Đã kết nối Fanpage "${result.pageName}".`) : (result.error || "Kết nối thất bại."),
+      pageName: result.pageName,
+    }));
+  } catch (err: any) {
+    console.error("[FB OAuth] Lỗi select:", err?.message || err);
+    return res.status(500).send(renderOAuthResultHtml({ success: false, message: "Có lỗi khi kết nối Fanpage. Hãy bấm Kết nối Facebook lại." }));
+  }
 });
 
 // Facebook Messenger webhook verification endpoint for Meta Developer dashboard.
