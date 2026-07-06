@@ -2188,7 +2188,15 @@ async function sendFacebookTextMessage(bot: BotConfig, recipientId: string, text
 
     const data = await response.json().catch(() => ({}));
     results.push(data);
-    if (!response.ok) {
+    if (!response.ok || data.error) {
+      // Token bị thu hồi/hết hạn (khách đổi mật khẩu, gỡ app...) → đánh dấu để dashboard nhắc kết nối lại.
+      if (data.error?.code === 190 && bot.facebookPageAccessToken) {
+        const updates = { facebookStatus: "expired" as const };
+        const memBot = bots.find(b => b.id === bot.id);
+        if (memBot) Object.assign(memBot, updates);
+        await dbUpdateBot(bot.id, updates).catch(() => {});
+        console.warn(`[Facebook] Token Page của bot ${bot.id} đã hết hạn/bị thu hồi (code 190).`);
+      }
       throw new Error(data.error?.message || `Facebook Send API failed with HTTP ${response.status}`);
     }
   }
@@ -2559,6 +2567,55 @@ app.post("/api/facebook-oauth/select", express.urlencoded({ extended: false }), 
   } catch (err: any) {
     console.error("[FB OAuth] Lỗi select:", err?.message || err);
     return res.status(500).send(renderOAuthResultHtml({ success: false, message: "Có lỗi khi kết nối Fanpage. Hãy bấm Kết nối Facebook lại." }));
+  }
+});
+
+// Webhook CHUNG cho app Meta của BalaBot (Meta chỉ cho 1 callback URL/app).
+// Route theo entry[].id (Page ID) → bot có facebookPageId tương ứng.
+app.get("/api/facebook-webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  if (mode === "subscribe" && token === getFacebookVerifyToken()) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
+app.post("/api/facebook-webhook", async (req, res) => {
+  // Verify chữ ký khi có app secret (bỏ qua ở môi trường dev chưa cấu hình).
+  const { appSecret } = getFacebookAppCreds();
+  if (appSecret) {
+    const ok = verifyFacebookSignature(
+      (req as any).rawBody,
+      req.headers["x-hub-signature-256"] as string | undefined,
+      appSecret
+    );
+    if (!ok) {
+      console.warn("[Facebook Webhook] Chữ ký X-Hub-Signature-256 không hợp lệ — bỏ qua request.");
+      return res.sendStatus(403);
+    }
+  }
+
+  if (req.body?.object !== "page") return res.sendStatus(404);
+  res.status(200).send("EVENT_RECEIVED"); // luôn 200 sớm để Meta không retry
+
+  try {
+    const groups = groupMessagingEventsByPage(req.body);
+    if (!groups.length) return;
+    const allBots = await dbGetBots(bots);
+    for (const g of groups) {
+      const bot = allBots.find(b => b.facebookPageId === g.pageId);
+      if (!bot) {
+        console.warn(`[Facebook Webhook] Không tìm thấy bot cho Page ${g.pageId} — bỏ qua.`);
+        continue;
+      }
+      for (const event of g.events) {
+        await processFacebookIncomingMessage(bot, event);
+      }
+    }
+  } catch (err) {
+    console.error("[Facebook Webhook] Lỗi xử lý webhook chung:", err);
   }
 });
 
