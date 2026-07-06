@@ -2530,8 +2530,22 @@ app.get("/api/facebook-oauth/callback", async (req, res) => {
       console.warn("[FB OAuth] Lấy danh sách Page thất bại:", pages?.error?.message || pagesRes.status);
       return fail("Không lấy được danh sách Fanpage. Hãy thử lại sau ít phút.");
     }
-    const list = (pages?.data || []).filter((p: any) => p?.id && p?.access_token);
+    const rawPages = Array.isArray(pages?.data) ? pages.data : [];
+    const list = rawPages.filter((p: any) => p?.id && p?.access_token);
     if (!list.length) {
+      // Chẩn đoán: phân biệt "không có Page" vs "có Page nhưng thiếu page token (thiếu quyền)".
+      console.warn(
+        "[FB OAuth] 0 page dùng được. rawPages:",
+        JSON.stringify(rawPages.map((p: any) => ({ id: p?.id, name: p?.name, hasToken: !!p?.access_token })))
+      );
+      try {
+        const permRes = await fetch(`https://graph.facebook.com/${ver}/me/permissions?access_token=${encodeURIComponent(userToken)}`);
+        const perms = await permRes.json();
+        console.warn("[FB OAuth] Quyền đã cấp:", JSON.stringify(perms?.data || perms?.error?.message));
+      } catch {}
+      if (rawPages.length > 0) {
+        return fail("Đã thấy Fanpage của bạn nhưng Facebook chưa cấp quyền quản lý cho BalaBot. Hãy thử lại: ở màn cấp quyền của Facebook, bấm \"Chỉnh sửa cài đặt\" và BẬT TẤT CẢ các quyền được hỏi (danh sách Trang, nhắn tin, quản lý Trang).");
+      }
       return fail("Tài khoản của bạn chưa quản lý Fanpage nào, hoặc bạn chưa chọn Page nào ở bước cấp quyền. Hãy thử lại và tick chọn Fanpage.");
     }
 
