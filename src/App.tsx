@@ -309,6 +309,9 @@ export default function App() {
   const [isFetchingFacebook, setIsFetchingFacebook] = useState(false);
   const [facebookActionMsg, setFacebookActionMsg] = useState<{ status: 'success' | 'error'; text: string } | null>(null);
   const [inputFacebookToken, setInputFacebookToken] = useState('');
+  const [bridgeInfo, setBridgeInfo] = useState<{ bridgeKey: string; bridgeUrl: string } | null>(null);
+  const [isFetchingBridge, setIsFetchingBridge] = useState(false);
+  const [bridgeCopied, setBridgeCopied] = useState(false);
   const [isConnectingFacebook, setIsConnectingFacebook] = useState(false);
   const [facebookSimText, setFacebookSimText] = useState('Shop tư vấn giúp mình sản phẩm/dịch vụ phù hợp với nhu cầu hiện tại nhé.');
   const [facebookSimUserId, setFacebookSimUserId] = useState('fb-test-user-001');
@@ -457,6 +460,55 @@ export default function App() {
       'balabot-fb-oauth',
       'width=650,height=760'
     );
+  };
+
+  const fetchBridgeInfo = async () => {
+    if (!selectedBotId) return;
+    setIsFetchingBridge(true);
+    try {
+      const res = await fetch(`/api/bots/${selectedBotId}/bridge-info`, { headers: getScopedApiHeaders() });
+      const data = await res.json();
+      if (res.ok) setBridgeInfo(data);
+      else setFacebookActionMsg({ status: 'error', text: data.error || 'Không tải được Bridge URL.' });
+    } catch (err: any) {
+      setFacebookActionMsg({ status: 'error', text: 'Lỗi tải Bridge URL: ' + err.message });
+    } finally {
+      setIsFetchingBridge(false);
+    }
+  };
+
+  const handleRegenBridgeKey = async () => {
+    if (!selectedBotId) return;
+    if (!window.confirm('Đổi key sẽ làm URL cũ ngừng hoạt động — các Page đang dùng phải dán lại URL mới. Tiếp tục?')) return;
+    setIsFetchingBridge(true);
+    try {
+      const res = await fetch(`/api/bots/${selectedBotId}/bridge-key/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setBridgeInfo(data);
+        setFacebookActionMsg({ status: 'success', text: 'Đã đổi bridge key. Nhớ cập nhật URL mới trong Botcake.' });
+      } else {
+        setFacebookActionMsg({ status: 'error', text: data.error || 'Không đổi được key.' });
+      }
+    } catch (err: any) {
+      setFacebookActionMsg({ status: 'error', text: 'Lỗi đổi key: ' + err.message });
+    } finally {
+      setIsFetchingBridge(false);
+    }
+  };
+
+  const handleCopyBridgeUrl = async () => {
+    if (!bridgeInfo?.bridgeUrl) return;
+    try {
+      await navigator.clipboard.writeText(bridgeInfo.bridgeUrl);
+      setBridgeCopied(true);
+      setTimeout(() => setBridgeCopied(false), 2000);
+    } catch {
+      window.prompt('Copy thủ công URL này:', bridgeInfo.bridgeUrl);
+    }
   };
 
   const handleSimulateFacebookMsg = async () => {
@@ -760,6 +812,11 @@ export default function App() {
   useEffect(() => {
     fetchBots(sbUser?.id);
   }, [sbUser?.id]);
+
+  // Xóa Bridge URL đang hiển thị khi đổi bot (không xóa khi chỉ chuyển tab).
+  useEffect(() => {
+    setBridgeInfo(null);
+  }, [selectedBotId]);
 
   // Fetch bot-specific resources when dynamic bot or tab changes
   useEffect(() => {
@@ -3441,19 +3498,60 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Phương án chính hiện tại — Botcake bridge: chạy ngay cho mọi khách vãng lai */}
+                  <div className="bg-white border border-emerald-200 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Kết nối Fanpage qua Botcake</span>
+                      <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold">Khuyến nghị hiện tại</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Kết nối Page vào Botcake (miễn phí) rồi dán Bridge URL bên dưới vào Dynamic Block — bot trả lời <b>mọi khách vãng lai</b> ngay.
+                    </p>
+                    {!bridgeInfo ? (
+                      <button
+                        type="button"
+                        onClick={fetchBridgeInfo}
+                        disabled={isFetchingBridge}
+                        className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold rounded-lg text-xs"
+                      >
+                        {isFetchingBridge ? 'Đang tải...' : 'Tạo / Hiện Bridge URL'}
+                      </button>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="font-mono text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-lg p-3 break-all select-all">
+                          {bridgeInfo.bridgeUrl}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button type="button" onClick={handleCopyBridgeUrl} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs">
+                            {bridgeCopied ? 'Đã copy ✓' : 'Copy URL'}
+                          </button>
+                          <button type="button" onClick={handleRegenBridgeKey} disabled={isFetchingBridge} className="px-3 py-2 text-[11px] font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50">
+                            Đổi key
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      Hướng dẫn 5 bước cài Botcake: xem file <span className="font-mono">docs/botcake-bridge-guide.md</span> (hoặc hỏi đội hỗ trợ BalaBot).
+                    </p>
+                  </div>
+
                   {/* Kết nối 1 chạm qua Facebook OAuth */}
                   <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                     <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Kết nối Fanpage</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Kết nối Facebook (1 chạm)</span>
+                      <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 text-[10px] font-bold">Sắp ra mắt — Đang chờ Meta phê duyệt</span>
+                    </div>
                     <button
                       type="button"
-                      onClick={handleOAuthConnectFacebook}
-                      disabled={isConnectingFacebook}
-                      className="w-full px-4 py-3 bg-[#1877F2] hover:bg-[#166FE5] disabled:opacity-50 text-white font-bold rounded-lg text-sm flex items-center justify-center gap-2"
+                      disabled
+                      className="w-full px-4 py-3 bg-slate-300 text-white font-bold rounded-lg text-sm flex items-center justify-center gap-2 cursor-not-allowed"
                     >
-                      Kết nối Facebook (1 chạm)
+                      Kết nối Facebook (1 chạm) — Sắp ra mắt
                     </button>
                     <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Đăng nhập Facebook, chọn Fanpage, xong — hệ thống tự lấy token và tự đăng ký nhận tin nhắn.
+                      Tính năng kết nối trực tiếp đang chờ Meta phê duyệt. Trong lúc chờ, dùng phương án Botcake ở trên — bot hoạt động đầy đủ với mọi khách.
                     </p>
                     {facebookDetails?.facebookStatus === 'connected' && (
                       <button

@@ -19,6 +19,8 @@ export interface BotConfig {
   facebookPageName?: string;
   facebookStatus?: 'not_connected' | 'connected' | 'expired';
   facebookConnectedAt?: string;
+  // Botcake bridge — kênh tạm qua nền tảng đã được Meta duyệt.
+  botcakeBridgeKey?: string;
   welcomeMessage: string;
   fallbackMessage: string;
   fallbackEmail: string;
@@ -99,7 +101,7 @@ export interface ChatSession {
   internalNotes: string;
   messages: Message[];
   // Định tuyến kênh để operator gửi tin can thiệp tới đúng nơi (kèm tag tên + trích dẫn).
-  channel?: 'telegram' | 'facebook' | 'zalo';
+  channel?: 'telegram' | 'facebook' | 'zalo' | 'botcake';
   channelChatId?: string;     // đích gửi: Telegram chat.id / Zalo groupId / FB psid
   channelIsGroup?: boolean;   // true nếu là nhóm (cần @tag + reply rõ người)
   channelSenderId?: string;   // id khách trên kênh (để @mention)
