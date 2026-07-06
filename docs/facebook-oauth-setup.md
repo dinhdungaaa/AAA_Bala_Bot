@@ -31,10 +31,11 @@ Có 3 việc chính:
 2. Tìm thẻ **Facebook Login** → bấm **Set Up**.
 3. Ở màn hỏi nền tảng, chọn **Web** (hoặc bấm bỏ qua/Skip nếu Facebook chỉ hỏi để gợi ý SDK — không bắt buộc cài SDK).
 4. Sau khi thêm xong, ở cột trái sẽ xuất hiện mục **Facebook Login** → bấm vào → chọn **Settings**.
-5. Tìm ô **Valid OAuth Redirect URIs** → dán chính xác URL sau:
+5. Tìm ô **Valid OAuth Redirect URIs** → dán **CẢ HAI** URL sau (đăng ký cả hai để tránh lỗi "URL blocked" tùy đường dẫn popup đi qua proxy hay không):
 
    ```
    https://antiantiai.xyz/balabot/api/facebook-oauth/callback
+   https://antiantiai.xyz/api/facebook-oauth/callback
    ```
 
 6. Kéo xuống dưới, bấm **Save Changes** (Lưu thay đổi).
@@ -52,7 +53,7 @@ Có 3 việc chính:
      https://antiantiai.xyz/balabot/api/facebook-webhook
      ```
    - **Verify Token**: nhập đúng giá trị đang đặt ở biến môi trường `FACEBOOK_VERIFY_TOKEN` trên Railway (xem lại giá trị này trong Railway → project BalaBot → tab **Variables**). Nếu chưa có, tự đặt một chuỗi bí mật bất kỳ (ví dụ `balabot-verify-2026-xyz`) rồi lưu đúng chuỗi đó vào cả 2 nơi: Railway Variables và ô Verify Token này.
-5. Bấm **Verify and Save**. Nếu Facebook báo lỗi "The URL couldn't be validated" — kiểm tra lại: Railway service đang chạy (không bị sleep/lỗi), Verify Token gõ đúng, Callback URL đúng chính tả.
+5. Bấm **Verify and Save**. Nếu Facebook báo lỗi "The URL couldn't be validated" — kiểm tra lại: Railway service đang chạy (không bị sleep/lỗi), Verify Token gõ đúng, Callback URL đúng chính tả. Webhook chỉ cần 1 URL: thử URL trên trước; nếu verify vẫn lỗi thì dùng `https://antiantiai.xyz/api/facebook-webhook` thay thế.
 6. Sau khi verify thành công, cuộn xuống mục **Webhook Fields** (hoặc **Subscribe to fields**) → tick chọn 2 mục:
    - `messages`
    - `messaging_postbacks`
@@ -137,7 +138,7 @@ Các bước tổng quát (làm khi cần, không gấp):
 
 | Mục | Giá trị |
 |---|---|
-| Redirect URI (Facebook Login → Settings) | `https://antiantiai.xyz/balabot/api/facebook-oauth/callback` |
+| Redirect URI (Facebook Login → Settings) | `https://antiantiai.xyz/balabot/api/facebook-oauth/callback` VÀ `https://antiantiai.xyz/api/facebook-oauth/callback` (đăng ký cả hai) |
 | Webhook Callback URL (Messenger → Settings) | `https://antiantiai.xyz/balabot/api/facebook-webhook` |
 | Webhook Verify Token | giá trị env `FACEBOOK_VERIFY_TOKEN` trên Railway |
 | Webhook Subscribe fields | `messages`, `messaging_postbacks` |

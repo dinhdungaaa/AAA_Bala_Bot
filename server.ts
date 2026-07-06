@@ -2385,6 +2385,22 @@ async function connectFacebookPageToBot(
       subscribeWarning = "Không tự subscribe được; có thể cần subscribe thủ công trên Meta.";
     }
 
+    // Page chỉ được gắn với 1 bot: gỡ liên kết khỏi bot khác còn giữ cùng pageId
+    // để webhook chung không route nhầm tin nhắn về bot cũ.
+    const staleBots = allBots.filter(b => b.id !== botId && b.facebookPageId === me.id);
+    for (const stale of staleBots) {
+      const staleUpdates = {
+        facebookPageAccessToken: "",
+        facebookPageId: "",
+        facebookPageName: "",
+        facebookStatus: "not_connected" as const
+      };
+      const staleMem = bots.find(b => b.id === stale.id);
+      if (staleMem) Object.assign(staleMem, staleUpdates);
+      await dbUpdateBot(stale.id, staleUpdates).catch(() => {});
+      console.warn(`[FB Connect] Page ${me.id} chuyển sang bot ${botId}; đã gỡ khỏi bot ${stale.id}.`);
+    }
+
     // 3. Lưu per-bot (memory + DB).
     const updates = {
       facebookPageAccessToken: token,
