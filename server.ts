@@ -12,6 +12,7 @@ import {
   signOAuthState, verifyOAuthState, buildOAuthDialogUrl, verifyFacebookSignature,
   groupMessagingEventsByPage, randomToken, renderOAuthResultHtml, renderPageSelectionHtml,
 } from "./facebookOauth.js";
+import { parseBridgePayload, buildBridgeResponse } from "./botcakeBridge.js";
 import { TOP_K, RETRIEVE_FLOOR } from "./rag/constants.js";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult, TelegramGroup } from "./src/types.js";
 import {
@@ -2447,6 +2448,142 @@ app.post("/api/bots/:botId/facebook-disconnect", async (req, res) => {
   if (memBot) Object.assign(memBot, updates);
   const ok = await dbUpdateBot(botId, updates);
   return res.json({ success: ok, message: ok ? "Đã ngắt kết nối Facebook Page." : "Không cập nhật được DB." });
+});
+
+// ===== Botcake Bridge: kênh tạm qua nền tảng đã được Meta duyệt =====
+// Botcake gọi THẲNG backend Railway (không qua proxy Cloudflare) để giảm 1 hop.
+const BRIDGE_BACKEND_ORIGIN = process.env.PUBLIC_BACKEND_ORIGIN || "https://aaabalabot-production.up.railway.app";
+
+function buildBridgeUrl(botId: string, key: string): string {
+  return `${BRIDGE_BACKEND_ORIGIN}/api/bridge/botcake/${encodeURIComponent(botId)}?key=${encodeURIComponent(key)}`;
+}
+
+// Lấy (tự sinh nếu chưa có) bridge key + URL cho dashboard.
+app.get("/api/bots/:botId/bridge-info", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+  if (!bot.botcakeBridgeKey) {
+    const key = randomToken(16);
+    bot.botcakeBridgeKey = key;
+    const memBot = bots.find(b => b.id === bot.id);
+    if (memBot) memBot.botcakeBridgeKey = key;
+    await dbUpdateBot(bot.id, { botcakeBridgeKey: key } as any);
+  }
+  res.json({ bridgeKey: bot.botcakeBridgeKey, bridgeUrl: buildBridgeUrl(bot.id, bot.botcakeBridgeKey) });
+});
+
+// Đổi key khi lộ — URL cũ mất hiệu lực ngay.
+app.post("/api/bots/:botId/bridge-key/regenerate", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+  const key = randomToken(16);
+  bot.botcakeBridgeKey = key;
+  const memBot = bots.find(b => b.id === bot.id);
+  if (memBot) memBot.botcakeBridgeKey = key;
+  await dbUpdateBot(bot.id, { botcakeBridgeKey: key } as any);
+  res.json({ bridgeKey: key, bridgeUrl: buildBridgeUrl(bot.id, key) });
+});
+
+// Endpoint chính: Botcake Dynamic Block POST tin nhắn khách vào đây.
+app.post("/api/bridge/botcake/:botId", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  const key = String(req.query.key || req.body?.key || "");
+  if (!bot || !bot.botcakeBridgeKey || key !== bot.botcakeBridgeKey) {
+    return res.status(403).json(buildBridgeResponse("Bridge key không hợp lệ. Vui lòng copy lại Bridge URL mới nhất từ dashboard BalaBot."));
+  }
+
+  const payload = parseBridgePayload(req.body);
+  if (!payload.text) {
+    console.warn("[Botcake Bridge] Thiếu text. payload keys:", JSON.stringify(Object.keys(req.body || {})));
+    return res.json({ messages: [] });
+  }
+  if (!payload.psid) {
+    console.warn("[Botcake Bridge] Thiếu psid — dùng session chung 'anon'. payload keys:", JSON.stringify(Object.keys(req.body || {})));
+  }
+
+  try {
+    const psid = payload.psid || "anon";
+    const userKey = `botcake:${psid}`;
+    const username = `botcake_${psid}`;
+    const fullName = payload.fullName || "Khách hàng Facebook";
+
+    let session = chatSessions.find(s => s.botId === bot.id && s.telegramUserId === userKey);
+    if (!session) {
+      session = {
+        id: "sess-bc-" + Math.random().toString(36).substr(2, 9),
+        botId: bot.id,
+        telegramUserId: userKey,
+        telegramUsername: username,
+        telegramFullName: fullName,
+        lastMessageText: payload.text,
+        lastMessageTime: new Date().toISOString(),
+        status: "bot_answered",
+        internalNotes: "Đến từ kênh Botcake bridge",
+        messages: []
+      };
+      chatSessions.unshift(session);
+    }
+    session.channel = "botcake";
+    session.channelChatId = psid;
+    session.channelIsGroup = false;
+    session.channelSenderId = psid;
+
+    const hasPriorBotReply = session.messages.some(msg => msg.sender === "bot");
+    const userMsg: Message = {
+      id: "m-bc-" + Math.random().toString(36).substr(2, 9),
+      sender: "user",
+      username,
+      fullName,
+      text: payload.text,
+      timestamp: new Date().toISOString()
+    };
+    session.messages.push(userMsg);
+    session.lastMessageText = payload.text;
+    session.lastMessageTime = userMsg.timestamp;
+
+    let aiAnswer: { text: string; sources: any[]; fallbackTriggered: boolean };
+    const gate = await checkUsageGate(bot);
+    if (!gate.allowed) {
+      aiAnswer = { text: BLOCK_MESSAGE, sources: [], fallbackTriggered: true };
+    } else {
+      aiAnswer = await generateRAGAnswer(
+        bot,
+        payload.text,
+        { fullName, username, id: userKey },
+        { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8, -1) }
+      );
+      await recordUsageForBot(bot);
+    }
+
+    const botMsg: Message = {
+      id: "m-bc-bot-" + Math.random().toString(36).substr(2, 9),
+      sender: "bot",
+      username: bot.name,
+      text: aiAnswer.text,
+      timestamp: new Date().toISOString(),
+      sourcesUsed: aiAnswer.sources,
+      fallbackTriggered: aiAnswer.fallbackTriggered
+    };
+    session.messages.push(botMsg);
+    session.lastMessageText = aiAnswer.text;
+    session.lastMessageTime = botMsg.timestamp;
+    session.status = aiAnswer.fallbackTriggered ? "escalated" : "bot_answered";
+    analytics.totalMessages += 2;
+
+    try {
+      await dbSaveConversation(session);
+    } catch (saveErr) {
+      console.warn("[Botcake Bridge] Skip Supabase upload:", saveErr);
+    }
+
+    return res.json(buildBridgeResponse(aiAnswer.text));
+  } catch (err: any) {
+    console.error("[Botcake Bridge] Lỗi xử lý:", err?.message || err);
+    return res.json(buildBridgeResponse(bot.fallbackMessage || "Dạ em xin phép kết nối nhân viên hỗ trợ mình ngay ạ."));
+  }
 });
 
 // ===== Facebook OAuth 1 chạm (app chung BalaBot) =====
