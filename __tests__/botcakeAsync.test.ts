@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildSendFlowRequest } from "../botcakeAsync.js";
 
 describe("buildSendFlowRequest", () => {
-  const base = { pageId: "P1", accessToken: "TOK", replyFlowId: "F9", psid: "u123", text: "Chào bạn" };
+  const base = { pageId: "P1", accessToken: "TOK", replyFlowId: "447646216", psid: "28087514047518474", text: "Chào bạn" };
 
   it("URL đúng endpoint public_api theo pageId", () => {
     const r = buildSendFlowRequest(base);
@@ -18,9 +18,30 @@ describe("buildSendFlowRequest", () => {
   it("body chứa psid, flow_id, payload.bot_reply", () => {
     const r = buildSendFlowRequest(base);
     const parsed = JSON.parse(r.body);
-    expect(parsed.psid).toBe("u123");
-    expect(parsed.flow_id).toBe("F9");
+    expect(parsed.psid).toBe("28087514047518474");
     expect(parsed.payload.bot_reply).toBe("Chào bạn");
+  });
+
+  it("flow_id gửi dạng SỐ NGUYÊN (Botcake yêu cầu integer, không phải chuỗi)", () => {
+    const r = buildSendFlowRequest(base);
+    const parsed = JSON.parse(r.body);
+    expect(parsed.flow_id).toBe(447646216);
+    expect(typeof parsed.flow_id).toBe("number");
+    // chuỗi thô "flow_id":"..." không được xuất hiện
+    expect(r.body).toContain('"flow_id":447646216');
+  });
+
+  it("psid GIỮ chuỗi để không mất độ chính xác (dài > MAX_SAFE_INTEGER)", () => {
+    const r = buildSendFlowRequest(base);
+    const parsed = JSON.parse(r.body);
+    expect(typeof parsed.psid).toBe("string");
+    expect(r.body).toContain('"psid":"28087514047518474"');
+  });
+
+  it("flow_id không parse được thì giữ nguyên chuỗi (không crash)", () => {
+    const r = buildSendFlowRequest({ ...base, replyFlowId: "abc" });
+    const parsed = JSON.parse(r.body);
+    expect(parsed.flow_id).toBe("abc");
   });
 
   it("encode pageId vào URL an toàn", () => {

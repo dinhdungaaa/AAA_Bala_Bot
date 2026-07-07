@@ -13,9 +13,13 @@ export function buildSendFlowRequest(opts: {
     "access-token": opts.accessToken,
     "Content-Type": "application/json",
   };
+  // Botcake yêu cầu flow_id là SỐ NGUYÊN (không phải chuỗi) → parse sang number.
+  // psid GIỮ NGUYÊN chuỗi: nó dài ~17 chữ số, vượt Number.MAX_SAFE_INTEGER nên
+  // ép sang number sẽ mất độ chính xác.
+  const flowIdNum = Number.parseInt(String(opts.replyFlowId).trim(), 10);
   const body = JSON.stringify({
     psid: opts.psid,
-    flow_id: opts.replyFlowId,
+    flow_id: Number.isNaN(flowIdNum) ? opts.replyFlowId : flowIdNum,
     payload: { bot_reply: opts.text },
   });
   return { url, headers, body };
