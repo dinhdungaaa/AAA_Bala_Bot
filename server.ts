@@ -2455,6 +2455,11 @@ app.post("/api/bots/:botId/facebook-disconnect", async (req, res) => {
 // Botcake gọi THẲNG backend Railway (không qua proxy Cloudflare) để giảm 1 hop.
 const BRIDGE_BACKEND_ORIGIN = process.env.PUBLIC_BACKEND_ORIGIN || "https://aaabalabot-production.up.railway.app";
 
+// Debug tạm cho kênh Botcake async: lưu lần Botcake gọi vào gần nhất + lần send_flow gần nhất.
+// KHÔNG chứa access token (token chỉ nằm ở HTTP header, không được ghi vào các biến này).
+let lastBotcakeInbound: any = null;
+let lastBotcakeSend: any = null;
+
 function buildBridgeUrl(botId: string, key: string): string {
   return `${BRIDGE_BACKEND_ORIGIN}/api/bridge/botcake/${encodeURIComponent(botId)}?key=${encodeURIComponent(key)}`;
 }
@@ -2479,6 +2484,18 @@ app.get("/api/bots/:botId/bridge-info", async (req, res) => {
     botcakeReplyFlowId: bot.botcakeReplyFlowId || "",
     hasAccessToken: !!bot.botcakeAccessToken,
   });
+});
+
+// Debug tạm kênh Botcake async: xem lần gọi vào + lần send_flow gần nhất. Gate bằng bridge key.
+// KHÔNG trả access token. Dùng để chẩn đoán rồi gỡ.
+app.get("/api/bots/:botId/botcake-debug", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  const key = String(req.query.key || "");
+  if (!bot || !bot.botcakeBridgeKey || key !== bot.botcakeBridgeKey) {
+    return res.status(403).json({ error: "forbidden" });
+  }
+  res.json({ inbound: lastBotcakeInbound, send: lastBotcakeSend });
 });
 
 // Đổi key khi lộ — URL cũ mất hiệu lực ngay.
@@ -2618,6 +2635,7 @@ app.post("/api/bridge/botcake/:botId", async (req, res) => {
 async function sendBotcakeFlow(bot: BotConfig, psid: string, text: string): Promise<boolean> {
   if (!bot.botcakePageId || !bot.botcakeAccessToken || !bot.botcakeReplyFlowId) {
     console.warn(`[Botcake Async] Bot ${bot.id} thiếu cấu hình gửi lại (pageId/accessToken/replyFlowId).`);
+    lastBotcakeSend = { at: new Date().toISOString(), stage: "thiếu-cấu-hình", psid };
     return false;
   }
   const req = buildSendFlowRequest({
@@ -2630,7 +2648,19 @@ async function sendBotcakeFlow(bot: BotConfig, psid: string, text: string): Prom
   try {
     const res = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || data?.success === false || data?.error) {
+    const ok = !(!res.ok || data?.success === false || data?.error);
+    // req.body chỉ chứa {psid, flow_id, payload} — KHÔNG có token → an toàn để lưu debug.
+    lastBotcakeSend = {
+      at: new Date().toISOString(),
+      stage: ok ? "send_flow_ok" : "send_flow_fail",
+      psid,
+      url: req.url,
+      requestBody: req.body,
+      httpStatus: res.status,
+      botcakeResponse: JSON.stringify(data).slice(0, 800),
+      answerPreview: text.slice(0, 200),
+    };
+    if (!ok) {
       console.warn(`[Botcake Async] send_flow thất bại (HTTP ${res.status}):`, JSON.stringify(data).slice(0, 500));
       return false;
     }
@@ -2638,6 +2668,7 @@ async function sendBotcakeFlow(bot: BotConfig, psid: string, text: string): Prom
     return true;
   } catch (err: any) {
     console.error("[Botcake Async] Lỗi gọi send_flow:", err?.message || err);
+    lastBotcakeSend = { at: new Date().toISOString(), stage: "send_flow_exception", psid, error: err?.message || String(err), answerPreview: text.slice(0, 200) };
     return false;
   }
 }
@@ -2719,6 +2750,8 @@ app.post("/api/bridge/botcake-async/:botId", async (req, res) => {
   const bot = allBots.find(b => b.id === req.params.botId);
   const key = String(req.query.key || req.body?.key || "");
   const ack = () => res.json({ messages: [] });
+  // Debug: ghi lại MỌI lần gọi vào (kể cả payload sai) để biết Botcake có thật sự gọi không.
+  lastBotcakeInbound = { at: new Date().toISOString(), botId: req.params.botId, bodyKeys: Object.keys(req.body || {}), bodyPreview: JSON.stringify(req.body || {}).slice(0, 400) };
 
   if (!bot || !bot.botcakeBridgeKey || key !== bot.botcakeBridgeKey) {
     console.warn("[Botcake Async] Key không hợp lệ hoặc bot không tồn tại:", req.params.botId);
