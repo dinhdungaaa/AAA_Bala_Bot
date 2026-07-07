@@ -6,8 +6,12 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { embedText, hashText } from "./rag/embeddings.js";
 import { GEN_MODEL } from "./rag/constants.js";
-import { rankBySimilarity, buildEmbedQuery, isShortFollowUp, condenseFollowUpQuery } from "./rag/retriever.js";
+import { rankBySimilarity, buildEmbedQuery } from "./rag/retriever.js";
 import { synthesizeAnswer } from "./rag/synthesis.js";
+import { understand, defaultUnderstanding, isValidVNPhone, normalizeVNPhone } from "./rag/understand.js";
+import type { Understanding } from "./rag/understand.js";
+import { channelFromUserKey, formatLeadNotify } from "./leadHelpers.js";
+import type { ConversationGoal, GoalState } from "./rag/synthesis.js";
 import {
   signOAuthState, verifyOAuthState, buildOAuthDialogUrl, verifyFacebookSignature,
   groupMessagingEventsByPage, randomToken, renderOAuthResultHtml, renderPageSelectionHtml,
@@ -15,7 +19,7 @@ import {
 import { parseBridgePayload, buildBridgeResponse } from "./botcakeBridge.js";
 import { buildSendContentRequest } from "./botcakeAsync.js";
 import { TOP_K, RETRIEVE_FLOOR } from "./rag/constants.js";
-import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult, TelegramGroup } from "./src/types.js";
+import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult, TelegramGroup, Lead } from "./src/types.js";
 import {
   getSupabaseConfig,
   withSupabaseConfig,
@@ -67,7 +71,10 @@ import {
   dbAddFreeAllowlist,
   dbRemoveFreeAllowlist,
   dbAddLead,
-  dbGetLeads
+  dbGetLeads,
+  dbGetBotLeads,
+  dbSaveBotLead,
+  dbUpdateBotLead
 } from "./supabaseService.js";
 import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
 import { resolveLimitForOwner } from "./billingResolve.js";
@@ -270,6 +277,30 @@ let knowledgeSources: KnowledgeSource[] = [];
 let knowledgeChunks: KnowledgeChunk[] = [];
 
 let chatSessions: ChatSession[] = [];
+
+// Leads in-memory mirror (Supabase là nguồn bền; RAM để chạy được khi chưa migrate).
+const leadsMem: Lead[] = [];
+// userKey dùng chung cho khách vô danh path Botcake sync (stateless) — KHÔNG được
+// dùng làm sessionId lead, nếu không mọi khách vô danh bị coi là "đã có liên hệ".
+const SHARED_ANON_KEY = "botcake:unknown";
+// Bot đã nạp lead bền từ Supabase vào leadsMem sau restart chưa (lazy, mỗi bot 1 lần).
+const leadsHydrated = new Set<string>();
+
+// Nạp lead từ Supabase vào RAM cho 1 bot — chống tạo lead TRÙNG + notify Telegram lặp
+// khi khách cũ nhắn lại SĐT sau khi server restart. Lỗi vẫn đánh dấu đã hydrate để
+// không gọi lặp mỗi tin nhắn (fail-open về RAM-only như trước).
+async function hydrateLeadsForBot(botId: string): Promise<void> {
+  if (leadsHydrated.has(botId)) return;
+  try {
+    const persisted = await dbGetBotLeads(botId, []);
+    for (const lead of persisted) {
+      if (!leadsMem.some(l => l.id === lead.id)) leadsMem.push(lead);
+    }
+  } catch (err: any) {
+    console.warn("[Leads] hydrate từ Supabase lỗi (dùng RAM-only):", err?.message || err);
+  }
+  leadsHydrated.add(botId);
+}
 
 let faqList: FAQItem[] = [];
 
@@ -1857,6 +1888,20 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
   res.status(200).send("OK");
 
   try {
+    // Lệnh /id: trả chat id để chủ shop dán vào ô "Chat ID Telegram nhận thông báo lead".
+    // Đặt TRƯỚC bộ lọc lệnh chung bên dưới (bộ lọc đó chỉ cho qua "/start").
+    const tgText = String(update?.message?.text || "").trim();
+    if (tgText === "/id") {
+      const chatId = String(update?.message?.chat?.id || "");
+      if (bot.telegramToken && chatId) {
+        try {
+          await sendTelegramReminder(bot.telegramToken, chatId,
+            `Chat ID của bạn: ${chatId}\nDán số này vào ô "Chat ID Telegram nhận thông báo lead" trong BalaBot → Cấu hình Bot AI.`);
+        } catch {}
+      }
+      return;
+    }
+
     // Bot được add/xóa khỏi nhóm → Telegram bắn my_chat_member. Bắt để đăng ký nhóm.
     if (update?.my_chat_member?.chat) {
       const mcm = update.my_chat_member;
@@ -2782,6 +2827,43 @@ app.post("/api/bots/:botId/botcake-config", async (req, res) => {
   const updates: any = { botcakePageId: pageId, botcakeReplyFlowId: replyFlowId };
   // accessToken rỗng trong body → giữ token cũ (không ghi đè bằng rỗng).
   if (accessToken) updates.botcakeAccessToken = accessToken;
+  const memBot = bots.find(b => b.id === bot.id);
+  if (memBot) Object.assign(memBot, updates);
+  await dbUpdateBot(bot.id, updates);
+  res.json({ success: true });
+});
+
+// Danh sách lead của bot — mới nhất trước.
+app.get("/api/bots/:botId/leads", async (req, res) => {
+  await hydrateLeadsForBot(req.params.botId); // fallback RAM đầy đủ kể cả sau restart
+  const list = await dbGetBotLeads(req.params.botId, leadsMem.filter(l => l.botId === req.params.botId));
+  res.json({ leads: list });
+});
+
+// Đổi trạng thái lead (new|contacted|won|lost).
+app.patch("/api/bots/:botId/leads/:leadId", async (req, res) => {
+  const status = String(req.body?.status || "");
+  if (!["new", "contacted", "won", "lost"].includes(status)) {
+    return res.status(400).json({ error: "status không hợp lệ." });
+  }
+  await hydrateLeadsForBot(req.params.botId);
+  // Scope theo botId — không cho sửa lead của bot khác qua leadId đoán mò.
+  const mem = leadsMem.find(l => l.botId === req.params.botId && l.id === req.params.leadId);
+  if (mem) mem.status = status as Lead["status"];
+  await dbUpdateBotLead(req.params.botId, req.params.leadId, { status: status as Lead["status"] });
+  res.json({ success: true });
+});
+
+// Lưu cấu hình trợ lý bán hàng (mục tiêu + chat id thông báo).
+app.post("/api/bots/:botId/assistant-config", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+  const goal = String(req.body?.conversationGoal || "");
+  const chatId = String(req.body?.notifyTelegramChatId ?? "").trim();
+  const updates: Partial<BotConfig> = {};
+  if (["lead", "order", "consult"].includes(goal)) updates.conversationGoal = goal as BotConfig["conversationGoal"];
+  updates.notifyTelegramChatId = chatId; // rỗng = tắt thông báo
   const memBot = bots.find(b => b.id === bot.id);
   if (memBot) Object.assign(memBot, updates);
   await dbUpdateBot(bot.id, updates);
@@ -3852,6 +3934,64 @@ async function recordUsageForBot(bot: BotConfig): Promise<void> {
   await dbIncrementUsage(ownerKey, currentYearMonth());
 }
 
+// Sync có chủ đích (gọi trong generateRAGAnswer cho goalState nudge): KHÔNG chờ
+// hydrate — sau restart, lượt đầu của khách cũ có thể sai lệch (bot mời liên hệ thừa
+// 1 lần), chấp nhận được; captureLeadIfAny (nơi gây trùng thật) mới bắt buộc hydrate.
+function hasLeadForSession(botId: string, userKey?: string): boolean {
+  // Key vô danh dùng chung → không bao giờ coi là "đã có liên hệ".
+  if (!userKey || userKey === SHARED_ANON_KEY) return false;
+  return leadsMem.some(l => l.botId === botId && l.sessionId === userKey);
+}
+
+// Bắt lead từ kết quả tầng HIỂU. Fire-and-forget — KHÔNG chặn/không phá reply.
+async function captureLeadIfAny(
+  bot: BotConfig,
+  und: Understanding,
+  userInfo?: { fullName?: string; username?: string; id?: string }
+): Promise<void> {
+  try {
+    const rawPhone = und.contact?.phone || "";
+    if (!isValidVNPhone(rawPhone)) return;
+    // Nạp lead bền trước khi dedupe — nếu không, sau restart khách cũ nhắn lại SĐT
+    // sẽ tạo lead trùng + notify Telegram lặp.
+    await hydrateLeadsForBot(bot.id);
+    const phone = normalizeVNPhone(rawPhone);
+    // Key vô danh dùng chung (Botcake sync stateless) không được gán làm sessionId.
+    const sessionKey = userInfo?.id === SHARED_ANON_KEY ? undefined : userInfo?.id;
+    let lead = leadsMem.find(l => l.botId === bot.id && l.phone === phone);
+    const isNew = !lead;
+    if (lead) {
+      lead.interest = und.interest || lead.interest;
+      lead.sessionId = sessionKey || lead.sessionId;
+      lead.name = und.contact?.name || lead.name;
+    } else {
+      lead = {
+        id: "lead-" + Math.random().toString(36).substr(2, 9),
+        botId: bot.id,
+        sessionId: sessionKey,
+        name: und.contact?.name || userInfo?.fullName,
+        phone,
+        address: und.contact?.address,
+        interest: und.interest || undefined,
+        buyingSignal: und.buyingSignal,
+        channel: channelFromUserKey(userInfo?.id),
+        status: "new",
+        createdAt: new Date().toISOString(),
+      };
+      leadsMem.unshift(lead);
+    }
+    await dbSaveBotLead(lead);
+    if (isNew && bot.notifyTelegramChatId && bot.telegramToken) {
+      try {
+        await sendTelegramReminder(bot.telegramToken, bot.notifyTelegramChatId, formatLeadNotify(lead));
+      } catch (e: any) { console.warn("[Leads] notify Telegram lỗi (bỏ qua):", e?.message || e); }
+    }
+    console.log(`[Leads] ${isNew ? "MỚI" : "cập nhật"} lead ${phone} (bot ${bot.id}).`);
+  } catch (err: any) {
+    console.warn("[Leads] capture failed (bỏ qua):", err?.message || err);
+  }
+}
+
 // Core RAG matching & AI generation call
 async function generateRAGAnswer(
   bot: BotConfig, 
@@ -3892,7 +4032,6 @@ async function generateRAGAnswer(
   const allowProductIntro = bot.allowProductConsulting !== false;
   const expand = replyOptions?.expand === true;
   const fast = replyOptions?.fast === true;
-  const synthCtx = { customer: customerCtx, history, allowProductIntro, expand, fast };
 
   const chitChatKind = detectOffTopicChitChat(query);
   if (chitChatKind) {
@@ -3910,6 +4049,16 @@ async function generateRAGAnswer(
   const ai = getAIClient();
   const answerStyle: "sales" | "reference" = bot.answerStyle === "reference" ? "reference" : "sales";
 
+  // Tầng HIỂU: 1 call nhanh — intent + câu tìm kiếm + tín hiệu mua + liên hệ.
+  // fast (bridge sync cũ) hoặc không có AI → default (fail-open, hành vi cũ).
+  let und = defaultUnderstanding(query);
+  if (ai && !fast) {
+    und = await understand(ai, query, history);
+  }
+
+  // Bắt lead nếu tin nhắn chứa SĐT hợp lệ — chạy nền, không chặn trả lời.
+  void captureLeadIfAny(bot, und, userInfo);
+
   if (!ai) {
     // No API key -> safe fallback
     return {
@@ -3919,15 +4068,28 @@ async function generateRAGAnswer(
     };
   }
 
+  const goal: ConversationGoal =
+    (bot.conversationGoal as ConversationGoal) ||
+    (answerStyle === "reference" ? "consult" : "lead");
+  // Bot đã mời để lại liên hệ trong 3 lượt bot gần nhất chưa (chống spam nhịp mời).
+  const ASK_CONTACT_RE = /(số điện thoại|sđt|sdt|hotline|để lại (số|thông tin|liên hệ)|xin (số|liên hệ))/i;
+  const goalState: GoalState = {
+    isFirstTurn: isFirstInteraction,
+    hasContact: hasLeadForSession(bot.id, userInfo?.id),
+    askedRecently: history.filter(t => t.role === "bot").slice(-3).some(t => ASK_CONTACT_RE.test(t.text)),
+  };
+  const synthCtx = {
+    customer: customerCtx, history, allowProductIntro, expand, fast,
+    intent: und.intent, buyingSignal: und.buyingSignal, goal, goalState,
+  };
+
   let topChunks: Array<{ chunk: KnowledgeChunk; score: number }> = [];
   try {
-    // Câu follow-up ngắn ("có giá không em") thiếu chủ đề → viết lại thành câu
-    // tìm kiếm độc lập dựa trên hội thoại (kể cả lượt bot) để retrieval trúng đoạn.
-    let searchText = buildEmbedQuery(query, lastUserText);
-    // Chế độ nhanh (bridge): bỏ bước viết lại câu hỏi bằng LLM để tiết kiệm 1 lượt gọi mạng.
-    if (!fast && isShortFollowUp(query) && history.length > 0) {
-      searchText = await condenseFollowUpQuery(ai, query, history);
-    }
+    // searchQuery từ tầng hiểu (đã viết lại đầy đủ chủ đề); default = câu gốc,
+    // nên vẫn ghép ngữ cảnh kiểu cũ khi tầng hiểu fail-open.
+    let searchText = und.searchQuery && und.searchQuery !== query.trim()
+      ? und.searchQuery
+      : buildEmbedQuery(query, lastUserText);
     const qVec = await embedText(ai, searchText);
     topChunks = rankBySimilarity(qVec, botChunks, TOP_K);
   } catch (e: any) {
