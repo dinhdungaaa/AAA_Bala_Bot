@@ -6,7 +6,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { embedText, hashText } from "./rag/embeddings.js";
 import { GEN_MODEL } from "./rag/constants.js";
-import { rankBySimilarity, buildEmbedQuery, isShortFollowUp } from "./rag/retriever.js";
+import { rankBySimilarity, buildEmbedQuery } from "./rag/retriever.js";
 import { synthesizeAnswer } from "./rag/synthesis.js";
 import { understand, defaultUnderstanding, isValidVNPhone, normalizeVNPhone } from "./rag/understand.js";
 import type { Understanding } from "./rag/understand.js";
