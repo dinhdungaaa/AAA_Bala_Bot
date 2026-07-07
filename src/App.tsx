@@ -853,6 +853,7 @@ export default function App() {
       setFaqs([]);
       setConversations([]);
       setAnalyticsData(null);
+      setLeads([]);
       return;
     }
     
@@ -891,6 +892,12 @@ export default function App() {
       .then(res => res.json())
       .then(data => setAnalyticsData(data));
 
+    // Leads nạp ngay khi chọn bot (để badge sidebar đếm được), và refetch mỗi lần đổi tab (kể cả mở tab leads) cho dữ liệu tươi
+    fetch(`/api/bots/${selectedBotId}/leads`, { headers: getScopedApiHeaders() })
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(data => setLeads(data.leads || []))
+      .catch(() => {});
+
     if (activeTab === 'telegram') {
       fetchWebhookDetails();
     }
@@ -898,17 +905,6 @@ export default function App() {
       fetchFacebookDetails();
     }
   }, [selectedBotId, activeTab]);
-
-  // Fetch leads when the "Khách tiềm năng" tab is opened
-  useEffect(() => {
-    if (activeTab !== 'leads' || !selectedBotId) return;
-    (async () => {
-      try {
-        const res = await fetch(`/api/bots/${selectedBotId}/leads`, { headers: getScopedApiHeaders() });
-        if (res.ok) setLeads((await res.json()).leads || []);
-      } catch {}
-    })();
-  }, [activeTab, selectedBotId]);
 
   // Init assistant config form from the currently selected bot
   useEffect(() => {
@@ -1217,12 +1213,18 @@ export default function App() {
     if (!selectedBotId) return;
     setSavingAssistant(true);
     try {
-      await fetch(`/api/bots/${selectedBotId}/assistant-config`, {
+      const res = await fetch(`/api/bots/${selectedBotId}/assistant-config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
         body: JSON.stringify({ conversationGoal: assistantGoal, notifyTelegramChatId: notifyChatId.trim() }),
       });
-      setBots(prev => prev.map(b => b.id === selectedBotId ? { ...b, conversationGoal: assistantGoal, notifyTelegramChatId: notifyChatId.trim() } as any : b));
+      if (res.ok) {
+        setBots(prev => prev.map(b => b.id === selectedBotId ? { ...b, conversationGoal: assistantGoal, notifyTelegramChatId: notifyChatId.trim() } as any : b));
+      } else {
+        alert('Lưu cấu hình thất bại, thử lại nhé');
+      }
+    } catch {
+      alert('Lưu cấu hình thất bại, thử lại nhé');
     } finally { setSavingAssistant(false); }
   };
 
@@ -2176,7 +2178,7 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('leads')}
+            onClick={() => { setActiveTab('leads'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'leads' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
             <span>🔥</span> Khách tiềm năng
