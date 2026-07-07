@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parseUnderstandOutput, defaultUnderstanding,
-  isValidVNPhone, normalizeVNPhone, buildUnderstandPrompt,
+  isValidVNPhone, normalizeVNPhone, buildUnderstandPrompt, understand,
 } from "../understand.js";
 
 describe("parseUnderstandOutput", () => {
@@ -87,5 +87,25 @@ describe("buildUnderstandPrompt", () => {
   it("history rỗng vẫn chạy", () => {
     const p = buildUnderstandPrompt("giá sao", []);
     expect(p.contents).toContain("giá sao");
+  });
+});
+
+describe("understand — fail-open", () => {
+  it("generateContent throw → resolve về defaultUnderstanding, KHÔNG reject", async () => {
+    const ai: any = { models: { generateContent: async () => { throw new Error("network down"); } } };
+    const u = await understand(ai, "giá bao nhiêu", []);
+    expect(u).toEqual(defaultUnderstanding("giá bao nhiêu"));
+  });
+  it("trả JSON hợp lệ → parse bình thường", async () => {
+    const ai: any = { models: { generateContent: async () => ({ text: '{"intent":"hoi_gia","searchQuery":"giá son","buyingSignal":"am","contact":null,"interest":"son"}' }) } };
+    const u = await understand(ai, "giá bn", []);
+    expect(u.intent).toBe("hoi_gia");
+    expect(u.searchQuery).toBe("giá son");
+  });
+  it("contact là ARRAY → null; raw có chữ quanh JSON không fence → vẫn parse", async () => {
+    const ai: any = { models: { generateContent: async () => ({ text: 'Đây là kết quả: {"intent":"khac","searchQuery":"x","buyingSignal":"lanh","contact":[1,2]} xong.' }) } };
+    const u = await understand(ai, "q", []);
+    expect(u.contact).toBeNull();
+    expect(u.intent).toBe("khac");
   });
 });

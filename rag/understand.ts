@@ -101,6 +101,7 @@ export async function understand(
   query: string,
   history: HistoryTurn[]
 ): Promise<Understanding> {
+  let timeoutId: NodeJS.Timeout | undefined;
   try {
     const { systemInstruction, contents } = buildUnderstandPrompt(query, history);
     const call = withRetry(() => ai.models.generateContent({
@@ -112,11 +113,15 @@ export async function understand(
         thinkingConfig: { thinkingBudget: 0 },
       },
     } as any), 2);
-    const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error("understand timeout")), 3000));
+    const timeout = new Promise<never>((_, rej) => {
+      timeoutId = setTimeout(() => rej(new Error("understand timeout")), 3000);
+    });
     const res: any = await Promise.race([call, timeout]);
     return parseUnderstandOutput(res?.text || "", query);
   } catch (err: any) {
     console.warn("[Understand] fail-open:", err?.message || err);
     return defaultUnderstanding(query);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
