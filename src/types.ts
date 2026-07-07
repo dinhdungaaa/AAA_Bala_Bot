@@ -37,6 +37,9 @@ export interface BotConfig {
   status: 'active' | 'inactive' | 'training' | 'needs_token';
   createdAt: string;
   answerStyle?: 'sales' | 'reference';
+  // Trợ lý bán hàng: mục tiêu hội thoại + chat id Telegram nhận thông báo lead.
+  conversationGoal?: 'lead' | 'order' | 'consult';
+  notifyTelegramChatId?: string;
 }
 
 export interface KnowledgeSource {
@@ -238,5 +241,21 @@ export interface PlanLimit {
   messages: number;
   bots: number;
   channels: number | 'all';
+}
+
+// === TRỢ LÝ BÁN HÀNG: LEAD CAPTURE ===
+
+export interface Lead {
+  id: string;
+  botId: string;
+  sessionId?: string;      // userKey kênh (vd "botcake:<psid>") — dùng tra hasContact
+  name?: string;
+  phone: string;           // đã normalize về dạng 0xxxxxxxxx
+  address?: string;
+  interest?: string;
+  buyingSignal?: string;
+  channel?: string;        // botcake | telegram | facebook | web
+  status: 'new' | 'contacted' | 'won' | 'lost';
+  createdAt: string;
 }
 

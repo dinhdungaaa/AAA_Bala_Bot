@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { BotConfig, KnowledgeSource, KnowledgeChunk, ChatSession, FAQItem, WorkspaceUser, ScheduleItem, ReminderLog, TelegramGroup, UsageCounter } from './src/types';
+import { BotConfig, KnowledgeSource, KnowledgeChunk, ChatSession, FAQItem, WorkspaceUser, ScheduleItem, ReminderLog, TelegramGroup, UsageCounter, Lead } from './src/types';
 import { AsyncLocalStorage } from 'async_hooks';
 
 let _supabaseClient: SupabaseClient | null = null;
@@ -1326,5 +1326,39 @@ export async function dbGetLeads(limit = 200): Promise<LeadRow[]> {
     if (error) { console.warn("dbGetLeads error:", error.message); return memLeads.slice(0, limit); }
     return (data as LeadRow[]) || [];
   } catch (e: any) { console.warn("dbGetLeads failed:", e?.message || e); return memLeads.slice(0, limit); }
+}
+
+// ================= BOT LEADS (trợ lý bán hàng — bắt SĐT từ tầng HIỂU) =================
+// Bảng RIÊNG "bot_leads": bảng "leads" ở trên đã dùng cho site-assistant (schema khác:
+// contact/note/page/created_at), nên không tái dùng tên/schema đó để tránh vỡ dữ liệu cũ.
+export async function dbGetBotLeads(botId: string, localFallback: Lead[]): Promise<Lead[]> {
+  const client = getSupabaseClient();
+  if (!client) return localFallback;
+  try {
+    const { data, error } = await client.from('bot_leads').select('*')
+      .eq('botId', botId).order('createdAt', { ascending: false });
+    if (error) { console.warn("Supabase dbGetBotLeads error, dùng local:", error); return localFallback; }
+    return (data as Lead[]) || [];
+  } catch (err) { console.warn("Supabase dbGetBotLeads failed:", err); return localFallback; }
+}
+
+export async function dbSaveBotLead(lead: Lead): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('bot_leads').upsert({ ...lead }, { onConflict: 'id' });
+    if (error) throw error;
+    return true;
+  } catch (err) { console.warn("Supabase dbSaveBotLead failed (RAM vẫn giữ):", err); return false; }
+}
+
+export async function dbUpdateBotLead(id: string, updates: Partial<Lead>): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('bot_leads').update(updates).eq('id', id);
+    if (error) throw error;
+    return true;
+  } catch (err) { console.warn("Supabase dbUpdateBotLead failed:", err); return false; }
 }
 

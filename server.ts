@@ -8,7 +8,9 @@ import { embedText, hashText } from "./rag/embeddings.js";
 import { GEN_MODEL } from "./rag/constants.js";
 import { rankBySimilarity, buildEmbedQuery, isShortFollowUp } from "./rag/retriever.js";
 import { synthesizeAnswer } from "./rag/synthesis.js";
-import { understand, defaultUnderstanding } from "./rag/understand.js";
+import { understand, defaultUnderstanding, isValidVNPhone, normalizeVNPhone } from "./rag/understand.js";
+import type { Understanding } from "./rag/understand.js";
+import { channelFromUserKey, formatLeadNotify } from "./leadHelpers.js";
 import type { ConversationGoal, GoalState } from "./rag/synthesis.js";
 import {
   signOAuthState, verifyOAuthState, buildOAuthDialogUrl, verifyFacebookSignature,
@@ -17,7 +19,7 @@ import {
 import { parseBridgePayload, buildBridgeResponse } from "./botcakeBridge.js";
 import { buildSendContentRequest } from "./botcakeAsync.js";
 import { TOP_K, RETRIEVE_FLOOR } from "./rag/constants.js";
-import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult, TelegramGroup } from "./src/types.js";
+import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult, TelegramGroup, Lead } from "./src/types.js";
 import {
   getSupabaseConfig,
   withSupabaseConfig,
@@ -69,7 +71,10 @@ import {
   dbAddFreeAllowlist,
   dbRemoveFreeAllowlist,
   dbAddLead,
-  dbGetLeads
+  dbGetLeads,
+  dbGetBotLeads,
+  dbSaveBotLead,
+  dbUpdateBotLead
 } from "./supabaseService.js";
 import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
 import { resolveLimitForOwner } from "./billingResolve.js";
@@ -272,6 +277,9 @@ let knowledgeSources: KnowledgeSource[] = [];
 let knowledgeChunks: KnowledgeChunk[] = [];
 
 let chatSessions: ChatSession[] = [];
+
+// Leads in-memory mirror (Supabase là nguồn bền; RAM để chạy được khi chưa migrate).
+const leadsMem: Lead[] = [];
 
 let faqList: FAQItem[] = [];
 
@@ -1859,6 +1867,20 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
   res.status(200).send("OK");
 
   try {
+    // Lệnh /id: trả chat id để chủ shop dán vào ô "Chat ID Telegram nhận thông báo lead".
+    // Đặt TRƯỚC bộ lọc lệnh chung bên dưới (bộ lọc đó chỉ cho qua "/start").
+    const tgText = String(update?.message?.text || "").trim();
+    if (tgText === "/id") {
+      const chatId = String(update?.message?.chat?.id || "");
+      if (bot.telegramToken && chatId) {
+        try {
+          await sendTelegramReminder(bot.telegramToken, chatId,
+            `Chat ID của bạn: ${chatId}\nDán số này vào ô "Chat ID Telegram nhận thông báo lead" trong BalaBot → Cấu hình Bot AI.`);
+        } catch {}
+      }
+      return;
+    }
+
     // Bot được add/xóa khỏi nhóm → Telegram bắn my_chat_member. Bắt để đăng ký nhóm.
     if (update?.my_chat_member?.chat) {
       const mcm = update.my_chat_member;
@@ -2784,6 +2806,40 @@ app.post("/api/bots/:botId/botcake-config", async (req, res) => {
   const updates: any = { botcakePageId: pageId, botcakeReplyFlowId: replyFlowId };
   // accessToken rỗng trong body → giữ token cũ (không ghi đè bằng rỗng).
   if (accessToken) updates.botcakeAccessToken = accessToken;
+  const memBot = bots.find(b => b.id === bot.id);
+  if (memBot) Object.assign(memBot, updates);
+  await dbUpdateBot(bot.id, updates);
+  res.json({ success: true });
+});
+
+// Danh sách lead của bot — mới nhất trước.
+app.get("/api/bots/:botId/leads", async (req, res) => {
+  const list = await dbGetBotLeads(req.params.botId, leadsMem.filter(l => l.botId === req.params.botId));
+  res.json({ leads: list });
+});
+
+// Đổi trạng thái lead (new|contacted|won|lost).
+app.patch("/api/bots/:botId/leads/:leadId", async (req, res) => {
+  const status = String(req.body?.status || "");
+  if (!["new", "contacted", "won", "lost"].includes(status)) {
+    return res.status(400).json({ error: "status không hợp lệ." });
+  }
+  const mem = leadsMem.find(l => l.id === req.params.leadId);
+  if (mem) mem.status = status as Lead["status"];
+  await dbUpdateBotLead(req.params.leadId, { status: status as Lead["status"] });
+  res.json({ success: true });
+});
+
+// Lưu cấu hình trợ lý bán hàng (mục tiêu + chat id thông báo).
+app.post("/api/bots/:botId/assistant-config", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+  const goal = String(req.body?.conversationGoal || "");
+  const chatId = String(req.body?.notifyTelegramChatId ?? "").trim();
+  const updates: Partial<BotConfig> = {};
+  if (["lead", "order", "consult"].includes(goal)) updates.conversationGoal = goal as BotConfig["conversationGoal"];
+  updates.notifyTelegramChatId = chatId; // rỗng = tắt thông báo
   const memBot = bots.find(b => b.id === bot.id);
   if (memBot) Object.assign(memBot, updates);
   await dbUpdateBot(bot.id, updates);
@@ -3854,8 +3910,53 @@ async function recordUsageForBot(bot: BotConfig): Promise<void> {
   await dbIncrementUsage(ownerKey, currentYearMonth());
 }
 
-// Task 4 thay bằng tra cứu leads thật. Stub để nối tầng trước.
-function hasLeadForSession(_botId: string, _userKey?: string): boolean { return false; }
+function hasLeadForSession(botId: string, userKey?: string): boolean {
+  return !!userKey && leadsMem.some(l => l.botId === botId && l.sessionId === userKey);
+}
+
+// Bắt lead từ kết quả tầng HIỂU. Fire-and-forget — KHÔNG chặn/không phá reply.
+async function captureLeadIfAny(
+  bot: BotConfig,
+  und: Understanding,
+  userInfo?: { fullName?: string; username?: string; id?: string }
+): Promise<void> {
+  try {
+    const rawPhone = und.contact?.phone || "";
+    if (!isValidVNPhone(rawPhone)) return;
+    const phone = normalizeVNPhone(rawPhone);
+    let lead = leadsMem.find(l => l.botId === bot.id && l.phone === phone);
+    const isNew = !lead;
+    if (lead) {
+      lead.interest = und.interest || lead.interest;
+      lead.sessionId = userInfo?.id || lead.sessionId;
+      lead.name = und.contact?.name || lead.name;
+    } else {
+      lead = {
+        id: "lead-" + Math.random().toString(36).substr(2, 9),
+        botId: bot.id,
+        sessionId: userInfo?.id,
+        name: und.contact?.name || userInfo?.fullName,
+        phone,
+        address: und.contact?.address,
+        interest: und.interest || undefined,
+        buyingSignal: und.buyingSignal,
+        channel: channelFromUserKey(userInfo?.id),
+        status: "new",
+        createdAt: new Date().toISOString(),
+      };
+      leadsMem.unshift(lead);
+    }
+    await dbSaveBotLead(lead);
+    if (isNew && bot.notifyTelegramChatId && bot.telegramToken) {
+      try {
+        await sendTelegramReminder(bot.telegramToken, bot.notifyTelegramChatId, formatLeadNotify(lead));
+      } catch (e: any) { console.warn("[Leads] notify Telegram lỗi (bỏ qua):", e?.message || e); }
+    }
+    console.log(`[Leads] ${isNew ? "MỚI" : "cập nhật"} lead ${phone} (bot ${bot.id}).`);
+  } catch (err: any) {
+    console.warn("[Leads] capture failed (bỏ qua):", err?.message || err);
+  }
+}
 
 // Core RAG matching & AI generation call
 async function generateRAGAnswer(
@@ -3921,6 +4022,9 @@ async function generateRAGAnswer(
     und = await understand(ai, query, history);
   }
 
+  // Bắt lead nếu tin nhắn chứa SĐT hợp lệ — chạy nền, không chặn trả lời.
+  void captureLeadIfAny(bot, und, userInfo);
+
   if (!ai) {
     // No API key -> safe fallback
     return {
@@ -3931,7 +4035,7 @@ async function generateRAGAnswer(
   }
 
   const goal: ConversationGoal =
-    ((bot as any).conversationGoal as ConversationGoal) ||
+    (bot.conversationGoal as ConversationGoal) ||
     (answerStyle === "reference" ? "consult" : "lead");
   // Bot đã mời để lại liên hệ trong 3 lượt bot gần nhất chưa (chống spam nhịp mời).
   const ASK_CONTACT_RE = /(số điện thoại|sđt|sdt|hotline|để lại (số|thông tin|liên hệ)|xin (số|liên hệ))/i;
