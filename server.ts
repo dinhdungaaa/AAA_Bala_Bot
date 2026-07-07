@@ -13,7 +13,7 @@ import {
   groupMessagingEventsByPage, randomToken, renderOAuthResultHtml, renderPageSelectionHtml,
 } from "./facebookOauth.js";
 import { parseBridgePayload, buildBridgeResponse } from "./botcakeBridge.js";
-import { buildSendFlowRequest } from "./botcakeAsync.js";
+import { buildSendContentRequest } from "./botcakeAsync.js";
 import { TOP_K, RETRIEVE_FLOOR } from "./rag/constants.js";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult, TelegramGroup } from "./src/types.js";
 import {
@@ -2631,17 +2631,17 @@ app.post("/api/bridge/botcake/:botId", async (req, res) => {
   }
 });
 
-// Gọi Botcake Public API để đẩy 1 đoạn text lại cho khách theo PSID.
+// Gọi Botcake Public API `send_content` để đẩy THẲNG câu trả lời lại cho khách theo PSID.
+// Chỉ cần pageId + accessToken (không cần flow trung gian hay custom field).
 async function sendBotcakeFlow(bot: BotConfig, psid: string, text: string): Promise<boolean> {
-  if (!bot.botcakePageId || !bot.botcakeAccessToken || !bot.botcakeReplyFlowId) {
-    console.warn(`[Botcake Async] Bot ${bot.id} thiếu cấu hình gửi lại (pageId/accessToken/replyFlowId).`);
+  if (!bot.botcakePageId || !bot.botcakeAccessToken) {
+    console.warn(`[Botcake Async] Bot ${bot.id} thiếu cấu hình gửi lại (pageId/accessToken).`);
     lastBotcakeSend = { at: new Date().toISOString(), stage: "thiếu-cấu-hình", psid };
     return false;
   }
-  const req = buildSendFlowRequest({
+  const req = buildSendContentRequest({
     pageId: bot.botcakePageId,
     accessToken: bot.botcakeAccessToken,
-    replyFlowId: bot.botcakeReplyFlowId,
     psid,
     text,
   });
@@ -2649,10 +2649,10 @@ async function sendBotcakeFlow(bot: BotConfig, psid: string, text: string): Prom
     const res = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body });
     const data = await res.json().catch(() => ({}));
     const ok = !(!res.ok || data?.success === false || data?.error);
-    // req.body chỉ chứa {psid, flow_id, payload} — KHÔNG có token → an toàn để lưu debug.
+    // req.body chỉ chứa {psid, data} — KHÔNG có token → an toàn để lưu debug.
     lastBotcakeSend = {
       at: new Date().toISOString(),
-      stage: ok ? "send_flow_ok" : "send_flow_fail",
+      stage: ok ? "send_content_ok" : "send_content_fail",
       psid,
       url: req.url,
       requestBody: req.body,
@@ -2762,8 +2762,8 @@ app.post("/api/bridge/botcake-async/:botId", async (req, res) => {
     console.warn("[Botcake Async] Thiếu text/psid. keys:", JSON.stringify(Object.keys(req.body || {})));
     return ack();
   }
-  if (!bot.botcakePageId || !bot.botcakeAccessToken || !bot.botcakeReplyFlowId) {
-    console.warn(`[Botcake Async] Bot ${bot.id} chưa cấu hình gửi lại — không thể trả lời.`);
+  if (!bot.botcakePageId || !bot.botcakeAccessToken) {
+    console.warn(`[Botcake Async] Bot ${bot.id} chưa cấu hình gửi lại (pageId/accessToken) — không thể trả lời.`);
     return ack();
   }
   // Trả 200 NGAY rồi xử lý nền (không await → Botcake không phải chờ).
