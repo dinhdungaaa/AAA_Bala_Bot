@@ -3555,11 +3555,11 @@ export default function App() {
                         <div className="grid grid-cols-1 gap-2 pt-2 border-t border-slate-100">
                           <span className="text-[11px] font-bold text-slate-600">Cấu hình gửi trả lời (Botcake API)</span>
                           <input value={botcakePageId} onChange={e => setBotcakePageId(e.target.value)} placeholder="Page ID (Botcake)" className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-                          <input value={botcakeReplyFlowId} onChange={e => setBotcakeReplyFlowId(e.target.value)} placeholder="Flow ID của flow trả lời" className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-                          <input type="password" value={botcakeAccessToken} onChange={e => setBotcakeAccessToken(e.target.value)} placeholder={(bridgeInfo as any).hasAccessToken ? '••• access-token đã lưu (để trống nếu giữ nguyên)' : 'Access token (Botcake → Cài đặt → API)'} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
+                          <input type="password" value={botcakeAccessToken} onChange={e => setBotcakeAccessToken(e.target.value)} placeholder={(bridgeInfo as any).hasAccessToken ? '••• access-token đã lưu (để trống nếu giữ nguyên)' : 'Access token (Botcake → Cấu hình → Tích hợp)'} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
                           <button type="button" onClick={handleSaveBotcakeConfig} disabled={savingBotcakeCfg} className="px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold rounded-lg text-xs">
                             {savingBotcakeCfg ? 'Đang lưu...' : 'Lưu cấu hình Botcake'}
                           </button>
+                          <span className="text-[10px] text-slate-400">Chỉ cần Page ID + Access Token. Bot gửi trả lời thẳng qua Botcake API (send_content) — không cần tạo flow hay Flow ID.</span>
                         </div>
 
                         <details>
