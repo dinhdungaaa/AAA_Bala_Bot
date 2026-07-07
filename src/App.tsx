@@ -532,17 +532,6 @@ export default function App() {
     }
   };
 
-  const handleCopyBridgeUrl = async () => {
-    if (!bridgeInfo?.bridgeUrl) return;
-    try {
-      await navigator.clipboard.writeText(bridgeInfo.bridgeUrl);
-      setBridgeCopied(true);
-      setTimeout(() => setBridgeCopied(false), 2000);
-    } catch {
-      window.prompt('Copy thủ công URL này:', bridgeInfo.bridgeUrl);
-    }
-  };
-
   const handleSimulateFacebookMsg = async () => {
     if (!selectedBotId || !facebookSimText.trim()) return;
     setIsSimulatingFacebook(true);
@@ -3582,7 +3571,7 @@ export default function App() {
                       </div>
                     )}
                     <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Hướng dẫn 5 bước cài Botcake: xem file <span className="font-mono">docs/botcake-bridge-guide.md</span> (hoặc hỏi đội hỗ trợ BalaBot).
+                      Hướng dẫn cài Botcake (async): xem file <span className="font-mono">docs/botcake-async-guide.md</span> (hoặc hỏi đội hỗ trợ BalaBot).
                     </p>
                   </div>
 
