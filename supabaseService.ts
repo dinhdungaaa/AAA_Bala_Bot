@@ -1352,11 +1352,12 @@ export async function dbSaveBotLead(lead: Lead): Promise<boolean> {
   } catch (err) { console.warn("Supabase dbSaveBotLead failed (RAM vẫn giữ):", err); return false; }
 }
 
-export async function dbUpdateBotLead(id: string, updates: Partial<Lead>): Promise<boolean> {
+// Scope theo botId để không cho route bot này sửa lead của bot khác qua leadId đoán mò.
+export async function dbUpdateBotLead(botId: string, id: string, updates: Partial<Lead>): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
   try {
-    const { error } = await client.from('bot_leads').update(updates).eq('id', id);
+    const { error } = await client.from('bot_leads').update(updates).eq('botId', botId).eq('id', id);
     if (error) throw error;
     return true;
   } catch (err) { console.warn("Supabase dbUpdateBotLead failed:", err); return false; }

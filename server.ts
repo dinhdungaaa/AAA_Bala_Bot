@@ -280,6 +280,27 @@ let chatSessions: ChatSession[] = [];
 
 // Leads in-memory mirror (Supabase là nguồn bền; RAM để chạy được khi chưa migrate).
 const leadsMem: Lead[] = [];
+// userKey dùng chung cho khách vô danh path Botcake sync (stateless) — KHÔNG được
+// dùng làm sessionId lead, nếu không mọi khách vô danh bị coi là "đã có liên hệ".
+const SHARED_ANON_KEY = "botcake:unknown";
+// Bot đã nạp lead bền từ Supabase vào leadsMem sau restart chưa (lazy, mỗi bot 1 lần).
+const leadsHydrated = new Set<string>();
+
+// Nạp lead từ Supabase vào RAM cho 1 bot — chống tạo lead TRÙNG + notify Telegram lặp
+// khi khách cũ nhắn lại SĐT sau khi server restart. Lỗi vẫn đánh dấu đã hydrate để
+// không gọi lặp mỗi tin nhắn (fail-open về RAM-only như trước).
+async function hydrateLeadsForBot(botId: string): Promise<void> {
+  if (leadsHydrated.has(botId)) return;
+  try {
+    const persisted = await dbGetBotLeads(botId, []);
+    for (const lead of persisted) {
+      if (!leadsMem.some(l => l.id === lead.id)) leadsMem.push(lead);
+    }
+  } catch (err: any) {
+    console.warn("[Leads] hydrate từ Supabase lỗi (dùng RAM-only):", err?.message || err);
+  }
+  leadsHydrated.add(botId);
+}
 
 let faqList: FAQItem[] = [];
 
@@ -2814,6 +2835,7 @@ app.post("/api/bots/:botId/botcake-config", async (req, res) => {
 
 // Danh sách lead của bot — mới nhất trước.
 app.get("/api/bots/:botId/leads", async (req, res) => {
+  await hydrateLeadsForBot(req.params.botId); // fallback RAM đầy đủ kể cả sau restart
   const list = await dbGetBotLeads(req.params.botId, leadsMem.filter(l => l.botId === req.params.botId));
   res.json({ leads: list });
 });
@@ -2824,9 +2846,11 @@ app.patch("/api/bots/:botId/leads/:leadId", async (req, res) => {
   if (!["new", "contacted", "won", "lost"].includes(status)) {
     return res.status(400).json({ error: "status không hợp lệ." });
   }
-  const mem = leadsMem.find(l => l.id === req.params.leadId);
+  await hydrateLeadsForBot(req.params.botId);
+  // Scope theo botId — không cho sửa lead của bot khác qua leadId đoán mò.
+  const mem = leadsMem.find(l => l.botId === req.params.botId && l.id === req.params.leadId);
   if (mem) mem.status = status as Lead["status"];
-  await dbUpdateBotLead(req.params.leadId, { status: status as Lead["status"] });
+  await dbUpdateBotLead(req.params.botId, req.params.leadId, { status: status as Lead["status"] });
   res.json({ success: true });
 });
 
@@ -3910,8 +3934,13 @@ async function recordUsageForBot(bot: BotConfig): Promise<void> {
   await dbIncrementUsage(ownerKey, currentYearMonth());
 }
 
+// Sync có chủ đích (gọi trong generateRAGAnswer cho goalState nudge): KHÔNG chờ
+// hydrate — sau restart, lượt đầu của khách cũ có thể sai lệch (bot mời liên hệ thừa
+// 1 lần), chấp nhận được; captureLeadIfAny (nơi gây trùng thật) mới bắt buộc hydrate.
 function hasLeadForSession(botId: string, userKey?: string): boolean {
-  return !!userKey && leadsMem.some(l => l.botId === botId && l.sessionId === userKey);
+  // Key vô danh dùng chung → không bao giờ coi là "đã có liên hệ".
+  if (!userKey || userKey === SHARED_ANON_KEY) return false;
+  return leadsMem.some(l => l.botId === botId && l.sessionId === userKey);
 }
 
 // Bắt lead từ kết quả tầng HIỂU. Fire-and-forget — KHÔNG chặn/không phá reply.
@@ -3923,18 +3952,23 @@ async function captureLeadIfAny(
   try {
     const rawPhone = und.contact?.phone || "";
     if (!isValidVNPhone(rawPhone)) return;
+    // Nạp lead bền trước khi dedupe — nếu không, sau restart khách cũ nhắn lại SĐT
+    // sẽ tạo lead trùng + notify Telegram lặp.
+    await hydrateLeadsForBot(bot.id);
     const phone = normalizeVNPhone(rawPhone);
+    // Key vô danh dùng chung (Botcake sync stateless) không được gán làm sessionId.
+    const sessionKey = userInfo?.id === SHARED_ANON_KEY ? undefined : userInfo?.id;
     let lead = leadsMem.find(l => l.botId === bot.id && l.phone === phone);
     const isNew = !lead;
     if (lead) {
       lead.interest = und.interest || lead.interest;
-      lead.sessionId = userInfo?.id || lead.sessionId;
+      lead.sessionId = sessionKey || lead.sessionId;
       lead.name = und.contact?.name || lead.name;
     } else {
       lead = {
         id: "lead-" + Math.random().toString(36).substr(2, 9),
         botId: bot.id,
-        sessionId: userInfo?.id,
+        sessionId: sessionKey,
         name: und.contact?.name || userInfo?.fullName,
         phone,
         address: und.contact?.address,
