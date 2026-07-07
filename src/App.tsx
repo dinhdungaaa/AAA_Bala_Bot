@@ -75,7 +75,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'facebook' | 'zalo' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin'>(() => isAdminRoute() ? 'admin' : 'dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'facebook' | 'zalo' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin' | 'leads'>(() => isAdminRoute() ? 'admin' : 'dashboard');
   const [telegramPanel, setTelegramPanel] = useState<'connection' | 'schedules' | 'train-schedules'>('connection');
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
@@ -320,6 +320,13 @@ export default function App() {
   const [facebookSimText, setFacebookSimText] = useState('Shop tư vấn giúp mình sản phẩm/dịch vụ phù hợp với nhu cầu hiện tại nhé.');
   const [facebookSimUserId, setFacebookSimUserId] = useState('fb-test-user-001');
   const [isSimulatingFacebook, setIsSimulatingFacebook] = useState(false);
+
+  // Sales Assistant: leads + assistant config states
+  const [leads, setLeads] = useState<any[]>([]);
+  const [assistantGoal, setAssistantGoal] = useState<'lead' | 'order' | 'consult'>('lead');
+  const [notifyChatId, setNotifyChatId] = useState('');
+  const [savingAssistant, setSavingAssistant] = useState(false);
+  const [copiedLeadId, setCopiedLeadId] = useState<string | null>(null);
 
   // Zalo Group Integration States
   const [zaloStatus, setZaloStatus] = useState<any>(null);
@@ -892,6 +899,26 @@ export default function App() {
     }
   }, [selectedBotId, activeTab]);
 
+  // Fetch leads when the "Khách tiềm năng" tab is opened
+  useEffect(() => {
+    if (activeTab !== 'leads' || !selectedBotId) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/bots/${selectedBotId}/leads`, { headers: getScopedApiHeaders() });
+        if (res.ok) setLeads((await res.json()).leads || []);
+      } catch {}
+    })();
+  }, [activeTab, selectedBotId]);
+
+  // Init assistant config form from the currently selected bot
+  useEffect(() => {
+    const b: any = bots.find(x => x.id === selectedBotId);
+    if (b) {
+      setAssistantGoal(b.conversationGoal || 'lead');
+      setNotifyChatId(b.notifyTelegramChatId || '');
+    }
+  }, [selectedBotId, bots]);
+
   // Load Supabase configuration & status
   useEffect(() => {
     fetch('/api/supabase/config')
@@ -1184,6 +1211,30 @@ export default function App() {
       const updated = await res.json();
       setBots(bots.map(b => b.id === selectedBotId ? updated : b));
     }
+  };
+
+  const handleSaveAssistantConfig = async () => {
+    if (!selectedBotId) return;
+    setSavingAssistant(true);
+    try {
+      await fetch(`/api/bots/${selectedBotId}/assistant-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
+        body: JSON.stringify({ conversationGoal: assistantGoal, notifyTelegramChatId: notifyChatId.trim() }),
+      });
+      setBots(prev => prev.map(b => b.id === selectedBotId ? { ...b, conversationGoal: assistantGoal, notifyTelegramChatId: notifyChatId.trim() } as any : b));
+    } finally { setSavingAssistant(false); }
+  };
+
+  const handleLeadStatus = async (leadId: string, status: string) => {
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status } : l));
+    try {
+      await fetch(`/api/bots/${selectedBotId}/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
+        body: JSON.stringify({ status }),
+      });
+    } catch {}
   };
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -2125,6 +2176,18 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('leads')}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'leads' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <span>🔥</span> Khách tiềm năng
+            {leads.filter(l => l.status === 'new').length > 0 && (
+              <span className="ml-auto px-1.5 py-0.5 text-[10px] font-bold bg-emerald-500 text-white rounded-full">
+                {leads.filter(l => l.status === 'new').length}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => { setActiveTab('analytics'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'analytics' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
@@ -2742,6 +2805,32 @@ export default function App() {
                     <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out ${activeBot.limitToKnowledge ? 'translate-x-5' : 'translate-x-0'}`}></span>
                   </button>
                 </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Trợ lý bán hàng</span>
+                <div className="space-y-2">
+                  <span className="text-[11px] font-bold text-slate-600">Mục tiêu hội thoại</span>
+                  {([
+                    ['lead', 'Lấy liên hệ — bot tư vấn rồi khéo léo xin SĐT để nhân viên gọi lại (khuyến nghị)'],
+                    ['order', 'Chốt đơn trong chat — bot thu thập món/số lượng/địa chỉ từng bước'],
+                    ['consult', 'Tư vấn thuần — chỉ trả lời, không xin gì, không mời chốt'],
+                  ] as const).map(([val, label]) => (
+                    <label key={val} className="flex items-start gap-2 text-sm text-slate-600 cursor-pointer">
+                      <input type="radio" name="assistantGoal" checked={assistantGoal === val} onChange={() => setAssistantGoal(val)} className="mt-1" />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <div>
+                  <span className="text-[11px] font-bold text-slate-600">Chat ID Telegram nhận thông báo lead (tùy chọn)</span>
+                  <input value={notifyChatId} onChange={e => setNotifyChatId(e.target.value)} placeholder="Nhắn /id cho bot Telegram của bạn để lấy số này"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
+                </div>
+                <button type="button" onClick={handleSaveAssistantConfig} disabled={savingAssistant}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold rounded-lg text-xs">
+                  {savingAssistant ? 'Đang lưu...' : 'Lưu cấu hình trợ lý'}
+                </button>
               </div>
 
               <div className="text-right">
@@ -3937,6 +4026,53 @@ export default function App() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {activeTab === 'leads' && (
+            <div className="p-6 space-y-4">
+              <h1 className="text-xl font-bold text-slate-800">Khách tiềm năng</h1>
+              <p className="text-sm text-slate-500">Khách để lại số điện thoại khi chat với bot — gọi lại sớm để chốt đơn.</p>
+              {leads.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-sm text-slate-400">
+                  Chưa có lead nào. Khi khách nhắn số điện thoại cho bot, lead sẽ hiện ở đây.
+                </div>
+              ) : (
+                <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-left text-[11px] uppercase text-slate-400 border-b border-slate-100">
+                      <th className="p-3">Tên</th><th className="p-3">SĐT</th><th className="p-3">Quan tâm</th>
+                      <th className="p-3">Kênh</th><th className="p-3">Lúc</th><th className="p-3">Trạng thái</th>
+                    </tr></thead>
+                    <tbody>
+                      {leads.map(l => (
+                        <tr key={l.id} className="border-b border-slate-50">
+                          <td className="p-3 font-medium text-slate-700">{l.name || '—'}</td>
+                          <td className="p-3 font-mono">
+                            {l.phone}
+                            <button onClick={() => { navigator.clipboard?.writeText(l.phone); setCopiedLeadId(l.id); setTimeout(() => setCopiedLeadId(null), 1500); }}
+                              className="ml-2 text-[11px] text-emerald-600 font-bold">
+                              {copiedLeadId === l.id ? '✓' : 'Copy'}
+                            </button>
+                          </td>
+                          <td className="p-3 text-slate-500">{l.interest || '—'}</td>
+                          <td className="p-3 text-slate-500">{l.channel || '—'}</td>
+                          <td className="p-3 text-slate-400 text-xs">{new Date(l.createdAt).toLocaleString('vi-VN')}</td>
+                          <td className="p-3">
+                            <select value={l.status} onChange={e => handleLeadStatus(l.id, e.target.value)}
+                              className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs">
+                              <option value="new">🔥 Mới</option>
+                              <option value="contacted">📞 Đã gọi</option>
+                              <option value="won">✅ Chốt</option>
+                              <option value="lost">❌ Hủy</option>
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
