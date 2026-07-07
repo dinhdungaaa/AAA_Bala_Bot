@@ -312,6 +312,10 @@ export default function App() {
   const [bridgeInfo, setBridgeInfo] = useState<{ bridgeKey: string; bridgeUrl: string } | null>(null);
   const [isFetchingBridge, setIsFetchingBridge] = useState(false);
   const [bridgeCopied, setBridgeCopied] = useState(false);
+  const [botcakePageId, setBotcakePageId] = useState('');
+  const [botcakeAccessToken, setBotcakeAccessToken] = useState('');
+  const [botcakeReplyFlowId, setBotcakeReplyFlowId] = useState('');
+  const [savingBotcakeCfg, setSavingBotcakeCfg] = useState(false);
   const [isConnectingFacebook, setIsConnectingFacebook] = useState(false);
   const [facebookSimText, setFacebookSimText] = useState('Shop tư vấn giúp mình sản phẩm/dịch vụ phù hợp với nhu cầu hiện tại nhé.');
   const [facebookSimUserId, setFacebookSimUserId] = useState('fb-test-user-001');
@@ -468,7 +472,12 @@ export default function App() {
     try {
       const res = await fetch(`/api/bots/${selectedBotId}/bridge-info`, { headers: getScopedApiHeaders() });
       const data = await res.json();
-      if (res.ok) setBridgeInfo(data);
+      if (res.ok) {
+        setBridgeInfo(data);
+        setBotcakePageId(data.botcakePageId || '');
+        setBotcakeReplyFlowId(data.botcakeReplyFlowId || '');
+        setBotcakeAccessToken(''); // không nhận token cũ về; để trống = giữ nguyên khi lưu
+      }
       else setFacebookActionMsg({ status: 'error', text: data.error || 'Không tải được Bridge URL.' });
     } catch (err: any) {
       setFacebookActionMsg({ status: 'error', text: 'Lỗi tải Bridge URL: ' + err.message });
@@ -500,14 +509,26 @@ export default function App() {
     }
   };
 
-  const handleCopyBridgeUrl = async () => {
-    if (!bridgeInfo?.bridgeUrl) return;
+  const handleSaveBotcakeConfig = async () => {
+    if (!selectedBotId) return;
+    setSavingBotcakeCfg(true);
     try {
-      await navigator.clipboard.writeText(bridgeInfo.bridgeUrl);
-      setBridgeCopied(true);
-      setTimeout(() => setBridgeCopied(false), 2000);
-    } catch {
-      window.prompt('Copy thủ công URL này:', bridgeInfo.bridgeUrl);
+      const res = await fetch(`/api/bots/${selectedBotId}/botcake-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
+        body: JSON.stringify({ pageId: botcakePageId.trim(), accessToken: botcakeAccessToken.trim(), replyFlowId: botcakeReplyFlowId.trim() })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setFacebookActionMsg({ status: 'success', text: 'Đã lưu cấu hình Botcake. Nhắn thử để kiểm tra.' });
+        fetchBridgeInfo();
+      } else {
+        setFacebookActionMsg({ status: 'error', text: data.error || 'Không lưu được cấu hình.' });
+      }
+    } catch (err: any) {
+      setFacebookActionMsg({ status: 'error', text: 'Lỗi lưu cấu hình: ' + err.message });
+    } finally {
+      setSavingBotcakeCfg(false);
     }
   };
 
@@ -3517,22 +3538,40 @@ export default function App() {
                         {isFetchingBridge ? 'Đang tải...' : 'Tạo / Hiện Bridge URL'}
                       </button>
                     ) : (
-                      <div className="space-y-2">
-                        <div className="font-mono text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-lg p-3 break-all select-all">
-                          {bridgeInfo.bridgeUrl}
+                      <div className="space-y-3">
+                        <div>
+                          <span className="text-[11px] font-bold text-slate-600">Bridge URL (async — khuyến nghị)</span>
+                          <div className="font-mono text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-lg p-3 break-all select-all mt-1">
+                            {(bridgeInfo as any).asyncBridgeUrl || bridgeInfo.bridgeUrl}
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <button type="button" onClick={() => { navigator.clipboard?.writeText((bridgeInfo as any).asyncBridgeUrl || bridgeInfo.bridgeUrl); setBridgeCopied(true); setTimeout(() => setBridgeCopied(false), 2000); }} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs">
+                              {bridgeCopied ? 'Đã copy ✓' : 'Copy URL'}
+                            </button>
+                            <button type="button" onClick={handleRegenBridgeKey} disabled={isFetchingBridge} className="px-3 py-2 text-[11px] font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50">Đổi key</button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button type="button" onClick={handleCopyBridgeUrl} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs">
-                            {bridgeCopied ? 'Đã copy ✓' : 'Copy URL'}
-                          </button>
-                          <button type="button" onClick={handleRegenBridgeKey} disabled={isFetchingBridge} className="px-3 py-2 text-[11px] font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50">
-                            Đổi key
+
+                        <div className="grid grid-cols-1 gap-2 pt-2 border-t border-slate-100">
+                          <span className="text-[11px] font-bold text-slate-600">Cấu hình gửi trả lời (Botcake API)</span>
+                          <input value={botcakePageId} onChange={e => setBotcakePageId(e.target.value)} placeholder="Page ID (Botcake)" className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
+                          <input value={botcakeReplyFlowId} onChange={e => setBotcakeReplyFlowId(e.target.value)} placeholder="Flow ID của flow trả lời" className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
+                          <input type="password" value={botcakeAccessToken} onChange={e => setBotcakeAccessToken(e.target.value)} placeholder={(bridgeInfo as any).hasAccessToken ? '••• access-token đã lưu (để trống nếu giữ nguyên)' : 'Access token (Botcake → Cài đặt → API)'} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
+                          <button type="button" onClick={handleSaveBotcakeConfig} disabled={savingBotcakeCfg} className="px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold rounded-lg text-xs">
+                            {savingBotcakeCfg ? 'Đang lưu...' : 'Lưu cấu hình Botcake'}
                           </button>
                         </div>
+
+                        <details>
+                          <summary className="text-[11px] font-bold text-slate-500 cursor-pointer select-none">Cách cũ (đồng bộ — có thể chậm, không khuyến nghị)</summary>
+                          <div className="font-mono text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg p-3 break-all select-all mt-2">
+                            {bridgeInfo.bridgeUrl}
+                          </div>
+                        </details>
                       </div>
                     )}
                     <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Hướng dẫn 5 bước cài Botcake: xem file <span className="font-mono">docs/botcake-bridge-guide.md</span> (hoặc hỏi đội hỗ trợ BalaBot).
+                      Hướng dẫn cài Botcake (async): xem file <span className="font-mono">docs/botcake-async-guide.md</span> (hoặc hỏi đội hỗ trợ BalaBot).
                     </p>
                   </div>
 

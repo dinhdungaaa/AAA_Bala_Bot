@@ -21,6 +21,10 @@ export interface BotConfig {
   facebookConnectedAt?: string;
   // Botcake bridge — kênh tạm qua nền tảng đã được Meta duyệt.
   botcakeBridgeKey?: string;
+  // Botcake async bridge — cấu hình gọi ngược send_flow API.
+  botcakePageId?: string;
+  botcakeAccessToken?: string;
+  botcakeReplyFlowId?: string;
   welcomeMessage: string;
   fallbackMessage: string;
   fallbackEmail: string;
