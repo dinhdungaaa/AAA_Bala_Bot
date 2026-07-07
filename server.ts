@@ -6,8 +6,10 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { embedText, hashText } from "./rag/embeddings.js";
 import { GEN_MODEL } from "./rag/constants.js";
-import { rankBySimilarity, buildEmbedQuery, isShortFollowUp, condenseFollowUpQuery } from "./rag/retriever.js";
+import { rankBySimilarity, buildEmbedQuery, isShortFollowUp } from "./rag/retriever.js";
 import { synthesizeAnswer } from "./rag/synthesis.js";
+import { understand, defaultUnderstanding } from "./rag/understand.js";
+import type { ConversationGoal, GoalState } from "./rag/synthesis.js";
 import {
   signOAuthState, verifyOAuthState, buildOAuthDialogUrl, verifyFacebookSignature,
   groupMessagingEventsByPage, randomToken, renderOAuthResultHtml, renderPageSelectionHtml,
@@ -3852,6 +3854,9 @@ async function recordUsageForBot(bot: BotConfig): Promise<void> {
   await dbIncrementUsage(ownerKey, currentYearMonth());
 }
 
+// Task 4 thay bằng tra cứu leads thật. Stub để nối tầng trước.
+function hasLeadForSession(_botId: string, _userKey?: string): boolean { return false; }
+
 // Core RAG matching & AI generation call
 async function generateRAGAnswer(
   bot: BotConfig, 
@@ -3892,7 +3897,6 @@ async function generateRAGAnswer(
   const allowProductIntro = bot.allowProductConsulting !== false;
   const expand = replyOptions?.expand === true;
   const fast = replyOptions?.fast === true;
-  const synthCtx = { customer: customerCtx, history, allowProductIntro, expand, fast };
 
   const chitChatKind = detectOffTopicChitChat(query);
   if (chitChatKind) {
@@ -3910,6 +3914,13 @@ async function generateRAGAnswer(
   const ai = getAIClient();
   const answerStyle: "sales" | "reference" = bot.answerStyle === "reference" ? "reference" : "sales";
 
+  // Tầng HIỂU: 1 call nhanh — intent + câu tìm kiếm + tín hiệu mua + liên hệ.
+  // fast (bridge sync cũ) hoặc không có AI → default (fail-open, hành vi cũ).
+  let und = defaultUnderstanding(query);
+  if (ai && !fast) {
+    und = await understand(ai, query, history);
+  }
+
   if (!ai) {
     // No API key -> safe fallback
     return {
@@ -3919,15 +3930,28 @@ async function generateRAGAnswer(
     };
   }
 
+  const goal: ConversationGoal =
+    ((bot as any).conversationGoal as ConversationGoal) ||
+    (answerStyle === "reference" ? "consult" : "lead");
+  // Bot đã mời để lại liên hệ trong 3 lượt bot gần nhất chưa (chống spam nhịp mời).
+  const ASK_CONTACT_RE = /(số điện thoại|sđt|sdt|hotline|để lại (số|thông tin|liên hệ)|xin (số|liên hệ))/i;
+  const goalState: GoalState = {
+    isFirstTurn: isFirstInteraction,
+    hasContact: hasLeadForSession(bot.id, userInfo?.id),
+    askedRecently: history.filter(t => t.role === "bot").slice(-3).some(t => ASK_CONTACT_RE.test(t.text)),
+  };
+  const synthCtx = {
+    customer: customerCtx, history, allowProductIntro, expand, fast,
+    intent: und.intent, buyingSignal: und.buyingSignal, goal, goalState,
+  };
+
   let topChunks: Array<{ chunk: KnowledgeChunk; score: number }> = [];
   try {
-    // Câu follow-up ngắn ("có giá không em") thiếu chủ đề → viết lại thành câu
-    // tìm kiếm độc lập dựa trên hội thoại (kể cả lượt bot) để retrieval trúng đoạn.
-    let searchText = buildEmbedQuery(query, lastUserText);
-    // Chế độ nhanh (bridge): bỏ bước viết lại câu hỏi bằng LLM để tiết kiệm 1 lượt gọi mạng.
-    if (!fast && isShortFollowUp(query) && history.length > 0) {
-      searchText = await condenseFollowUpQuery(ai, query, history);
-    }
+    // searchQuery từ tầng hiểu (đã viết lại đầy đủ chủ đề); default = câu gốc,
+    // nên vẫn ghép ngữ cảnh kiểu cũ khi tầng hiểu fail-open.
+    let searchText = und.searchQuery && und.searchQuery !== query.trim()
+      ? und.searchQuery
+      : buildEmbedQuery(query, lastUserText);
     const qVec = await embedText(ai, searchText);
     topChunks = rankBySimilarity(qVec, botChunks, TOP_K);
   } catch (e: any) {
