@@ -67,34 +67,43 @@ const INTENT_GUIDANCE: Record<string, string> = {
 };
 
 // Quy tắc dẫn dắt theo mục tiêu + trạng thái — phần "đúng thời điểm" chống spam.
-function buildGoalRule(goal: ConversationGoal, state: GoalState, buyingSignal: BuyingSignal): string {
+// Intent nhạy cảm (phan_nan/cung_cap_lien_he) cũng chặn mời/chốt lượt này để prompt
+// không tự mâu thuẫn với INTENT_GUIDANCE ("không chào bán", "không hỏi xin lại").
+function buildGoalRule(goal: ConversationGoal, state: GoalState, buyingSignal: BuyingSignal, intent?: Intent): string {
   if (state.hasContact) {
     return (
       "MỤC TIÊU: khách ĐÃ để lại thông tin liên hệ. TUYỆT ĐỐI KHÔNG xin/hỏi lại liên hệ hay số điện thoại thêm lần nào nữa — " +
       "chỉ tư vấn chu đáo và nhắc bên em sẽ liên hệ lại khi phù hợp."
     );
   }
-  const holdOff = state.isFirstTurn || state.askedRecently;
+  const contactJustGiven = intent === "cung_cap_lien_he";
+  const sensitiveTurn = intent === "phan_nan" || contactJustGiven;
+  const holdOff = state.isFirstTurn || state.askedRecently || sensitiveTurn;
+  const contactJustGivenLine = contactJustGiven
+    ? "Khách VỪA GỬI thông tin liên hệ ngay lượt này: chỉ cảm ơn + xác nhận đã ghi nhận, TUYỆT ĐỐI KHÔNG xin thêm hay hỏi lại bất kỳ thông tin liên hệ nào."
+    : null;
   if (goal === "order") {
     return [
       "MỤC TIÊU: CHỐT ĐƠN ngay trong chat. Khi khách có tín hiệu mua: chốt TỪNG BƯỚC —",
       "(1) xác nhận món + số lượng; (2) xin tên + số điện thoại + địa chỉ giao; (3) tóm tắt đơn để khách xác nhận.",
       "Mỗi tin nhắn chỉ hỏi 1-2 thứ, KHÔNG dồn hết một lượt.",
       holdOff
-        ? "Lượt này KHÔNG mời chốt/xin thông tin (mới vào chuyện hoặc vừa mời xong) — chỉ tư vấn cho tốt đã."
+        ? "Lượt này KHÔNG mời chốt/xin thông tin (mới vào chuyện, vừa mời xong, hoặc lượt này không phù hợp để mời) — chỉ tư vấn cho tốt đã."
         : buyingSignal === "lanh"
           ? "Khách còn lạnh: tư vấn tạo giá trị trước, chưa vội chốt."
           : "Khách đang quan tâm: chủ động dẫn sang bước chốt một cách tự nhiên.",
+      ...(contactJustGivenLine ? [contactJustGivenLine] : []),
     ].join("\n");
   }
   // goal === "lead"
   return [
     "MỤC TIÊU: lấy được THÔNG TIN LIÊN HỆ (số điện thoại) để nhân viên gọi tư vấn kỹ hơn.",
     holdOff
-      ? "Lượt này KHÔNG mời để lại liên hệ (mới vào chuyện hoặc vừa mời gần đây) — tập trung tư vấn cho tốt."
+      ? "Lượt này KHÔNG mời để lại liên hệ (mới vào chuyện, vừa mời gần đây, hoặc lượt này không phù hợp để mời) — tập trung tư vấn cho tốt."
       : buyingSignal !== "lanh"
         ? "Khách đang quan tâm rõ: sau khi trả lời, mời khách để lại số điện thoại kèm LÝ DO tự nhiên (vd: 'để bên em gọi tư vấn kỹ và báo ưu đãi cho mình nhé')."
         : "Khách còn lạnh: tư vấn tạo giá trị trước; CHỈ mời để lại liên hệ nếu tài liệu không đủ trả lời câu hỏi.",
+    ...(contactJustGivenLine ? [contactJustGivenLine] : []),
     "Khách từ chối cho số → tôn trọng, tiếp tục tư vấn vui vẻ, KHÔNG nài thêm.",
   ].join("\n");
 }
@@ -162,11 +171,13 @@ export function buildGroundedPrompt(
           ? [`KHÔNG mở đầu giống các lượt trước (gần đây bạn đã mở đầu: ${recentOpeners.map(o => `"${o}"`).join(", ")}). Đổi cách vào câu.`]
           : []),
         ...(opts.intent && INTENT_GUIDANCE[opts.intent] ? [INTENT_GUIDANCE[opts.intent]] : []),
-        buildGoalRule(goal, opts.goalState || { isFirstTurn: true, hasContact: false, askedRecently: false }, opts.buyingSignal || "lanh"),
+        buildGoalRule(goal, opts.goalState || { isFirstTurn: true, hasContact: false, askedRecently: false }, opts.buyingSignal || "lanh", opts.intent),
         "",
         FEW_SHOTS,
       ].join("\n")
-    : buildStyleRule(opts.answerStyle, opts.allowProductIntro);
+    // goal đã resolve = "consult" thì đi giọng tra cứu bất kể answerStyle (consult thắng);
+    // còn lại là answerStyle "reference" thuần túy như cũ.
+    : buildStyleRule(goal === "consult" ? "reference" : opts.answerStyle, opts.allowProductIntro);
 
   // Quy tắc về nguồn thông tin: mặc định chỉ bám tài liệu; chế độ mở rộng cho phép
   // bổ sung kiến thức chung trong cùng lĩnh vực nhưng có rào chắn chặt.
