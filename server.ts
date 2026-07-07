@@ -156,7 +156,7 @@ function getRequestConfig(req: express.Request): { url: string; key: string } | 
     if (userConfig?.url && userConfig?.key) return userConfig;
   }
 
-  const botMatch = req.path.match(/^\/api\/(?:bots|telegram-webhook|facebook-webhook|bridge\/botcake)\/([^/]+)/);
+  const botMatch = req.path.match(/^\/api\/(?:bots|telegram-webhook|facebook-webhook|bridge\/botcake(?:-async)?)\/([^/]+)/);
   const botId = botMatch?.[1];
   if (botId) {
     const botConfigs = readJsonFile<Record<string, { url: string; key: string }>>(BOT_CONFIGS_FILE, {});
