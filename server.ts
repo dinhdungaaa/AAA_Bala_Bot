@@ -13,6 +13,7 @@ import {
   groupMessagingEventsByPage, randomToken, renderOAuthResultHtml, renderPageSelectionHtml,
 } from "./facebookOauth.js";
 import { parseBridgePayload, buildBridgeResponse } from "./botcakeBridge.js";
+import { buildSendFlowRequest } from "./botcakeAsync.js";
 import { TOP_K, RETRIEVE_FLOOR } from "./rag/constants.js";
 import { BotConfig, KnowledgeSource, KnowledgeChunk, Message, ChatSession, FAQItem, AnalyticsSummary, WorkspaceUser, SaasCustomer, ScheduleItem, ReminderLog, ScheduleUploadResult, TelegramGroup } from "./src/types.js";
 import {
@@ -2470,7 +2471,14 @@ app.get("/api/bots/:botId/bridge-info", async (req, res) => {
     if (memBot) memBot.botcakeBridgeKey = key;
     await dbUpdateBot(bot.id, { botcakeBridgeKey: key } as any);
   }
-  res.json({ bridgeKey: bot.botcakeBridgeKey, bridgeUrl: buildBridgeUrl(bot.id, bot.botcakeBridgeKey) });
+  res.json({
+    bridgeKey: bot.botcakeBridgeKey,
+    bridgeUrl: buildBridgeUrl(bot.id, bot.botcakeBridgeKey),
+    asyncBridgeUrl: `${BRIDGE_BACKEND_ORIGIN}/api/bridge/botcake-async/${encodeURIComponent(bot.id)}?key=${encodeURIComponent(bot.botcakeBridgeKey)}`,
+    botcakePageId: bot.botcakePageId || "",
+    botcakeReplyFlowId: bot.botcakeReplyFlowId || "",
+    hasAccessToken: !!bot.botcakeAccessToken,
+  });
 });
 
 // Đổi key khi lộ — URL cũ mất hiệu lực ngay.
@@ -2604,6 +2612,147 @@ app.post("/api/bridge/botcake/:botId", async (req, res) => {
     console.error("[Botcake Bridge] Lỗi xử lý:", err?.message || err);
     return res.json(buildBridgeResponse(bot.fallbackMessage || "Dạ em xin phép kết nối nhân viên hỗ trợ mình ngay ạ."));
   }
+});
+
+// Gọi Botcake Public API để đẩy 1 đoạn text lại cho khách theo PSID.
+async function sendBotcakeFlow(bot: BotConfig, psid: string, text: string): Promise<boolean> {
+  if (!bot.botcakePageId || !bot.botcakeAccessToken || !bot.botcakeReplyFlowId) {
+    console.warn(`[Botcake Async] Bot ${bot.id} thiếu cấu hình gửi lại (pageId/accessToken/replyFlowId).`);
+    return false;
+  }
+  const req = buildSendFlowRequest({
+    pageId: bot.botcakePageId,
+    accessToken: bot.botcakeAccessToken,
+    replyFlowId: bot.botcakeReplyFlowId,
+    psid,
+    text,
+  });
+  try {
+    const res = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.success === false || data?.error) {
+      console.warn(`[Botcake Async] send_flow thất bại (HTTP ${res.status}):`, JSON.stringify(data).slice(0, 500));
+      return false;
+    }
+    console.log(`[Botcake Async] Đã gửi trả lời cho psid ${psid} (bot ${bot.id}).`);
+    return true;
+  } catch (err: any) {
+    console.error("[Botcake Async] Lỗi gọi send_flow:", err?.message || err);
+    return false;
+  }
+}
+
+// Xử lý nền: chạy SAU khi đã trả 200 cho Botcake. Không throw ra ngoài.
+async function processBotcakeAsync(bot: BotConfig, psid: string, text: string, fullName: string): Promise<void> {
+  try {
+    const userKey = `botcake:${psid}`;
+    const username = `botcake_${psid}`;
+    const name = fullName || "Khách hàng Facebook";
+
+    let session = chatSessions.find(s => s.botId === bot.id && s.telegramUserId === userKey);
+    if (!session) {
+      session = {
+        id: "sess-bca-" + Math.random().toString(36).substr(2, 9),
+        botId: bot.id,
+        telegramUserId: userKey,
+        telegramUsername: username,
+        telegramFullName: name,
+        lastMessageText: text,
+        lastMessageTime: new Date().toISOString(),
+        status: "bot_answered",
+        internalNotes: "Đến từ kênh Botcake (async)",
+        messages: []
+      };
+      chatSessions.unshift(session);
+    }
+    session.channel = "botcake";
+    session.channelChatId = psid;
+    session.channelIsGroup = false;
+    session.channelSenderId = psid;
+
+    const hasPriorBotReply = session.messages.some(msg => msg.sender === "bot");
+    const userMsg: Message = {
+      id: "m-bca-" + Math.random().toString(36).substr(2, 9),
+      sender: "user", username, fullName: name, text,
+      timestamp: new Date().toISOString()
+    };
+    session.messages.push(userMsg);
+    session.lastMessageText = text;
+    session.lastMessageTime = userMsg.timestamp;
+
+    let aiAnswer: { text: string; sources: any[]; fallbackTriggered: boolean };
+    const gate = await checkUsageGate(bot);
+    if (!gate.allowed) {
+      aiAnswer = { text: BLOCK_MESSAGE, sources: [], fallbackTriggered: true };
+    } else {
+      aiAnswer = await generateRAGAnswer(
+        bot, text,
+        { fullName: name, username, id: userKey },
+        { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8, -1) }
+      );
+      await recordUsageForBot(bot);
+    }
+
+    const botMsg: Message = {
+      id: "m-bca-bot-" + Math.random().toString(36).substr(2, 9),
+      sender: "bot", username: bot.name, text: aiAnswer.text,
+      timestamp: new Date().toISOString(),
+      sourcesUsed: aiAnswer.sources, fallbackTriggered: aiAnswer.fallbackTriggered
+    };
+    session.messages.push(botMsg);
+    session.lastMessageText = aiAnswer.text;
+    session.lastMessageTime = botMsg.timestamp;
+    session.status = aiAnswer.fallbackTriggered ? "escalated" : "bot_answered";
+    analytics.totalMessages += 2;
+
+    await sendBotcakeFlow(bot, psid, aiAnswer.text);
+    try { await dbSaveConversation(session); } catch (e) { console.warn("[Botcake Async] Skip Supabase:", e); }
+  } catch (err: any) {
+    console.error("[Botcake Async] Lỗi xử lý nền:", err?.message || err);
+    try { await sendBotcakeFlow(bot, psid, bot.fallbackMessage || "Dạ em xin phép kết nối nhân viên hỗ trợ mình ngay ạ."); } catch {}
+  }
+}
+
+// Endpoint async: Botcake POST vào đây, nhận 200 ngay, bot trả lời sau qua send_flow.
+app.post("/api/bridge/botcake-async/:botId", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  const key = String(req.query.key || req.body?.key || "");
+  const ack = () => res.json({ messages: [] });
+
+  if (!bot || !bot.botcakeBridgeKey || key !== bot.botcakeBridgeKey) {
+    console.warn("[Botcake Async] Key không hợp lệ hoặc bot không tồn tại:", req.params.botId);
+    return ack();
+  }
+  const payload = parseBridgePayload(req.body);
+  if (!payload.text || !payload.psid) {
+    console.warn("[Botcake Async] Thiếu text/psid. keys:", JSON.stringify(Object.keys(req.body || {})));
+    return ack();
+  }
+  if (!bot.botcakePageId || !bot.botcakeAccessToken || !bot.botcakeReplyFlowId) {
+    console.warn(`[Botcake Async] Bot ${bot.id} chưa cấu hình gửi lại — không thể trả lời.`);
+    return ack();
+  }
+  // Trả 200 NGAY rồi xử lý nền (không await → Botcake không phải chờ).
+  ack();
+  void processBotcakeAsync(bot, payload.psid, payload.text, payload.fullName);
+});
+
+// Lưu cấu hình gửi lại (pageId/replyFlowId/accessToken) cho kênh Botcake async.
+app.post("/api/bots/:botId/botcake-config", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+  const pageId = String(req.body?.pageId || "").trim();
+  const replyFlowId = String(req.body?.replyFlowId || "").trim();
+  const accessToken = String(req.body?.accessToken || "").trim();
+  const updates: any = { botcakePageId: pageId, botcakeReplyFlowId: replyFlowId };
+  // accessToken rỗng trong body → giữ token cũ (không ghi đè bằng rỗng).
+  if (accessToken) updates.botcakeAccessToken = accessToken;
+  const memBot = bots.find(b => b.id === bot.id);
+  if (memBot) Object.assign(memBot, updates);
+  await dbUpdateBot(bot.id, updates);
+  res.json({ success: true });
 });
 
 // ===== Facebook OAuth 1 chạm (app chung BalaBot) =====
