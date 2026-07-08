@@ -265,7 +265,8 @@ function normalizeCustomerRecord(customer: Partial<SaasCustomer> & { id?: string
     passwordSet: Boolean(customer.passwordSet),
     passwordUpdatedAt: customer.passwordUpdatedAt,
     lastLoginAt: customer.lastLoginAt,
-    botsCount: Number(customer.botsCount) || 0
+    botsCount: Number(customer.botsCount) || 0,
+    planExpiresAt: customer.planExpiresAt ?? null
   };
 }
 
@@ -346,13 +347,14 @@ app.get("/api/admin/customers", async (req, res) => {
       // Gói bền per khách nằm ở bảng profiles — đọc thành map để PHỦ LÊN danh sách
       // auth users (trước đây profiles có dòng nào là bỏ luôn auth list → vừa mất
       // khách chưa có profile, vừa reset gói về 'free' hardcode khi profiles trống).
-      const planById = new Map<string, { tier?: string; message_limit?: number }>();
-      const planByEmail = new Map<string, { tier?: string; message_limit?: number }>();
+      type PlanRow = { tier?: string; message_limit?: number; plan_expires_at?: string | null };
+      const planById = new Map<string, PlanRow>();
+      const planByEmail = new Map<string, PlanRow>();
       try {
-        const { data: profiles, error: pError } = await client.from("profiles").select("id,email,tier,message_limit");
+        const { data: profiles, error: pError } = await client.from("profiles").select("id,email,tier,message_limit,plan_expires_at");
         if (!pError && profiles) {
           for (const p of profiles as any[]) {
-            const plan = { tier: p.tier, message_limit: Number(p.message_limit) || undefined };
+            const plan: PlanRow = { tier: p.tier, message_limit: Number(p.message_limit) || undefined, plan_expires_at: p.plan_expires_at };
             if (p.id) planById.set(String(p.id), plan);
             if (p.email) planByEmail.set(String(p.email).toLowerCase(), plan);
           }
@@ -376,7 +378,8 @@ app.get("/api/admin/customers", async (req, res) => {
             role: (isOwnerAcc ? "owner" : "customer") as "owner" | "customer",
             passwordSet: true,
             lastLoginAt: u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString('vi-VN') : undefined,
-            botsCount: bots.filter(bot => bot.userId === u.id || bot.userId === u.email).length
+            botsCount: bots.filter(bot => bot.userId === u.id || bot.userId === u.email).length,
+            planExpiresAt: plan?.plan_expires_at ?? null
           };
         });
       }
@@ -528,7 +531,19 @@ app.put("/api/admin/customers/:id", async (req, res) => {
     });
     saasCustomers.push(customer);
   }
-  if (tier !== undefined) customer.tier = tier;
+  if (tier !== undefined) {
+    customer.tier = tier;
+    // Gói trả phí có hạn 30 ngày: gia hạn NỐI TIẾP hạn cũ (còn hạn → hạn cũ + 30;
+    // hết hạn/chưa có → từ lúc bấm + 30). Hạ về free → xoá hạn. Owner không hết hạn.
+    const PLAN_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+    if (tier === "free" || customer.email === ADMIN_EMAIL) {
+      customer.planExpiresAt = null;
+    } else {
+      const prev = customer.planExpiresAt ? new Date(customer.planExpiresAt).getTime() : 0;
+      const base = prev > Date.now() ? prev : Date.now();
+      customer.planExpiresAt = new Date(base + PLAN_DURATION_MS).toISOString();
+    }
+  }
   if (messageLimit !== undefined) customer.messageLimit = Number(messageLimit);
   if (phone !== undefined) customer.phone = phone;
   if (name !== undefined) customer.name = name;
@@ -561,7 +576,7 @@ app.put("/api/admin/customers/:id", async (req, res) => {
 
   // Ghi gói BỀN vào Supabase profiles (sống sót qua redeploy). Best-effort, không chặn nếu lỗi.
   if ((tier !== undefined || messageLimit !== undefined) && !id.startsWith("cust-") && !id.startsWith("u-")) {
-    const saved = await dbUpdateProfilePlan(id, customer.email || "", customer.tier, Number(customer.messageLimit) || 0);
+    const saved = await dbUpdateProfilePlan(id, customer.email || "", customer.tier, Number(customer.messageLimit) || 0, customer.planExpiresAt ?? null);
     if (!saved) console.warn(`[Admin] Gói của ${customer.email} CHỈ lưu RAM (profiles chưa ghi được) — sẽ mất khi redeploy. Đã chạy profiles.sql chưa?`);
   }
 
@@ -3899,6 +3914,7 @@ async function resolveOwnerPlan(ownerKey: string, emailHint?: string): Promise<{
   let tier = cust?.tier as string | undefined;
   let limit = (cust?.messageLimit && cust.messageLimit > 0) ? cust.messageLimit : undefined;
   let email = cust?.email?.toLowerCase() || emailLc;
+  let expiresAt: string | null | undefined = cust?.planExpiresAt;
 
   if (!tier || !limit || !email) {
     const p = await dbGetProfilePlan(ownerKey);
@@ -3906,7 +3922,14 @@ async function resolveOwnerPlan(ownerKey: string, emailHint?: string): Promise<{
       if (!tier && p.tier) tier = p.tier;
       if (!limit && p.message_limit && p.message_limit > 0) limit = p.message_limit;
       if (!email && p.email) email = p.email.toLowerCase();
+      if (expiresAt === undefined) expiresAt = p.plan_expires_at;
     }
+  }
+
+  // Gói trả phí có hạn 30 ngày: quá hạn → tự rơi về Free (kiểm tra lúc dùng, không cần cron).
+  if (tier && tier !== "free" && expiresAt && new Date(expiresAt).getTime() < Date.now()) {
+    tier = "free";
+    limit = undefined;
   }
 
   // Admin không bao giờ bị giới hạn.

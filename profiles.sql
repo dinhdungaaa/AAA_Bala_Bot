@@ -9,3 +9,5 @@ create table if not exists profiles (
   created_at timestamptz default now()
 );
 create index if not exists profiles_email_idx on profiles (lower(email));
+-- Hạn gói trả phí: null = không hết hạn; quá hạn → hệ thống tự coi là Free.
+alter table profiles add column if not exists plan_expires_at timestamptz;

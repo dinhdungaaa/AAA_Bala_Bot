@@ -1230,30 +1230,32 @@ export async function dbIncrementUsage(ownerKey: string, yearMonth: string): Pro
   } catch (e: any) { console.warn("dbIncrementUsage failed:", e?.message || e); }
 }
 
-// Đọc gói (tier + hạn mức) bền từ profiles theo id hoặc email. Fail-open: null nếu lỗi/không có.
-export async function dbGetProfilePlan(ownerKey: string): Promise<{ tier?: string; message_limit?: number; email?: string } | null> {
+// Đọc gói (tier + hạn mức + hạn dùng) bền từ profiles theo id hoặc email. Fail-open: null nếu lỗi/không có.
+export async function dbGetProfilePlan(ownerKey: string): Promise<{ tier?: string; message_limit?: number; email?: string; plan_expires_at?: string | null } | null> {
   const client = getSupabaseClient();
   if (!client || !ownerKey) return null;
   try {
-    let resp = await client.from("profiles").select("id,email,tier,message_limit").eq("id", ownerKey).maybeSingle();
+    const cols = "id,email,tier,message_limit,plan_expires_at";
+    let resp = await client.from("profiles").select(cols).eq("id", ownerKey).maybeSingle();
     if ((!resp.data || resp.error) && ownerKey.includes("@")) {
-      resp = await client.from("profiles").select("id,email,tier,message_limit").eq("email", ownerKey.toLowerCase()).maybeSingle();
+      resp = await client.from("profiles").select(cols).eq("email", ownerKey.toLowerCase()).maybeSingle();
     }
     if (resp.error || !resp.data) return null;
     const d = resp.data as any;
-    return { tier: d.tier, message_limit: d.message_limit, email: d.email };
+    return { tier: d.tier, message_limit: d.message_limit, email: d.email, plan_expires_at: d.plan_expires_at };
   } catch (e: any) { console.warn("dbGetProfilePlan failed:", e?.message || e); return null; }
 }
 
 // Ghi gói bền vào profiles khi admin nâng/hạ gói (sống sót qua Railway redeploy).
 // UPSERT (không phải update): dòng profile chưa tồn tại thì tạo mới — update vào
 // dòng không tồn tại là no-op im lặng, chính là lỗi làm gói bị reset về Free.
-export async function dbUpdateProfilePlan(id: string, email: string, tier: string, messageLimit: number): Promise<boolean> {
+export async function dbUpdateProfilePlan(id: string, email: string, tier: string, messageLimit: number, planExpiresAt?: string | null): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client || !id) return false;
   try {
     const row: any = { id, tier, message_limit: messageLimit };
     if (email) row.email = email.toLowerCase();
+    if (planExpiresAt !== undefined) row.plan_expires_at = planExpiresAt; // null = xoá hạn
     const { error } = await client.from("profiles").upsert(row, { onConflict: "id" });
     if (error) { console.warn("dbUpdateProfilePlan error:", error.message); return false; }
     return true;

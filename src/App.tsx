@@ -1602,6 +1602,16 @@ export default function App() {
   const myPlanTier = ((usage?.tier as keyof typeof PLAN_LIMITS) || (isAdminUser ? 'enterprise' : 'free'));
   const planMeta = isNoPlan ? { messages: 0, bots: 0, channels: 0 as number } : (PLAN_LIMITS[myPlanTier] || PLAN_LIMITS.free);
   const planLabelMap: Record<string, string> = { free: 'Free Standard', starter: 'Starter', pro: 'Premium Pro', business: 'Business', enterprise: 'Enterprise' };
+
+  // Nhãn hạn gói trả phí (30 ngày/lần kích hoạt): còn bao nhiêu ngày / đã hết hạn.
+  const planExpiryLabel = (c: { tier?: string; planExpiresAt?: string | null }): { text: string; cls: string } | null => {
+    if (!c?.planExpiresAt || c.tier === 'free') return null;
+    const ms = new Date(c.planExpiresAt).getTime() - Date.now();
+    if (isNaN(ms)) return null;
+    if (ms <= 0) return { text: '⛔ Hết hạn — đã về Free', cls: 'text-rose-600' };
+    const days = Math.ceil(ms / 86400000);
+    return { text: `⏳ Còn ${days} ngày (đến ${new Date(c.planExpiresAt).toLocaleDateString('vi-VN')})`, cls: days <= 5 ? 'text-amber-600' : 'text-slate-400' };
+  };
   const myPlanLabel = isNoPlan ? 'Chưa kích hoạt' : (planLabelMap[myPlanTier] || 'Free Standard');
   const myBotLimit = planMeta.bots;                                   // number | Infinity
   const myBotLimitFinite = Number.isFinite(myBotLimit);
@@ -5609,6 +5619,7 @@ export default function App() {
                                       <span className={`px-2.5 py-1 rounded-full text-[9px] uppercase tracking-wider border font-sans ${badgeClass}`}>
                                         {c.tier === 'free' ? 'Standard Free' : c.tier === 'pro' ? 'Premium Pro ⭐' : 'Enterprise 👑'}
                                       </span>
+                                      {(() => { const ex = planExpiryLabel(c); return ex ? <div className={`text-[10px] mt-1 font-semibold ${ex.cls}`}>{ex.text}</div> : null; })()}
                                     </td>
                                     <td className="p-3">
                                       <div className="flex items-center gap-2">
@@ -6422,6 +6433,7 @@ WHERE email = 'customer-email@example.com';`}
                                       <span className={`px-2.5 py-1 rounded-full text-[9px] uppercase tracking-wider border font-sans ${badgeClass}`}>
                                         {c.tier === 'free' ? 'Standard Free' : c.tier === 'pro' ? 'Premium Pro ⭐' : 'Enterprise 👑'}
                                       </span>
+                                      {(() => { const ex = planExpiryLabel(c); return ex ? <div className={`text-[10px] mt-1 font-semibold ${ex.cls}`}>{ex.text}</div> : null; })()}
                                     </td>
                                     <td className="p-3 text-left">
                                       <span className={`px-2.5 py-1 rounded-full text-[9px] uppercase tracking-wider border font-bold ${c.status === 'suspended' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>

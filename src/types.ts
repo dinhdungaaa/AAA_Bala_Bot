@@ -173,6 +173,8 @@ export interface SaasCustomer {
   passwordUpdatedAt?: string;
   lastLoginAt?: string;
   botsCount?: number;
+  // Hạn gói trả phí (ISO). null/undefined = không hết hạn. Nâng/gia hạn = hạn cũ + 30 ngày.
+  planExpiresAt?: string | null;
 }
 
 // === REMINDER / SCHEDULE SYSTEM ===
