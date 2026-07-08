@@ -279,6 +279,21 @@ let knowledgeChunks: KnowledgeChunk[] = [];
 
 let chatSessions: ChatSession[] = [];
 
+// ===== Human takeover: nhân viên nhắn → bot im lặng 30 phút (mỗi tin gia hạn lại) =====
+const TAKEOVER_WINDOW_MS = 30 * 60 * 1000;
+
+function isHumanTakeoverActive(session: ChatSession | null | undefined): boolean {
+  if (!session?.humanTakeoverUntil) return false;
+  return new Date(session.humanTakeoverUntil).getTime() > Date.now();
+}
+
+// Lưu tin khách vào session rồi im lặng (không gọi AI) — dùng ở mọi kênh khi takeover active.
+async function absorbMessageDuringTakeover(session: ChatSession): Promise<void> {
+  session.status = "needs_review";
+  try { await dbSaveConversation(session); } catch {}
+  console.log(`[Takeover] Bot im lặng (người đang xử lý đến ${session.humanTakeoverUntil}) — session ${session.id}`);
+}
+
 // Leads in-memory mirror (Supabase là nguồn bền; RAM để chạy được khi chưa migrate).
 const leadsMem: Lead[] = [];
 // userKey dùng chung cho khách vô danh path Botcake sync (stateless) — KHÔNG được
@@ -1554,16 +1569,23 @@ app.post("/api/conversations/:sessId/messages", async (req, res) => {
   // Session dùng để chuyển tiếp tin can thiệp ra kênh khách.
   let targetSession: ChatSession | null = idx !== -1 ? chatSessions[idx] : null;
 
+  // Nhân viên nhắn → bot nhường sân 30 phút (mỗi tin gia hạn lại từ bây giờ).
+  const takeoverUntil = (sender || "agent") === "agent"
+    ? new Date(Date.now() + TAKEOVER_WINDOW_MS).toISOString()
+    : undefined;
+
   if (idx !== -1) {
     chatSessions[idx].messages.push(newMsg);
     chatSessions[idx].lastMessageText = text;
     chatSessions[idx].lastMessageTime = newMsg.timestamp;
     chatSessions[idx].status = sender === "agent" ? "resolved" : chatSessions[idx].status;
+    if (takeoverUntil) chatSessions[idx].humanTakeoverUntil = takeoverUntil;
     await dbUpdateConversation(req.params.sessId, {
       messages: chatSessions[idx].messages,
       lastMessageText: text,
       lastMessageTime: newMsg.timestamp,
-      status: chatSessions[idx].status
+      status: chatSessions[idx].status,
+      ...(takeoverUntil ? { humanTakeoverUntil: takeoverUntil } : {})
     });
   } else {
     const client = getSupabaseClient();
@@ -1577,7 +1599,8 @@ app.post("/api/conversations/:sessId/messages", async (req, res) => {
           messages: updatedMsgs,
           lastMessageText: text,
           lastMessageTime: newMsg.timestamp,
-          status: calculatedStatus
+          status: calculatedStatus,
+          ...(takeoverUntil ? { humanTakeoverUntil: takeoverUntil } : {})
         });
         // Dựng session tạm (kèm messages đã lưu) để định tuyến gửi ra kênh khách.
         targetSession = { ...(sessData as ChatSession), messages: updatedMsgs };
@@ -1593,6 +1616,18 @@ app.post("/api/conversations/:sessId/messages", async (req, res) => {
   }
 
   res.status(201).json({ ...newMsg, delivery });
+});
+
+// Bật/tắt takeover thủ công: body { release: true } = trả lại cho bot ngay;
+// { minutes } = tạm dừng bot N phút (mặc định 30).
+app.post("/api/conversations/:sessId/takeover", async (req, res) => {
+  const release = req.body?.release === true;
+  const minutes = Math.min(Math.max(Number(req.body?.minutes) || 30, 1), 24 * 60);
+  const until = release ? null : new Date(Date.now() + minutes * 60000).toISOString();
+  const sess = chatSessions.find(s => s.id === req.params.sessId);
+  if (sess) sess.humanTakeoverUntil = until;
+  try { await dbUpdateConversation(req.params.sessId, { humanTakeoverUntil: until } as any); } catch {}
+  res.json({ success: true, humanTakeoverUntil: until });
 });
 
 // Get Webhook status and information from Telegram
@@ -2022,6 +2057,12 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
     session.lastMessageText = text;
     session.lastMessageTime = userMsg.timestamp;
 
+    // Người đang xử lý → bot im lặng, chỉ lưu tin khách cho nhân viên đọc.
+    if (isHumanTakeoverActive(session)) {
+      await absorbMessageDuringTakeover(session);
+      return res.status(200).send("OK");
+    }
+
     let responseText = "";
     let sourcesUsed: any[] = [];
     let fallbackTriggered = false;
@@ -2148,6 +2189,12 @@ app.post("/api/telegram-webhook/simulate", async (req, res) => {
   session.messages.push(userMsg);
   session.lastMessageText = text;
   session.lastMessageTime = userMsg.timestamp;
+
+  // Người đang xử lý → bot im lặng, chỉ lưu tin khách.
+  if (isHumanTakeoverActive(session)) {
+    await absorbMessageDuringTakeover(session);
+    return res.json({ ok: true, humanTakeover: true, messages: session.messages.slice(-10) });
+  }
 
   // Process through AI Answer retrieval or /start detection
   let aiAnswer;
@@ -2342,6 +2389,12 @@ async function processFacebookIncomingMessage(bot: BotConfig, event: any, option
   session.messages.push(userMsg);
   session.lastMessageText = text;
   session.lastMessageTime = userMsg.timestamp;
+
+  // Người đang xử lý → bot im lặng, chỉ lưu tin khách cho nhân viên đọc.
+  if (isHumanTakeoverActive(session)) {
+    await absorbMessageDuringTakeover(session);
+    return null;
+  }
 
   let aiAnswer;
   if (text.trim().toLowerCase() === "/start") {
@@ -2666,6 +2719,12 @@ app.post("/api/bridge/botcake/:botId", async (req, res) => {
     session.lastMessageText = payload.text;
     session.lastMessageTime = userMsg.timestamp;
 
+    // Người đang xử lý → bot im lặng (trả messages rỗng cho Botcake), lưu tin khách.
+    if (isHumanTakeoverActive(session)) {
+      await absorbMessageDuringTakeover(session);
+      return res.json({ messages: [] });
+    }
+
     let aiAnswer: { text: string; sources: any[]; fallbackTriggered: boolean };
     const gate = await checkUsageGate(bot);
     if (!gate.allowed) {
@@ -2787,6 +2846,12 @@ async function processBotcakeAsync(bot: BotConfig, psid: string, text: string, f
     session.messages.push(userMsg);
     session.lastMessageText = text;
     session.lastMessageTime = userMsg.timestamp;
+
+    // Người đang xử lý → bot im lặng (không gọi send_content), lưu tin khách.
+    if (isHumanTakeoverActive(session)) {
+      await absorbMessageDuringTakeover(session);
+      return;
+    }
 
     let aiAnswer: { text: string; sources: any[]; fallbackTriggered: boolean };
     const gate = await checkUsageGate(bot);
@@ -4348,6 +4413,14 @@ app.post("/api/integrations/botpress/reply", async (req, res) => {
       timestamp: new Date().toISOString()
     };
     session.messages.push(userMsg);
+
+    // Người đang xử lý → bot im lặng (reply rỗng), lưu tin khách.
+    if (isHumanTakeoverActive(session)) {
+      session.lastMessageText = text;
+      session.lastMessageTime = userMsg.timestamp;
+      await absorbMessageDuringTakeover(session);
+      return res.json({ reply: "", text: "", sources: [], fallbackTriggered: false, humanTakeover: true });
+    }
 
     const gate = await checkUsageGate(bot);
     if (!gate.allowed) {

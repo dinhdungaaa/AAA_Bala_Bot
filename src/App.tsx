@@ -1530,6 +1530,21 @@ export default function App() {
   };
 
   // Operator takeover send
+  // Bật/tắt takeover thủ công: release=true → trả lại cho bot ngay; false → bot im lặng 30 phút.
+  const handleTakeover = async (sessId: string, release: boolean) => {
+    try {
+      const res = await fetch(`/api/conversations/${sessId}/takeover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
+        body: JSON.stringify(release ? { release: true } : { minutes: 30 })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setConversations(prev => prev.map(c => c.id === sessId ? { ...c, humanTakeoverUntil: data.humanTakeoverUntil } as any : c));
+      }
+    } catch {}
+  };
+
   const handleOperatorSendReply = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!operatorReply.trim() || !selectedSessionId) return;
@@ -1553,8 +1568,10 @@ export default function App() {
           status: 'resolved',
           lastMessageText: operatorReply,
           lastMessageTime: new Date().toISOString(),
-          messages: updatedMsgs
-        } : c));
+          messages: updatedMsgs,
+          // Nhân viên vừa nhắn → bot im lặng 30 phút (đồng bộ với server)
+          humanTakeoverUntil: new Date(Date.now() + 30 * 60 * 1000).toISOString()
+        } as any : c));
       }
       setOperatorReply('');
       // Báo nếu KHÔNG gửi được ra kênh khách (vd phiên Zalo chưa đăng nhập, thiếu token).
@@ -3975,8 +3992,8 @@ export default function App() {
                         </h4>
                       </div>
 
-                      {/* Manual State Resolver */}
-                      <div className="flex gap-2">
+                      {/* Manual State Resolver + Human takeover */}
+                      <div className="flex gap-2 items-center flex-wrap justify-end">
                         {selectedSession.status === 'escalated' && (
                           <button
                             onClick={() => handleUpdateSessionStatus(selectedSession.id, 'resolved')}
@@ -3985,11 +4002,38 @@ export default function App() {
                             Đánh dấu xử lý xong (Resolve)
                           </button>
                         )}
-                        <span className={`px-2.5 py-1 text-xs font-bold rounded uppercase ${
-                          selectedSession.status === 'escalated' ? 'bg-rose-100 text-rose-700' : 'bg-green-100 text-green-700'
-                        }`}>
-                          {selectedSession.status === 'escalated' ? 'Cảnh báo: Nhân viên cần vào' : 'Bot Đang Phục Vụ'}
-                        </span>
+                        {(() => {
+                          const toUntil = (selectedSession as any).humanTakeoverUntil;
+                          const toActive = toUntil && new Date(toUntil).getTime() > Date.now();
+                          return toActive ? (
+                            <>
+                              <span className="px-2.5 py-1 text-xs font-bold rounded uppercase bg-amber-100 text-amber-700">
+                                👤 Người đang xử lý (đến {new Date(toUntil).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })})
+                              </span>
+                              <button
+                                onClick={() => handleTakeover(selectedSession.id, true)}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-colors shadow-xs"
+                              >
+                                Trả lại cho bot ngay
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span className={`px-2.5 py-1 text-xs font-bold rounded uppercase ${
+                                selectedSession.status === 'escalated' ? 'bg-rose-100 text-rose-700' : 'bg-green-100 text-green-700'
+                              }`}>
+                                {selectedSession.status === 'escalated' ? 'Cảnh báo: Nhân viên cần vào' : 'Bot Đang Phục Vụ'}
+                              </span>
+                              <button
+                                onClick={() => handleTakeover(selectedSession.id, false)}
+                                className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-colors shadow-xs"
+                                title="Bot im lặng 30 phút để nhân viên nhắn tay"
+                              >
+                                ⏸ Tạm dừng bot 30p
+                              </button>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
 

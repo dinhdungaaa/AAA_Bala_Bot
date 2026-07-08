@@ -113,6 +113,9 @@ export interface ChatSession {
   channelIsGroup?: boolean;   // true nếu là nhóm (cần @tag + reply rõ người)
   channelSenderId?: string;   // id khách trên kênh (để @mention)
   channelOwnerEmail?: string; // chủ session Zalo (để gửi qua đúng phiên zca-js)
+  // Người đang xử lý: đến thời điểm này bot IM LẶNG (mỗi tin nhân viên gửi lại gia hạn).
+  // null/quá hạn = bot hoạt động bình thường.
+  humanTakeoverUntil?: string | null;
 }
 
 export interface FAQItem {
