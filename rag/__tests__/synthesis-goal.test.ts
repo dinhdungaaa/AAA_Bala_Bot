@@ -6,6 +6,23 @@ const bot = { name: "Shop Test", field: "mỹ phẩm" } as BotConfig;
 const passages = [{ chunk: { title: "Bảng giá", content: "Son A giá 200k" } }];
 const base = { answerStyle: "sales" as const };
 
+describe("buildGroundedPrompt — tài liệu trống", () => {
+  it("passages rỗng → có rule cấm suy đoán từ tên bot; có passages → không", () => {
+    const empty = buildGroundedPrompt(bot, [], {
+      ...base, goal: "lead", intent: "chit_chat", buyingSignal: "lanh",
+      goalState: { isFirstTurn: true, hasContact: false, askedRecently: false },
+    });
+    expect(empty).toContain("TÀI LIỆU ĐANG TRỐNG");
+    expect(empty).toMatch(/KHÔNG suy đoán .*tên bot/i);
+
+    const withDocs = buildGroundedPrompt(bot, passages, {
+      ...base, goal: "lead", intent: "chit_chat", buyingSignal: "lanh",
+      goalState: { isFirstTurn: true, hasContact: false, askedRecently: false },
+    });
+    expect(withDocs).not.toContain("TÀI LIỆU ĐANG TRỐNG");
+  });
+});
+
 describe("buildGroundedPrompt — goal-driven", () => {
   it("goal lead + buyingSignal am → có khối mục tiêu mời liên hệ", () => {
     const p = buildGroundedPrompt(bot, passages, {

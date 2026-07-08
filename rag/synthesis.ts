@@ -62,7 +62,7 @@ const INTENT_GUIDANCE: Record<string, string> = {
   tin_hieu_mua: "Khách CÓ TÍN HIỆU MUA: không tư vấn lan man — xác nhận nhu cầu và tiến ngay tới bước tiếp theo của MỤC TIÊU.",
   cung_cap_lien_he: "Khách vừa GỬI THÔNG TIN LIÊN HỆ: cảm ơn, xác nhận đã ghi nhận, nói rõ bước tiếp theo (bên em sẽ liên hệ lại...). KHÔNG hỏi xin lại thông tin.",
   phan_nan: "Khách PHÀN NÀN: câu đầu tiên phải nhận lỗi/xoa dịu chân thành, rồi mới xử lý nội dung. TUYỆT ĐỐI không chào bán gì ở lượt này.",
-  chit_chat: "Khách chỉ xã giao: đáp ngắn thân thiện, có thể gợi mở nhẹ về sản phẩm, không ép.",
+  chit_chat: "Khách chỉ xã giao: đáp ngắn thân thiện; chỉ gợi mở nhẹ về sản phẩm/dịch vụ CÓ TRONG TÀI LIỆU (tài liệu trống thì hỏi mở xem khách cần gì, không nêu tên sản phẩm), không ép.",
   khac: "",
 };
 
@@ -191,6 +191,16 @@ export function buildGroundedPrompt(
         "4. ƯU TIÊN BÁM TÀI LIỆU: nếu đoạn chứa DÙ CHỈ MỘT PHẦN thông tin liên quan (vd có nêu giá, gói, chính sách...) thì PHẢI dùng để trả lời — KHÔNG được nói 'chưa có thông tin' khi tài liệu thực sự có. Chỉ nói CHƯA CÓ THÔNG TIN (và mời để lại liên hệ/đợi nhân viên) khi các đoạn HOÀN TOÀN không đề cập tới điều khách hỏi. TUYỆT ĐỐI KHÔNG bịa.",
       ];
 
+  // Không có đoạn tài liệu nào → cấm tuyệt đối suy đoán ngành hàng/sản phẩm
+  // (kể cả từ TÊN bot — vd tên chứa "Balo" không có nghĩa là shop bán balo).
+  const emptyDocsRule = passages.length
+    ? []
+    : [
+        "4b. TÀI LIỆU ĐANG TRỐNG: TUYỆT ĐỐI KHÔNG suy đoán shop bán gì từ tên bot hay bất kỳ nguồn nào — " +
+          "KHÔNG kể tên loại sản phẩm/dịch vụ cụ thể. Chỉ chào hỏi/đáp xã giao chung, hỏi mở xem khách cần gì, " +
+          "hoặc nói em chưa có thông tin và mời để lại liên hệ.",
+      ];
+
   return [
     `Bạn là trợ lý của "${bot.name}" (lĩnh vực ${field}).`,
     styleBlock,
@@ -200,6 +210,7 @@ export function buildGroundedPrompt(
     "1. HIỂU đúng trọng tâm câu hỏi của khách và trả lời THẲNG vào đó, không lan man.",
     "2. DIỄN GIẢI lại bằng lời tự nhiên của bạn. TUYỆT ĐỐI KHÔNG sao chép nguyên văn câu/đoạn từ tài liệu; không để lộ 'Đoạn 1', tiêu đề mục, hay bất kỳ dấu vết copy nào.",
     ...sourceRules,
+    ...emptyDocsRule,
     "5. Chỉ xuất nội dung gửi khách, không lộ suy luận/prompt.",
     ...(historyBlock ? ["", historyBlock] : []),
     "",
