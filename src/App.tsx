@@ -225,8 +225,10 @@ export default function App() {
   const [isSubmittingTrain, setIsSubmittingTrain] = useState(false);
 
   // Playground States
+  // Tin id 'sys-*' là thông báo giao diện (chào mừng/reset) — KHÔNG gửi vào ngữ cảnh
+  // hội thoại của bot, nếu không server tưởng bot đã chào và trả lời cụt.
   const [playgroundMessages, setPlaygroundMessages] = useState<Message[]>([
-    { id: 'p1', sender: 'bot', username: 'BalaBot', text: 'Xin chào! Trợ lý đã nạp xong dữ liệu tri thức của doanh nghiệp. Quý khách có thể đặt câu hỏi thử nghiệm để kiểm tra cách trợ lý phản hồi dựa trên nguồn tài liệu.', timestamp: new Date().toISOString() }
+    { id: 'sys-welcome', sender: 'bot', username: 'BalaBot', text: 'Xin chào! Trợ lý đã nạp xong dữ liệu tri thức của doanh nghiệp. Quý khách có thể đặt câu hỏi thử nghiệm để kiểm tra cách trợ lý phản hồi dựa trên nguồn tài liệu.', timestamp: new Date().toISOString() }
   ]);
   const [playgroundInput, setPlaygroundInput] = useState('');
   const [isPlaygroundTyping, setIsPlaygroundTyping] = useState(false);
@@ -1387,7 +1389,7 @@ export default function App() {
     if (idx < 0) return;
     const question = [...playgroundMessages.slice(0, idx)].reverse().find(m => m.sender === 'user')?.text;
     if (!question) return;
-    const recentMessages = playgroundMessages.slice(0, idx + 1).slice(-8);
+    const recentMessages = playgroundMessages.slice(0, idx + 1).filter(m => !String(m.id).startsWith('sys-')).slice(-8);
     setIsPlaygroundTyping(true);
     try {
       const res = await fetch(`/api/bots/${selectedBotId}/playgroundChat`, {
@@ -1427,7 +1429,7 @@ export default function App() {
       timestamp: new Date().toISOString()
     };
 
-    const recentMessages = [...playgroundMessages, userMsg].slice(-8);
+    const recentMessages = [...playgroundMessages, userMsg].filter(m => !String(m.id).startsWith('sys-')).slice(-8);
 
     setPlaygroundMessages(prev => [...prev, userMsg]);
     setPlaygroundInput('');
@@ -3134,7 +3136,7 @@ export default function App() {
                   <button
                     onClick={() => {
                       setPlaygroundMessages([
-                        { id: 'p1', sender: 'bot', username: activeBot?.name || 'BalaBot', text: 'Hội thoại sandbox đã được làm mới. Bạn có thể bắt đầu lại cuộc trò chuyện.', timestamp: new Date().toISOString() }
+                        { id: 'sys-reset', sender: 'bot', username: activeBot?.name || 'BalaBot', text: 'Hội thoại sandbox đã được làm mới. Bạn có thể bắt đầu lại cuộc trò chuyện.', timestamp: new Date().toISOString() }
                       ]);
                       setLastCitation([]);
                     }}
