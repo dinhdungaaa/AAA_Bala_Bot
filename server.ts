@@ -343,42 +343,42 @@ app.get("/api/admin/customers", async (req, res) => {
 
   if (client) {
     try {
-      // 1. Try to fetch from the database 'profiles' table if it exists
-      const { data: profiles, error: pError } = await client.from("profiles").select("*");
-      if (!pError && profiles && profiles.length > 0) {
-        dbCustomers = profiles.map(p => ({
-          id: p.id || `db-${p.email}`,
-          name: p.full_name || p.email?.split('@')[0] || "Khách Hàng Thật",
-          email: p.email || "",
-          phone: p.phone || "Không có",
-          tier: (p.tier || "free") as "free" | "pro" | "enterprise",
-          messageLimit: Number(p.message_limit) || 1000,
-          joinedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN'),
-          status: (p.status === "suspended" ? "suspended" : "active") as "active" | "suspended",
-          role: (p.email === ADMIN_EMAIL ? "owner" : "customer") as "owner" | "customer",
-          passwordSet: false,
-          lastLoginAt: p.last_sign_in_at ? new Date(p.last_sign_in_at).toLocaleString('vi-VN') : undefined,
-          botsCount: bots.filter(bot => bot.userId === p.id || bot.userId === p.email).length
-        }));
-      } else {
-        // 2. If table is empty or doesn't have rows, try to pull list of registered Auth users using service role API
-        const { data: authData, error: aError } = await client.auth.admin.listUsers();
-        if (!aError && authData && authData.users && authData.users.length > 0) {
-          dbCustomers = authData.users.map(u => ({
+      // Gói bền per khách nằm ở bảng profiles — đọc thành map để PHỦ LÊN danh sách
+      // auth users (trước đây profiles có dòng nào là bỏ luôn auth list → vừa mất
+      // khách chưa có profile, vừa reset gói về 'free' hardcode khi profiles trống).
+      const planById = new Map<string, { tier?: string; message_limit?: number }>();
+      const planByEmail = new Map<string, { tier?: string; message_limit?: number }>();
+      try {
+        const { data: profiles, error: pError } = await client.from("profiles").select("id,email,tier,message_limit");
+        if (!pError && profiles) {
+          for (const p of profiles as any[]) {
+            const plan = { tier: p.tier, message_limit: Number(p.message_limit) || undefined };
+            if (p.id) planById.set(String(p.id), plan);
+            if (p.email) planByEmail.set(String(p.email).toLowerCase(), plan);
+          }
+        }
+      } catch { /* bảng profiles chưa tạo → bỏ qua, dùng mặc định */ }
+
+      const { data: authData, error: aError } = await client.auth.admin.listUsers();
+      if (!aError && authData && authData.users && authData.users.length > 0) {
+        dbCustomers = authData.users.map(u => {
+          const plan = planById.get(u.id) || planByEmail.get((u.email || "").toLowerCase());
+          const isOwnerAcc = u.email === ADMIN_EMAIL;
+          return {
             id: u.id,
             name: u.email?.split('@')[0] || "Khách Hàng Thật",
             email: u.email || "",
             phone: u.phone || "Chưa cập nhật",
-            tier: (u.email === ADMIN_EMAIL ? 'enterprise' : 'free') as "free" | "pro" | "enterprise",
-            messageLimit: u.email === ADMIN_EMAIL ? 250000 : 1000,
+            tier: ((plan?.tier) || (isOwnerAcc ? 'enterprise' : 'free')) as "free" | "pro" | "enterprise",
+            messageLimit: (plan?.message_limit && plan.message_limit > 0) ? plan.message_limit : (isOwnerAcc ? 250000 : 1000),
             joinedDate: u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN'),
             status: (u.banned_until ? "suspended" : "active") as "active" | "suspended",
-            role: (u.email === ADMIN_EMAIL ? "owner" : "customer") as "owner" | "customer",
+            role: (isOwnerAcc ? "owner" : "customer") as "owner" | "customer",
             passwordSet: true,
             lastLoginAt: u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString('vi-VN') : undefined,
             botsCount: bots.filter(bot => bot.userId === u.id || bot.userId === u.email).length
-          }));
-        }
+          };
+        });
       }
     } catch (err) {
       console.warn("Dynamic user discovery through Supabase skipped or failed:", err);
@@ -545,7 +545,8 @@ app.put("/api/admin/customers/:id", async (req, res) => {
 
   // Ghi gói BỀN vào Supabase profiles (sống sót qua redeploy). Best-effort, không chặn nếu lỗi.
   if ((tier !== undefined || messageLimit !== undefined) && !id.startsWith("cust-") && !id.startsWith("u-")) {
-    await dbUpdateProfilePlan(id, customer.tier, Number(customer.messageLimit) || 0);
+    const saved = await dbUpdateProfilePlan(id, customer.email || "", customer.tier, Number(customer.messageLimit) || 0);
+    if (!saved) console.warn(`[Admin] Gói của ${customer.email} CHỈ lưu RAM (profiles chưa ghi được) — sẽ mất khi redeploy. Đã chạy profiles.sql chưa?`);
   }
 
   res.json({ ...customer, passwordSync, passwordError });

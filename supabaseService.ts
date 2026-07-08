@@ -1246,11 +1246,15 @@ export async function dbGetProfilePlan(ownerKey: string): Promise<{ tier?: strin
 }
 
 // Ghi gói bền vào profiles khi admin nâng/hạ gói (sống sót qua Railway redeploy).
-export async function dbUpdateProfilePlan(id: string, tier: string, messageLimit: number): Promise<boolean> {
+// UPSERT (không phải update): dòng profile chưa tồn tại thì tạo mới — update vào
+// dòng không tồn tại là no-op im lặng, chính là lỗi làm gói bị reset về Free.
+export async function dbUpdateProfilePlan(id: string, email: string, tier: string, messageLimit: number): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client || !id) return false;
   try {
-    const { error } = await client.from("profiles").update({ tier, message_limit: messageLimit }).eq("id", id);
+    const row: any = { id, tier, message_limit: messageLimit };
+    if (email) row.email = email.toLowerCase();
+    const { error } = await client.from("profiles").upsert(row, { onConflict: "id" });
     if (error) { console.warn("dbUpdateProfilePlan error:", error.message); return false; }
     return true;
   } catch (e: any) { console.warn("dbUpdateProfilePlan failed:", e?.message || e); return false; }
