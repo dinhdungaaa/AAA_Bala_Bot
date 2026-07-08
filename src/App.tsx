@@ -162,11 +162,15 @@ export default function App() {
   };
 
   const handleUpdateCustomer = (id: string, updates: Partial<SaasCustomer>) => {
+    // Luôn gửi kèm email + tên của khách để server nhận diện đúng người —
+    // thiếu email server sẽ tạo bản ghi rỗng "Khách hàng mới".
+    const cur = simulatedCustomers.find(c => c.id === id);
+    const body = { ...(cur ? { email: cur.email, name: cur.name } : {}), ...updates };
     setSimulatedCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
     fetch(`/api/admin/customers/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
-      body: JSON.stringify(updates)
+      body: JSON.stringify(body)
     })
     .then(res => {
       if (!res.ok) throw new Error("Cập nhật thất bại");

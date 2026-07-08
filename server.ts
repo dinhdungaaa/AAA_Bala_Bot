@@ -500,10 +500,26 @@ app.put("/api/admin/customers/:id", async (req, res) => {
   const { tier, messageLimit, phone, name, email, status, password } = req.body;
   let customer = saasCustomers.find(c => c.id === id || (email && c.email.toLowerCase() === String(email).toLowerCase()));
   if (!customer) {
+    // Body thiếu email (client cũ chỉ gửi tier/messageLimit) → tra danh tính từ
+    // Supabase Auth theo id, tránh tạo bản ghi rỗng "Khách hàng mới".
+    let resolvedEmail = String(email || "").trim().toLowerCase();
+    let resolvedName = name;
+    if (!resolvedEmail && !id.startsWith("cust-") && !id.startsWith("u-")) {
+      try {
+        const client = getSupabaseClient();
+        if (client) {
+          const { data } = await client.auth.admin.getUserById(id);
+          if (data?.user?.email) {
+            resolvedEmail = data.user.email.toLowerCase();
+            if (!resolvedName) resolvedName = resolvedEmail.split("@")[0];
+          }
+        }
+      } catch { /* tra không được thì đành tạo theo body */ }
+    }
     customer = normalizeCustomerRecord({
       id,
-      name,
-      email: email || "",
+      name: resolvedName,
+      email: resolvedEmail,
       phone,
       tier,
       messageLimit,
