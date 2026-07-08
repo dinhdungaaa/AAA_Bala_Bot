@@ -4141,23 +4141,116 @@ export default function App() {
           {/* TAB 8: VECTOR REPORTING ANALYTICS */}
           {activeTab === 'analytics' && bots.length > 0 && (
             <div className="space-y-6">
-              
-              {/* TOP STATS ANALYTICS ROW */}
+
+              {/* ===== BÁO CÁO BÁN HÀNG ===== */}
+              {(() => {
+                const s = (analyticsData as any)?.sales;
+                if (!s) return null;
+                const funnelSteps = [
+                  { label: 'Khách nhắn tin', value: s.funnel.visitors, rate: null as number | null, icon: '💬' },
+                  { label: 'Tương tác thật (≥2 tin)', value: s.funnel.engaged, rate: s.funnel.engagedRate, icon: '🔥' },
+                  { label: 'Để lại SĐT', value: s.funnel.leads, rate: s.funnel.leadRate, icon: '📞' },
+                  { label: 'Chốt đơn', value: s.funnel.won, rate: s.funnel.wonRate, icon: '✅' },
+                ];
+                const maxHour = Math.max(1, ...s.hourly);
+                const bestHours: number[] = s.hourly
+                  .map((v: number, h: number) => ({ v, h }))
+                  .sort((a: any, b: any) => b.v - a.v).slice(0, 3)
+                  .filter((x: any) => x.v > 0).map((x: any) => x.h);
+                const chLabel: Record<string, string> = { botcake: 'Messenger (Botcake)', facebook: 'Facebook', telegram: 'Telegram', zalo: 'Zalo', botpress: 'Botpress', web: 'Web' };
+                return (
+                  <div className="bg-white rounded-xl border border-emerald-200 p-6 space-y-6">
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">📈 Báo cáo bán hàng</h3>
+                      <p className="text-xs text-slate-400 mt-1">Bot đang biến bao nhiêu người nhắn tin thành khách hàng — cập nhật realtime từ hội thoại thật.</p>
+                    </div>
+
+                    {/* PHỄU BÁN HÀNG */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                      {funnelSteps.map((st, i) => (
+                        <div key={st.label} className="relative bg-slate-50 border border-slate-200 rounded-xl p-4">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">{st.icon} {st.label}</span>
+                          <div className="text-3xl font-extrabold text-slate-800 mt-1">{st.value}</div>
+                          {st.rate !== null && (
+                            <p className="text-[11px] mt-1 font-bold text-emerald-600">↳ {st.rate}% từ bước trước</p>
+                          )}
+                          {i < 3 && <span className="hidden lg:block absolute top-1/2 -right-3 -translate-y-1/2 text-slate-300 font-black">→</span>}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      {/* MÓN KHÁCH QUAN TÂM */}
+                      <div>
+                        <h4 className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-2">🛍️ Món khách quan tâm nhất</h4>
+                        {s.topInterests.length === 0 ? (
+                          <p className="text-xs text-slate-400">Chưa có dữ liệu — sẽ tự gom khi khách để lại SĐT kèm nhu cầu.</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {s.topInterests.map((it: any) => (
+                              <div key={it.interest} className="flex items-center justify-between text-xs bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                                <span className="text-slate-700 font-medium capitalize">{it.interest}</span>
+                                <span className="font-bold text-emerald-600">{it.count} khách</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* GIỜ VÀNG */}
+                      <div>
+                        <h4 className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-2">⏰ Giờ vàng khách nhắn</h4>
+                        <div className="flex items-end gap-[2px] h-24">
+                          {s.hourly.map((v: number, h: number) => (
+                            <div key={h} className="flex-1 flex flex-col items-center" title={`${h}h: ${v} tin`}>
+                              <div className={`w-full rounded-t ${bestHours.includes(h) ? 'bg-emerald-500' : 'bg-slate-200'}`}
+                                style={{ height: `${Math.max(2, Math.round((v / maxHour) * 88))}px` }} />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex justify-between text-[9px] text-slate-400 mt-1"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>23h</span></div>
+                        {bestHours.length > 0 && (
+                          <p className="text-[11px] text-slate-500 mt-2">Nên có người trực chốt lúc <b className="text-emerald-600">{bestHours.sort((a, b) => a - b).map(h => `${h}h`).join(', ')}</b></p>
+                        )}
+                      </div>
+
+                      {/* HIỆU QUẢ THEO KÊNH */}
+                      <div>
+                        <h4 className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-2">📡 Hiệu quả theo kênh</h4>
+                        {s.channels.length === 0 ? (
+                          <p className="text-xs text-slate-400">Chưa có hội thoại nào.</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {s.channels.map((c: any) => (
+                              <div key={c.channel} className="flex items-center justify-between text-xs bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                                <span className="text-slate-700 font-medium">{chLabel[c.channel] || c.channel}</span>
+                                <span className="text-slate-500">{c.sessions} chat · <b className="text-emerald-600">{c.leads} SĐT</b>{c.won > 0 ? <b className="text-emerald-700"> · {c.won} chốt</b> : null}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* TOP STATS ANALYTICS ROW — số thật từ analyticsData */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Tỉ lệ escalation sang nhân viên</span>
-                  <div className="text-2xl font-extrabold text-slate-800 mt-1">8.8%</div>
-                  <p className="text-xs text-slate-500 mt-2">Dưới mức cho phép (Tối đa 15%)</p>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Tỉ lệ cần người hỗ trợ (escalation)</span>
+                  <div className="text-2xl font-extrabold text-slate-800 mt-1">{analyticsData?.escalationRate ?? 0}%</div>
+                  <p className="text-xs text-slate-500 mt-2">{(analyticsData?.escalationRate ?? 0) <= 15 ? 'Dưới mức khuyến nghị (tối đa 15%)' : 'Cao — nên bổ sung tri thức cho bot'}</p>
                 </div>
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Người dùng chat tích cực (7 ngày)</span>
-                  <div className="text-2xl font-extrabold text-slate-800 mt-1">142 Người</div>
-                  <p className="text-xs text-slate-500 mt-2">Đạt tỉ lệ tương tác sỉ tới 42%</p>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Tổng khách đã nhắn tin</span>
+                  <div className="text-2xl font-extrabold text-slate-800 mt-1">{analyticsData?.totalUsers ?? 0} Người</div>
+                  <p className="text-xs text-slate-500 mt-2">{analyticsData?.dialogsCount ?? 0} hội thoại · {analyticsData?.totalMessages ?? 0} tin nhắn</p>
                 </div>
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Hỏi/Đáp Hữu Ích Đơn Trích</span>
-                  <div className="text-2xl font-extrabold text-[#10B981] mt-1">84 / 92</div>
-                  <p className="text-xs text-slate-500 mt-2">Tỉ lệ Thumbs-up đạt mức 91.3%</p>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Bot tự xử lý thành công</span>
+                  <div className="text-2xl font-extrabold text-[#10B981] mt-1">{analyticsData?.successRate ?? 100}%</div>
+                  <p className="text-xs text-slate-500 mt-2">Hội thoại bot phục vụ trọn vẹn không cần người can thiệp</p>
                 </div>
               </div>
 

@@ -1866,6 +1866,73 @@ app.get("/api/analytics/:botId", async (req, res) => {
     ? { helpful: helpfulCount, total: totalFeedbacks }
     : (isDemoFarm ? analytics.feedbackStats : { helpful: 0, total: 0 });
 
+  // ===== BÁO CÁO BÁN HÀNG (phễu + món quan tâm + giờ vàng + kênh) =====
+  // Dùng dữ liệu sẵn có: sessions (tin nhắn, kênh) + bot_leads (SĐT, interest, status).
+  const botLeads = await dbGetBotLeads(botId, leadsMem.filter(l => l.botId === botId));
+
+  // Kênh của 1 session: ưu tiên field channel, suy từ prefix userKey cho session cũ.
+  const sessionChannel = (conv: ChatSession): string => {
+    if (conv.channel) return conv.channel;
+    const key = conv.telegramUserId || "";
+    const i = key.indexOf(":");
+    return i > 0 ? key.slice(0, i) : "telegram";
+  };
+
+  // Phễu: khách nhắn → tương tác thật (≥2 tin của khách) → để lại SĐT → chốt.
+  const engagedCount = botConvs.filter(c => (c.messages || []).filter(m => m.sender === "user").length >= 2).length;
+  const wonCount = botLeads.filter(l => l.status === "won").length;
+  const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
+  const funnel = {
+    visitors: totalUsers,
+    engaged: engagedCount,
+    leads: botLeads.length,
+    won: wonCount,
+    engagedRate: pct(engagedCount, totalUsers),
+    leadRate: pct(botLeads.length, engagedCount),
+    wonRate: pct(wonCount, botLeads.length),
+  };
+
+  // Món khách quan tâm nhất — gom từ interest của leads (tầng HIỂU tóm sẵn).
+  const interestCounts = new Map<string, number>();
+  for (const l of botLeads) {
+    const k = (l.interest || "").trim().toLowerCase();
+    if (!k) continue;
+    interestCounts.set(k, (interestCounts.get(k) || 0) + 1);
+  }
+  const topInterests = [...interestCounts.entries()]
+    .sort((a, b) => b[1] - a[1]).slice(0, 6)
+    .map(([interest, count]) => ({ interest, count }));
+
+  // Giờ vàng: phân bố tin KHÁCH theo giờ VN (UTC+7).
+  const hourly = new Array(24).fill(0) as number[];
+  botConvs.forEach(conv => {
+    (conv.messages || []).forEach(msg => {
+      if (msg.sender === "user" && msg.timestamp) {
+        const t = new Date(msg.timestamp);
+        if (!isNaN(t.getTime())) hourly[(t.getUTCHours() + 7) % 24]++;
+      }
+    });
+  });
+
+  // Hiệu quả theo kênh: hội thoại + lead + chốt.
+  const channelMap = new Map<string, { sessions: number; leads: number; won: number }>();
+  botConvs.forEach(conv => {
+    const ch = sessionChannel(conv);
+    const cur = channelMap.get(ch) || { sessions: 0, leads: 0, won: 0 };
+    cur.sessions++;
+    channelMap.set(ch, cur);
+  });
+  botLeads.forEach(l => {
+    const ch = l.channel || "khác";
+    const cur = channelMap.get(ch) || { sessions: 0, leads: 0, won: 0 };
+    cur.leads++;
+    if (l.status === "won") cur.won++;
+    channelMap.set(ch, cur);
+  });
+  const channels = [...channelMap.entries()]
+    .map(([channel, v]) => ({ channel, ...v }))
+    .sort((a, b) => b.leads - a.leads || b.sessions - a.sessions);
+
   res.json({
     totalUsers,
     totalMessages,
@@ -1873,6 +1940,7 @@ app.get("/api/analytics/:botId", async (req, res) => {
     successRate,
     escalationRate,
     messageTrend,
+    sales: { funnel, topInterests, hourly, channels },
     popularQuestions: popularQuestions.slice(0, 5),
     unansweredQuestions: finalUnanswered.slice(0, 5),
     feedbackStats,
