@@ -1593,6 +1593,7 @@ async function deliverOperatorReply(session: ChatSession, text: string): Promise
     const key = session.telegramUserId || "";
     if (!channel) {
       if (key.startsWith("facebook:")) { channel = "facebook"; chatId = chatId || key.slice("facebook:".length); senderId = senderId || chatId; isGroup = false; }
+      else if (key.startsWith("botcake:")) { channel = "botcake"; chatId = chatId || key.slice("botcake:".length); senderId = senderId || chatId; isGroup = false; }
       else if (key.startsWith("zalo:")) { const p = key.split(":"); channel = "zalo"; chatId = chatId || p[1]; senderId = senderId || p[2]; isGroup = true; }
       else { channel = "telegram"; chatId = chatId || key; senderId = senderId || key; }
     }
@@ -1619,6 +1620,15 @@ async function deliverOperatorReply(session: ChatSession, text: string): Promise
       const finalText = customerName ? `${customerName} ơi, ${text}` : text;
       await sendFacebookTextMessage(bot, chatId, finalText);
       return { delivered: true, channel };
+    }
+
+    if (channel === "botcake") {
+      // Messenger qua Botcake send_content — cùng đường bot vẫn dùng để trả lời.
+      if (!chatId || chatId === "unknown") return { delivered: false, channel, error: "botcake_no_recipient" };
+      if (!bot.botcakePageId || !bot.botcakeAccessToken) return { delivered: false, channel, error: "botcake_not_configured" };
+      const finalText = customerName ? `${customerName} ơi, ${text}` : text;
+      const ok = await sendBotcakeFlow(bot, chatId, finalText);
+      return ok ? { delivered: true, channel } : { delivered: false, channel, error: "botcake_send_failed" };
     }
 
     if (channel === "zalo") {
