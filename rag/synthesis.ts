@@ -138,6 +138,10 @@ function buildHistoryBlock(history?: HistoryTurn[]): string | null {
     "→ Dùng hội thoại trên để HIỂU câu hỏi nối tiếp (vd 'cái đó', 'loại kia', 'còn không'). " +
       "Nếu khách đang nói tiếp về món vừa nhắc, hiểu đúng — đừng hỏi lại từ đầu. " +
       "Nếu đã chào ở lượt trước thì KHÔNG chào lại.",
+    "→ Câu MƠ HỒ/CỤT ('có không vậy', 'thật hả', 'sao á', 'ừ rồi sao') hầu như luôn là phản hồi cho " +
+      "CÂU BẠN VỪA NÓI ở lượt trước — đọc lại câu đó để hiểu khách đang nói về điều gì (kể cả khi đang " +
+      "đùa/xã giao) và đáp TIẾP MẠCH một cách tự nhiên. TUYỆT ĐỐI KHÔNG hỏi trống kiểu 'mình muốn hỏi về gì ạ?' " +
+      "khi hội thoại đã có mạch rõ. CHỈ hỏi lại khách khi đã xét toàn bộ hội thoại mà vẫn không thể xác định ý.",
   ].join("\n");
 }
 

@@ -70,6 +70,19 @@ describe("buildGroundedPrompt", () => {
     expect(p).toContain("Bạn: Dạ còn ạ");
   });
 
+  it("co history -> co quy tac hieu cau mo ho theo mach, chi hoi lai khi bi", () => {
+    const p = buildGroundedPrompt(bot, passages, {
+      answerStyle: "sales",
+      history: [
+        { role: "user", text: "đùa thôi, vui lên em" },
+        { role: "bot", text: "Dạ em vui mà" },
+      ],
+    });
+    expect(p).toContain("MƠ HỒ");
+    expect(p).toMatch(/CHỈ hỏi lại khách khi/);
+    expect(p).toMatch(/KHÔNG hỏi trống/);
+  });
+
   it("khong customer + khong history -> giong base prompt", () => {
     const base = buildGroundedPrompt(bot, passages, { answerStyle: "sales" });
     const withEmpty = buildGroundedPrompt(bot, passages, { answerStyle: "sales", history: [] });
