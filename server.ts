@@ -4033,8 +4033,11 @@ async function generateRAGAnswer(
   const expand = replyOptions?.expand === true;
   const fast = replyOptions?.fast === true;
 
+  // Chit-chat đóng sẵn CHỈ dùng khi không có AI hoặc chế độ fast (bridge sync cần
+  // trả lời tức thì). Bình thường mọi tin — kể cả chào hỏi — đi qua bộ não 2 tầng:
+  // tầng HIỂU phân loại chit_chat, tầng NÓI đáp ngắn thân thiện theo mục tiêu bot.
   const chitChatKind = detectOffTopicChitChat(query);
-  if (chitChatKind) {
+  if (chitChatKind && (fast || !getAIClient())) {
     return {
       text: postProcessBotReply(buildOffTopicChitChatReply(bot, query, pronoun, targetName, chitChatKind, isFirstInteraction), replyOptions),
       sources: [],
