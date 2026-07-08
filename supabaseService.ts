@@ -902,13 +902,29 @@ export async function dbGetConversations(botId: string, localFallback: ChatSessi
   }
 }
 
+// Cột chat_sessions có trong schema gốc ban đầu — DB lỗi thời có thể chỉ có chừng này.
+const SESSION_BASE_COLUMNS = new Set([
+  "id", "botId", "telegramUserId", "telegramUsername", "telegramFullName",
+  "lastMessageText", "lastMessageTime", "status", "internalNotes", "messages",
+]);
+
+function pickSessionBaseColumns(obj: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (SESSION_BASE_COLUMNS.has(k)) out[k] = v;
+  }
+  return out;
+}
+
 export async function dbSaveConversation(convo: ChatSession): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
   try {
     // upsert (không insert) để lưu lặp cùng 1 session không vỡ khóa chính —
     // khách nhắn nhiều lượt sẽ cập nhật đúng bản ghi thay vì lỗi trùng id.
-    const { error } = await client.from('chat_sessions').upsert({
+    // Kèm cột định tuyến kênh + takeover: thiếu chúng, sau restart operator
+    // không gửi được tin can thiệp ra Zalo (mất ownerEmail) / Telegram nhóm.
+    const row: Record<string, any> = {
       id: convo.id,
       botId: convo.botId,
       telegramUserId: convo.telegramUserId,
@@ -918,9 +934,24 @@ export async function dbSaveConversation(convo: ChatSession): Promise<boolean> {
       lastMessageTime: convo.lastMessageTime,
       status: convo.status,
       internalNotes: convo.internalNotes,
-      messages: convo.messages
-    }, { onConflict: 'id' });
-    if (error) throw error;
+      messages: convo.messages,
+      channel: convo.channel ?? null,
+      channelChatId: convo.channelChatId ?? null,
+      channelIsGroup: convo.channelIsGroup ?? null,
+      channelSenderId: convo.channelSenderId ?? null,
+      channelOwnerEmail: convo.channelOwnerEmail ?? null,
+      humanTakeoverUntil: convo.humanTakeoverUntil ?? null,
+    };
+    const { error } = await client.from('chat_sessions').upsert(row, { onConflict: 'id' });
+    if (error) {
+      if (isMissingColumnError(error)) {
+        console.warn(`dbSaveConversation: DB thiếu cột mới (${error.message}) — lưu bộ cột cơ bản. Hãy chạy takeover.sql / SQL Schema để nâng cấp bảng.`);
+        const { error: retryErr } = await client.from('chat_sessions').upsert(pickSessionBaseColumns(row), { onConflict: 'id' });
+        if (retryErr) throw retryErr;
+        return true;
+      }
+      throw error;
+    }
     return true;
   } catch (err) {
     console.error("Supabase dbSaveConversation failed:", err);
@@ -933,7 +964,19 @@ export async function dbUpdateConversation(sessId: string, updates: Partial<Chat
   if (!client) return false;
   try {
     const { error } = await client.from('chat_sessions').update(updates).eq('id', sessId);
-    if (error) throw error;
+    if (error) {
+      // DB thiếu cột mới (vd humanTakeoverUntil chưa chạy takeover.sql): bỏ cột lạ
+      // và lưu phần còn lại — không để mất cả messages chỉ vì 1 cột phụ.
+      if (isMissingColumnError(error)) {
+        const baseUpdates = pickSessionBaseColumns(updates as Record<string, any>);
+        if (Object.keys(baseUpdates).length === 0) return false;
+        console.warn(`dbUpdateConversation: DB thiếu cột mới (${error.message}) — lưu bộ cột cơ bản. Hãy chạy takeover.sql / SQL Schema.`);
+        const { error: retryErr } = await client.from('chat_sessions').update(baseUpdates).eq('id', sessId);
+        if (retryErr) throw retryErr;
+        return true;
+      }
+      throw error;
+    }
     return true;
   } catch (err) {
     console.error("Supabase dbUpdateConversation failed:", err);
