@@ -580,6 +580,8 @@ export default function App() {
 
   // Search Knowledge Filter
   const [kbSearchQuery, setKbSearchQuery] = useState('');
+  // Kho kiến thức: thẻ nào đang mở rộng xem toàn văn (mặc định thu gọn cho đỡ dài)
+  const [kbExpandedIds, setKbExpandedIds] = useState<Set<string>>(new Set());
 
   // Schedule/Reminder System States
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
@@ -3114,16 +3116,31 @@ export default function App() {
 
               {/* SEARCH RESULTS CHUNKS */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredSources.map((source) => (
+                {filteredSources.map((source) => {
+                  const isExpanded = kbExpandedIds.has(source.id);
+                  const isLong = (source.fullText || '').length > 280;
+                  return (
                   <div key={source.id} className="border border-slate-200 rounded-xl p-5 hover:shadow-xs transition-shadow flex flex-col justify-between">
                     <div>
-                      <div className="flex items-center justify-end mb-2">
-                        <span className="text-[11px] text-slate-400 font-mono">ID: {source.id}</span>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <h3 className="font-bold text-sm text-slate-800">{source.name}</h3>
+                        <span className="text-[10px] text-slate-400 shrink-0 mt-0.5">{(source.fullText || '').length.toLocaleString('vi-VN')} ký tự</span>
                       </div>
-                      <h3 className="font-bold text-sm text-slate-800 mb-2">{source.name}</h3>
-                      <div className="bg-slate-50 p-3 rounded-lg text-xs leading-relaxed text-slate-600 font-medium">
+                      <div className={`bg-slate-50 p-3 rounded-lg text-xs leading-relaxed text-slate-600 font-medium whitespace-pre-line ${isExpanded ? 'max-h-80 overflow-y-auto' : 'line-clamp-4'}`}>
                         {source.fullText}
                       </div>
+                      {isLong && (
+                        <button
+                          onClick={() => setKbExpandedIds(prev => {
+                            const next = new Set(prev);
+                            if (next.has(source.id)) next.delete(source.id); else next.add(source.id);
+                            return next;
+                          })}
+                          className="mt-2 text-[11px] font-bold text-emerald-600 hover:text-emerald-800 cursor-pointer"
+                        >
+                          {isExpanded ? '▲ Thu gọn' : '▼ Xem toàn bộ'}
+                        </button>
+                      )}
                     </div>
 
                     <div className="flex justify-between items-center mt-4 pt-3 border-t border-slate-100 text-xs">
@@ -3136,7 +3153,8 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
 
                 {filteredSources.length === 0 && (
                   <div className="col-span-2 text-center py-12 text-slate-400">
