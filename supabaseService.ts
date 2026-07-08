@@ -73,6 +73,89 @@ export function getSupabaseClient(): SupabaseClient | null {
   }
 }
 
+// Client "GỐC": luôn trỏ về Supabase của chủ hệ thống (biến môi trường), BỎ QUA
+// mọi scope per-request. Dùng cho dữ liệu vận hành nền tảng phải sống qua redeploy
+// và không phụ thuộc tenant: cấu hình BYO Supabase, gói cước (profiles), usage.
+let _rootClient: SupabaseClient | null = null;
+export function getRootSupabaseClient(): SupabaseClient | null {
+  if (_rootClient) return _rootClient;
+  const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "").trim();
+  if (!url || !key) return null;
+  try {
+    _rootClient = createClient(url, key, { auth: { persistSession: false } });
+    return _rootClient;
+  } catch (e) {
+    console.error("Failed to initialize root Supabase client:", e);
+    return null;
+  }
+}
+
+// ============== BYO SUPABASE CONFIGS (lưu ở DB GỐC — sống qua redeploy) ==============
+export type ByoConfig = { url: string; key: string };
+
+export async function dbRootLoadByoConfigs(): Promise<{ users: Record<string, ByoConfig>; bots: Record<string, ByoConfig> } | null> {
+  const client = getRootSupabaseClient();
+  if (!client) return null;
+  const users: Record<string, ByoConfig> = {};
+  const botConfigs: Record<string, ByoConfig> = {};
+  try {
+    const { data: userRows, error: userErr } = await client.from('user_configs').select('*');
+    if (userErr) {
+      console.warn("dbRootLoadByoConfigs user_configs:", userErr.message);
+    } else {
+      for (const r of userRows || []) {
+        if (r.email && r.supabase_url && r.supabase_key) {
+          users[String(r.email).toLowerCase()] = { url: r.supabase_url, key: r.supabase_key };
+        }
+      }
+    }
+    const { data: botRows, error: botErr } = await client.from('bot_configs').select('*');
+    if (botErr) {
+      console.warn("dbRootLoadByoConfigs bot_configs (chạy byo-configs.sql nếu chưa có bảng):", botErr.message);
+    } else {
+      for (const r of botRows || []) {
+        if (r.botId && r.supabase_url && r.supabase_key) {
+          botConfigs[String(r.botId)] = { url: r.supabase_url, key: r.supabase_key };
+        }
+      }
+    }
+    return { users, bots: botConfigs };
+  } catch (err: any) {
+    console.warn("dbRootLoadByoConfigs failed:", err.message || err);
+    return null;
+  }
+}
+
+export async function dbRootSaveBotConfig(botId: string, url: string, key: string): Promise<boolean> {
+  const client = getRootSupabaseClient();
+  if (!client || !botId) return false;
+  try {
+    const { error } = await client.from('bot_configs').upsert({
+      botId,
+      supabase_url: url,
+      supabase_key: key,
+      updatedAt: new Date().toISOString()
+    }, { onConflict: 'botId' });
+    if (error) { console.warn("dbRootSaveBotConfig:", error.message); return false; }
+    return true;
+  } catch (err: any) {
+    console.warn("dbRootSaveBotConfig failed:", err.message || err);
+    return false;
+  }
+}
+
+export async function dbRootDeleteBotConfig(botId: string): Promise<boolean> {
+  const client = getRootSupabaseClient();
+  if (!client || !botId) return false;
+  try {
+    const { error } = await client.from('bot_configs').delete().eq('botId', botId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 // Check connection to Supabase and see if tables exist
 export async function testConnection(): Promise<{
   connected: boolean;
@@ -379,6 +462,79 @@ DROP POLICY IF EXISTS "Allow public update user_configs" ON user_configs;
 CREATE POLICY "Allow public read user_configs" ON user_configs FOR SELECT USING (true);
 CREATE POLICY "Allow public insert user_configs" ON user_configs FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update user_configs" ON user_configs FOR UPDATE USING (true);
+
+-- =========================================================================
+-- 10. NÂNG CẤP CỘT MỚI — chạy lại script này an toàn, chỉ thêm cột nếu thiếu.
+-- (CREATE TABLE IF NOT EXISTS không thêm cột vào bảng đã tồn tại, nên cần ALTER)
+-- =========================================================================
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "answerStyle" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "conversationGoal" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "notifyTelegramChatId" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "botcakeBridgeKey" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "botcakePageId" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "botcakeAccessToken" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "botcakeReplyFlowId" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "facebookPageAccessToken" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "facebookPageId" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "facebookPageName" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "facebookStatus" TEXT;
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS "facebookConnectedAt" TEXT;
+
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS channel TEXT;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS "channelChatId" TEXT;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS "channelIsGroup" BOOLEAN;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS "channelSenderId" TEXT;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS "channelOwnerEmail" TEXT;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS "humanTakeoverUntil" TIMESTAMPTZ;
+
+-- =========================================================================
+-- 11. BẢNG KHÁCH TIỀM NĂNG (BOT LEADS — trợ lý bán hàng bắt SĐT)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS bot_leads (
+  id TEXT PRIMARY KEY,
+  "botId" TEXT NOT NULL,
+  "sessionId" TEXT,
+  name TEXT,
+  phone TEXT NOT NULL,
+  address TEXT,
+  interest TEXT,
+  "buyingSignal" TEXT,
+  channel TEXT,
+  status TEXT DEFAULT 'new',
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS bot_leads_bot_idx ON bot_leads ("botId", "createdAt" DESC);
+
+ALTER TABLE bot_leads ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read bot_leads" ON bot_leads;
+DROP POLICY IF EXISTS "Allow public insert bot_leads" ON bot_leads;
+DROP POLICY IF EXISTS "Allow public update bot_leads" ON bot_leads;
+CREATE POLICY "Allow public read bot_leads" ON bot_leads FOR SELECT USING (true);
+CREATE POLICY "Allow public insert bot_leads" ON bot_leads FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update bot_leads" ON bot_leads FOR UPDATE USING (true);
+
+-- =========================================================================
+-- 12. BẢNG NHÓM TELEGRAM (auto-bắt khi bot được add vào nhóm — cho lịch nhắc)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS telegram_groups (
+  "id" TEXT PRIMARY KEY,
+  "botId" TEXT NOT NULL,
+  "chatId" TEXT NOT NULL,
+  "title" TEXT,
+  "type" TEXT,
+  "isActive" BOOLEAN DEFAULT TRUE,
+  "addedAt" TEXT,
+  "lastSeenAt" TEXT
+);
+CREATE INDEX IF NOT EXISTS telegram_groups_bot_idx ON telegram_groups ("botId");
+
+ALTER TABLE telegram_groups ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read tg_groups" ON telegram_groups;
+DROP POLICY IF EXISTS "Allow public insert tg_groups" ON telegram_groups;
+DROP POLICY IF EXISTS "Allow public update tg_groups" ON telegram_groups;
+CREATE POLICY "Allow public read tg_groups" ON telegram_groups FOR SELECT USING (true);
+CREATE POLICY "Allow public insert tg_groups" ON telegram_groups FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update tg_groups" ON telegram_groups FOR UPDATE USING (true);
 `;
 }
 
@@ -509,12 +665,45 @@ export async function dbGetBots(localFallback: BotConfig[]): Promise<BotConfig[]
   }
 }
 
+// Cột "bots" có trong schema GỐC ban đầu — DB của khách BYO có thể chỉ có chừng này.
+// Khi insert/update dính lỗi thiếu cột (schema khách lỗi thời), lùi về bộ cột này
+// để bot vẫn được lưu, thay vì fail âm thầm và bot chỉ sống trong RAM.
+const BOT_BASE_COLUMNS = new Set([
+  "id", "userId", "name", "description", "field", "language", "tone",
+  "allowPricing", "allowProductConsulting", "escalationTrigger",
+  "telegramToken", "telegramStatus", "telegramBotUsername", "telegramWebhookActive",
+  "welcomeMessage", "fallbackMessage", "fallbackEmail", "fallbackPhone",
+  "fallbackZalo", "fallbackWebsite", "limitToKnowledge", "restrictedTopics",
+  "workingHours", "status", "createdAt",
+]);
+
+function isMissingColumnError(err: any): boolean {
+  const msg = String(err?.message || "");
+  return err?.code === "PGRST204" || err?.code === "42703" || /could not find .* column|column .* does not exist/i.test(msg);
+}
+
+function pickBotBaseColumns<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (BOT_BASE_COLUMNS.has(k)) out[k] = v;
+  }
+  return out;
+}
+
 export async function dbSaveBot(bot: BotConfig): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
   try {
     const { error } = await client.from('bots').insert(bot);
-    if (error) throw error;
+    if (error) {
+      if (isMissingColumnError(error)) {
+        console.warn(`dbSaveBot: DB thiếu cột mới (${error.message}) — lưu bộ cột cơ bản. Hãy chạy lại SQL Schema để nâng cấp bảng.`);
+        const { error: retryErr } = await client.from('bots').insert(pickBotBaseColumns(bot));
+        if (retryErr) throw retryErr;
+        return true;
+      }
+      throw error;
+    }
     return true;
   } catch (err) {
     console.error("Supabase dbSaveBot failed:", err);
@@ -527,7 +716,20 @@ export async function dbUpdateBot(id: string, updates: Partial<BotConfig>): Prom
   if (!client) return false;
   try {
     const { error } = await client.from('bots').update(updates).eq('id', id);
-    if (error) throw error;
+    if (error) {
+      if (isMissingColumnError(error)) {
+        const baseUpdates = pickBotBaseColumns(updates);
+        if (Object.keys(baseUpdates).length === 0) {
+          console.warn(`dbUpdateBot: toàn bộ cột cập nhật đều chưa có trong DB (${error.message}) — hãy chạy lại SQL Schema.`);
+          return false;
+        }
+        console.warn(`dbUpdateBot: DB thiếu cột mới (${error.message}) — cập nhật bộ cột cơ bản. Hãy chạy lại SQL Schema để nâng cấp bảng.`);
+        const { error: retryErr } = await client.from('bots').update(baseUpdates).eq('id', id);
+        if (retryErr) throw retryErr;
+        return true;
+      }
+      throw error;
+    }
     return true;
   } catch (err) {
     console.error("Supabase dbUpdateBot failed:", err);
@@ -1132,7 +1334,9 @@ export async function dbGetReminderLogs(botId: string, localFallback: ReminderLo
 // ================= USER CONFIG PERSISTENCE (SURVIVES RESTARTS) =================
 
 export async function dbSaveUserConfig(email: string, url: string, key: string): Promise<boolean> {
-  const client = getSupabaseClient();
+  // Luôn ghi vào DB GỐC: đây là "danh bạ" ánh xạ user → Supabase riêng của họ,
+  // phải nằm ở nền tảng mới tra được sau redeploy (ghi vào DB khách là mất dấu).
+  const client = getRootSupabaseClient();
   if (!client) return false;
   try {
     const { error } = await client.from('user_configs').upsert({
@@ -1155,7 +1359,7 @@ export async function dbSaveUserConfig(email: string, url: string, key: string):
 }
 
 export async function dbGetUserConfig(email: string): Promise<{ url: string; key: string } | null> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient();
   if (!client) return null;
   try {
     const { data, error } = await client
@@ -1209,9 +1413,12 @@ export async function dbSaveTelegramGroup(group: TelegramGroup): Promise<boolean
 
 // ================= USAGE METERING (BILLING) =================
 // Tất cả fail-open: lỗi DB trả 0 / no-op để không chặn nhầm dịch vụ khách.
+// Billing là dữ liệu NỀN TẢNG → luôn dùng root client. Nếu dùng client scoped,
+// request webhook của khách BYO Supabase sẽ đọc profiles/usage trong DB của họ
+// (không có dữ liệu) → gói trả phí bị coi nhầm là Free.
 
 export async function dbGetUsage(ownerKey: string, yearMonth: string): Promise<number> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient();
   if (!client || !ownerKey) return 0;
   try {
     const { data, error } = await client.from("usage_counters")
@@ -1222,7 +1429,7 @@ export async function dbGetUsage(ownerKey: string, yearMonth: string): Promise<n
 }
 
 export async function dbIncrementUsage(ownerKey: string, yearMonth: string): Promise<void> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient();
   if (!client || !ownerKey) return;
   try {
     const { error } = await client.rpc("increment_usage", { p_owner: ownerKey, p_month: yearMonth });
@@ -1232,7 +1439,7 @@ export async function dbIncrementUsage(ownerKey: string, yearMonth: string): Pro
 
 // Đọc gói (tier + hạn mức + hạn dùng) bền từ profiles theo id hoặc email. Fail-open: null nếu lỗi/không có.
 export async function dbGetProfilePlan(ownerKey: string): Promise<{ tier?: string; message_limit?: number; email?: string; plan_expires_at?: string | null } | null> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient();
   if (!client || !ownerKey) return null;
   try {
     const cols = "id,email,tier,message_limit,plan_expires_at";
@@ -1250,7 +1457,7 @@ export async function dbGetProfilePlan(ownerKey: string): Promise<{ tier?: strin
 // UPSERT (không phải update): dòng profile chưa tồn tại thì tạo mới — update vào
 // dòng không tồn tại là no-op im lặng, chính là lỗi làm gói bị reset về Free.
 export async function dbUpdateProfilePlan(id: string, email: string, tier: string, messageLimit: number, planExpiresAt?: string | null): Promise<boolean> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient();
   if (!client || !id) return false;
   try {
     const row: any = { id, tier, message_limit: messageLimit };
@@ -1263,7 +1470,7 @@ export async function dbUpdateProfilePlan(id: string, email: string, tier: strin
 }
 
 export async function dbGetUsageBulk(yearMonth: string): Promise<Record<string, number>> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient();
   if (!client) return {};
   try {
     const { data, error } = await client.from("usage_counters")
@@ -1279,7 +1486,7 @@ export async function dbGetUsageBulk(yearMonth: string): Promise<Record<string, 
 // Email/domain được phép dùng gói Free. Trả về { entries, ok } để phân biệt
 // "bảng rỗng" (ok=true, enforce) với "DB lỗi" (ok=false, fail-open không enforce).
 export async function dbGetFreeAllowlist(): Promise<{ entries: string[]; ok: boolean }> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient(); // allowlist là dữ liệu nền tảng
   if (!client) return { entries: [], ok: false };
   try {
     const { data, error } = await client.from("free_allowlist").select("entry");
@@ -1290,7 +1497,7 @@ export async function dbGetFreeAllowlist(): Promise<{ entries: string[]; ok: boo
 }
 
 export async function dbAddFreeAllowlist(entry: string, note?: string): Promise<boolean> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient();
   if (!client || !entry) return false;
   try {
     const { error } = await client.from("free_allowlist").upsert({ entry: entry.toLowerCase(), note: note || null }, { onConflict: "entry" });
@@ -1300,7 +1507,7 @@ export async function dbAddFreeAllowlist(entry: string, note?: string): Promise<
 }
 
 export async function dbRemoveFreeAllowlist(entry: string): Promise<boolean> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient();
   if (!client || !entry) return false;
   try {
     const { error } = await client.from("free_allowlist").delete().eq("entry", entry.toLowerCase());

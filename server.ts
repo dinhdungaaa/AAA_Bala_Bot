@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { embedText, hashText } from "./rag/embeddings.js";
@@ -60,6 +61,9 @@ import {
   dbGetReminderLogs,
   dbSaveUserConfig,
   dbGetUserConfig,
+  dbRootLoadByoConfigs,
+  dbRootSaveBotConfig,
+  dbRootDeleteBotConfig,
   dbGetTelegramGroups,
   dbSaveTelegramGroup,
   dbGetUsage,
@@ -126,6 +130,60 @@ function writeJsonFile(filePath: string, data: unknown) {
   }
 }
 
+// ============ BYO SUPABASE CONFIGS (khách dùng Supabase riêng) ============
+// Nguồn sự thật trong RAM, write-through ra file JSON (cache local) + DB GỐC (bền).
+// File trên Railway bị xóa mỗi lần redeploy nên khởi động phải hydrate lại từ DB gốc —
+// nếu không, webhook Telegram/Botcake mất ánh xạ botId → Supabase khách và dữ liệu
+// kênh chat rơi nhầm về DB mặc định.
+let byoUserConfigs: Record<string, { url: string; key: string }> = readJsonFile(USER_CONFIGS_FILE, {});
+let byoBotConfigs: Record<string, { url: string; key: string }> = readJsonFile(BOT_CONFIGS_FILE, {});
+
+async function hydrateByoConfigs() {
+  const loaded = await dbRootLoadByoConfigs();
+  if (!loaded) return;
+  // File local (nếu còn) mới hơn DB trong phiên hiện tại → file thắng khi trùng khóa.
+  byoUserConfigs = { ...loaded.users, ...byoUserConfigs };
+  byoBotConfigs = { ...loaded.bots, ...byoBotConfigs };
+  writeJsonFile(USER_CONFIGS_FILE, byoUserConfigs);
+  writeJsonFile(BOT_CONFIGS_FILE, byoBotConfigs);
+  console.log(`[BYO] Nạp ${Object.keys(byoUserConfigs).length} user config + ${Object.keys(byoBotConfigs).length} bot config từ DB gốc`);
+}
+void hydrateByoConfigs();
+
+function saveByoUserConfig(email: string, url: string, key: string) {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return;
+  byoUserConfigs[normalized] = { url, key };
+  writeJsonFile(USER_CONFIGS_FILE, byoUserConfigs);
+  void dbSaveUserConfig(normalized, url, key); // ghi bền vào DB gốc
+}
+
+function saveByoBotConfig(botId: string, config: { url: string; key: string }) {
+  byoBotConfigs[botId] = config;
+  writeJsonFile(BOT_CONFIGS_FILE, byoBotConfigs);
+  void dbRootSaveBotConfig(botId, config.url, config.key);
+}
+
+function deleteByoBotConfig(botId: string) {
+  if (!byoBotConfigs[botId]) return;
+  delete byoBotConfigs[botId];
+  writeJsonFile(BOT_CONFIGS_FILE, byoBotConfigs);
+  void dbRootDeleteBotConfig(botId);
+}
+
+// Token xác nhận danh tính khi client xin lại Supabase key đã lưu (chống lộ key
+// cho người lạ chỉ cần biết email). HMAC theo secret ổn định qua các lần deploy.
+const CONFIG_TOKEN_SECRET = (
+  process.env.CONFIG_TOKEN_SECRET ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  "balabot-config-token"
+).trim();
+
+function makeConfigToken(email: string): string {
+  return crypto.createHmac("sha256", CONFIG_TOKEN_SECRET).update(email.trim().toLowerCase()).digest("hex");
+}
+
 function getRequestUserEmail(req: express.Request) {
   return (
     req.headers["x-balabot-user-email"] ||
@@ -158,16 +216,14 @@ function getRequestConfig(req: express.Request): { url: string; key: string } | 
 
   const email = (req.headers["x-balabot-user-email"] || "").toString().trim().toLowerCase();
   if (email) {
-    const userConfigs = readJsonFile<Record<string, { url: string; key: string }>>(USER_CONFIGS_FILE, {});
-    const userConfig = userConfigs[email];
+    const userConfig = byoUserConfigs[email];
     if (userConfig?.url && userConfig?.key) return userConfig;
   }
 
   const botMatch = req.path.match(/^\/api\/(?:bots|telegram-webhook|facebook-webhook|bridge\/botcake(?:-async)?)\/([^/]+)/);
   const botId = botMatch?.[1];
   if (botId) {
-    const botConfigs = readJsonFile<Record<string, { url: string; key: string }>>(BOT_CONFIGS_FILE, {});
-    const botConfig = botConfigs[botId];
+    const botConfig = byoBotConfigs[botId];
     if (botConfig?.url && botConfig?.key) return botConfig;
   }
 
@@ -178,8 +234,7 @@ function getSavedSupabaseConfigForEmail(email: string): { url: string; key: stri
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) return null;
 
-  const userConfigs = readJsonFile<Record<string, { url: string; key: string }>>(USER_CONFIGS_FILE, {});
-  const userConfig = userConfigs[normalizedEmail];
+  const userConfig = byoUserConfigs[normalizedEmail];
   if (userConfig?.url && userConfig?.key) return userConfig;
 
   return null;
@@ -629,21 +684,22 @@ app.post("/api/supabase/config", async (req, res) => {
     return res.status(400).json({ success: false, error: "Missing Supabase URL or key" });
   }
 
+  // Bootstrap: server chưa có bất kỳ Supabase nào (cài mới, chưa đăng nhập được vì
+  // auth cũng cần Supabase) thì cho cấu hình lần đầu. Đánh giá TRƯỚC khi scope theo body.
+  const bootstrapAllowed = !getSupabaseConfig().isConfigured;
+
   return withSupabaseConfig({ url, key }, async () => {
     if (!email) {
+      // Đổi DB mặc định của CẢ server — chỉ owner (hoặc bootstrap) được phép. Nếu để
+      // mở, một request ẩn danh có thể chuyển hướng dữ liệu mặc định của mọi khách sang DB lạ.
+      if (!bootstrapAllowed && getRequestUserEmail(req) !== ADMIN_EMAIL) {
+        return res.status(403).json({ success: false, error: "Cần đăng nhập để lưu cấu hình Supabase theo tài khoản." });
+      }
       updateDynamicConfig(url, key);
     }
 
     if (email) {
-      const normalizedEmail = email.toLowerCase();
-      const dbSaved = await dbSaveUserConfig(normalizedEmail, url, key);
-      if (dbSaved) {
-        console.log(`[Config] Saved user config for ${normalizedEmail} to that user's Supabase DB`);
-      }
-
-      const configs = readJsonFile<Record<string, { url: string; key: string }>>(USER_CONFIGS_FILE, {});
-      configs[normalizedEmail] = { url, key };
-      writeJsonFile(USER_CONFIGS_FILE, configs);
+      saveByoUserConfig(email, url, key);
     }
 
     const status = await testConnection();
@@ -656,19 +712,26 @@ app.post("/api/supabase/config", async (req, res) => {
 });
 
 app.get("/api/supabase/config/retrieve", async (req, res) => {
-  const email = req.query.email as string;
+  const email = (req.query.email as string || "").trim();
+  const token = (req.query.token as string || "").trim();
   if (!email) {
     return res.status(400).json({ success: false, error: "Email is required" });
   }
+  // SECURITY: endpoint này trả về Supabase key THÔ — bắt buộc token HMAC cấp lúc
+  // đăng nhập. Không có token, bất kỳ ai biết email đều lấy được key DB của khách.
+  const expected = makeConfigToken(email);
+  if (!token || token.length !== expected.length ||
+      !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected))) {
+    return res.status(403).json({ success: false, error: "Phiên không hợp lệ — vui lòng đăng nhập lại để khôi phục cấu hình." });
+  }
 
-  const configs = readJsonFile<Record<string, { url: string; key: string }>>(USER_CONFIGS_FILE, {});
-  const userConfig = configs[email.toLowerCase()];
+  const userConfig = byoUserConfigs[email.toLowerCase()];
   if (userConfig?.url && userConfig?.key) {
     return res.json({
       success: true,
       url: userConfig.url,
       key: userConfig.key,
-      source: "json"
+      source: "memory"
     });
   }
 
@@ -686,12 +749,21 @@ app.get("/api/supabase/config/retrieve", async (req, res) => {
 });
 
 app.post("/api/supabase/sync", async (req, res) => {
+  // Chỉ đồng bộ dữ liệu THUỘC user đang gọi — mảng in-memory chứa dữ liệu của
+  // mọi tenant, đổ nguyên xi vào Supabase của một khách là rò dữ liệu chéo.
+  const userId = (req.body?.userId || "").toString().trim();
+  const isOwner = getRequestUserEmail(req) === ADMIN_EMAIL;
+  if (!isOwner && !userId) {
+    return res.status(400).json({ success: false, message: "Thiếu userId — vui lòng đăng nhập lại rồi bấm đồng bộ.", counts: {} });
+  }
+  const syncBots = userId ? bots.filter(b => b.userId === userId) : bots; // owner không truyền userId = đồng bộ tất cả
+  const botIds = new Set(syncBots.map(b => b.id));
   const result = await syncLocalToSupabase({
-    bots,
-    sources: knowledgeSources,
-    chunks: knowledgeChunks,
-    sessions: chatSessions,
-    faqs: faqList
+    bots: syncBots,
+    sources: knowledgeSources.filter(s => botIds.has(s.botId)),
+    chunks: knowledgeChunks.filter(c => botIds.has(c.botId)),
+    sessions: chatSessions.filter(s => botIds.has(s.botId)),
+    faqs: faqList.filter(f => botIds.has(f.botId))
   });
   res.json(result);
 });
@@ -758,7 +830,7 @@ app.post("/api/supabase/auth/signup", async (req, res) => {
       }
     }
 
-    res.status(201).json(result);
+    res.status(201).json({ ...result, configToken: makeConfigToken(email) });
   } else {
     res.status(400).json(result);
   }
@@ -809,7 +881,7 @@ app.post("/api/supabase/auth/signin", async (req, res) => {
       }
     }
 
-    res.json(result);
+    res.json({ ...result, configToken: makeConfigToken(email) });
   } else {
     res.status(400).json(result);
   }
@@ -1192,9 +1264,7 @@ app.post("/api/bots", async (req, res) => {
   await dbSaveBot(newBot);
   const requestConfig = getRequestConfig(req);
   if (requestConfig) {
-    const botConfigs = readJsonFile<Record<string, { url: string; key: string }>>(BOT_CONFIGS_FILE, {});
-    botConfigs[newBot.id] = requestConfig;
-    writeJsonFile(BOT_CONFIGS_FILE, botConfigs);
+    saveByoBotConfig(newBot.id, requestConfig);
   }
 
   // Register live Webhook automatically with Telegram
@@ -1229,9 +1299,7 @@ app.put("/api/bots/:id", async (req, res) => {
   await dbUpdateBot(req.params.id, updates);
   const requestConfig = getRequestConfig(req);
   if (requestConfig) {
-    const botConfigs = readJsonFile<Record<string, { url: string; key: string }>>(BOT_CONFIGS_FILE, {});
-    botConfigs[req.params.id] = requestConfig;
-    writeJsonFile(BOT_CONFIGS_FILE, botConfigs);
+    saveByoBotConfig(req.params.id, requestConfig);
   }
 
   // Register/update live Webhook automatically when token is configured or changed
@@ -1260,11 +1328,7 @@ app.put("/api/bots/:id", async (req, res) => {
 app.delete("/api/bots/:id", async (req, res) => {
   bots = bots.filter(b => b.id !== req.params.id);
   await dbDeleteBot(req.params.id);
-  const botConfigs = readJsonFile<Record<string, { url: string; key: string }>>(BOT_CONFIGS_FILE, {});
-  if (botConfigs[req.params.id]) {
-    delete botConfigs[req.params.id];
-    writeJsonFile(BOT_CONFIGS_FILE, botConfigs);
-  }
+  deleteByoBotConfig(req.params.id);
   res.json({ success: true });
 });
 

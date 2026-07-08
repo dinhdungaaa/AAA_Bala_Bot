@@ -767,7 +767,7 @@ export default function App() {
         // Multi-source config recovery chain:
         // 1. Server DB (survives restarts) → 2. localStorage → 3. Server current env
         if (parsed.email) {
-          fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(parsed.email)}`)
+          fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(parsed.email)}&token=${encodeURIComponent(localStorage.getItem("sbConfigToken") || '')}`)
             .then(res => res.json())
             .then(data => {
               if (data.success && data.url && data.key) {
@@ -1016,6 +1016,8 @@ export default function App() {
       if (res.ok && data.success) {
         setSbUser(data.user);
         localStorage.setItem("sbUser", JSON.stringify(data.user));
+        // Token khôi phục cấu hình Supabase riêng (bắt buộc khi gọi /config/retrieve)
+        if (data.configToken) localStorage.setItem("sbConfigToken", data.configToken);
         if (data.user.email === ADMIN_EMAIL) {
           setActiveTab('admin');
         } else {
@@ -1052,7 +1054,7 @@ export default function App() {
             });
           };
 
-          fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(data.user.email)}`)
+          fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(data.user.email)}&token=${encodeURIComponent(data.configToken || '')}`)
             .then(r => r.json())
             .then(configData => {
               if (configData.success && configData.url && configData.key) {
@@ -1111,6 +1113,7 @@ export default function App() {
     localStorage.removeItem("sbUser");
     localStorage.removeItem("sbUrl");
     localStorage.removeItem("sbKey");
+    localStorage.removeItem("sbConfigToken");
     alert('Đăng xuất tài khoản Supabase Auth thành công.');
   };
 
@@ -1141,7 +1144,12 @@ export default function App() {
     setSbSyncing(true);
     setSbSyncResult(null);
     try {
-      const res = await fetch('/api/supabase/sync', { method: 'POST' });
+      // Gửi userId để server chỉ đồng bộ dữ liệu của mình (header scoped tự đính qua interceptor)
+      const res = await fetch('/api/supabase/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: sbUser?.id || '' })
+      });
       const data = await res.json();
       setSbSyncResult(data);
       if (data.success) {
