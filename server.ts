@@ -905,7 +905,7 @@ Nội dung chính của tài liệu ${baseName}:
       fullText,
       category: category || "product",
       contentSummary: nSummary,
-      status: "completed",
+      status: "processing",
       fileSize: fileSizeStr,
       createdAt: new Date().toISOString()
     };
@@ -916,13 +916,11 @@ Nội dung chính của tài liệu ${baseName}:
     const generatedChunks = buildKnowledgeChunksForSource(newSource, [
       strategy === 'default' ? "supabase-storage" : (strategy === 'byo-cloud' ? "byo-cloud" : "extract-instant-rag")
     ]);
+    for (const newChunk of generatedChunks) knowledgeChunks.push(newChunk);
 
-    for (const newChunk of generatedChunks) {
-      knowledgeChunks.push(newChunk);
-      await attachChunkEmbedding(newChunk);
-      await dbSaveChunk(newChunk);
-    }
-
+    // Trả lời NGAY rồi embed nền — file dài embed hàng trăm chunk mất vài phút,
+    // giữ request mở sẽ bị Cloudflare proxy cắt ~100s → client nhận trang HTML lỗi
+    // ("Unexpected token '<'... is not valid JSON"). Giống pattern POST /sources.
     res.status(201).json({
       success: true,
       source: newSource,
@@ -930,6 +928,23 @@ Nội dung chính của tài liệu ${baseName}:
       supabaseStored: strategy === 'default' && !!getSupabaseClient(),
       strategyUsed: strategy
     });
+
+    void (async () => {
+      let embedded = 0;
+      for (const newChunk of generatedChunks) {
+        try {
+          await attachChunkEmbedding(newChunk);
+          await dbSaveChunk(newChunk);
+          embedded++;
+        } catch (e: any) {
+          console.warn("[Upload] embed/save chunk lỗi (bỏ qua chunk):", e?.message || e);
+        }
+      }
+      newSource.status = "completed";
+      try { await dbSaveSource(newSource); } catch {}
+      console.log(`[Upload] Hoàn tất embedding ${embedded}/${generatedChunks.length} chunks cho source ${newSource.id} (${fileName}).`);
+    })();
+    return;
 
   } catch (err: any) {
     console.error("Upload handler error:", err);
