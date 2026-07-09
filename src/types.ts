@@ -40,6 +40,11 @@ export interface BotConfig {
   // Trợ lý bán hàng: mục tiêu hội thoại + chat id Telegram nhận thông báo lead.
   conversationGoal?: 'lead' | 'order' | 'consult';
   notifyTelegramChatId?: string;
+  // Widget chat nhúng website của chủ shop. widgetKey rỗng/null = tính năng tắt.
+  widgetKey?: string | null;
+  widgetColor?: string;
+  widgetTitle?: string;
+  widgetGreeting?: string;
 }
 
 export interface KnowledgeSource {
@@ -108,7 +113,7 @@ export interface ChatSession {
   internalNotes: string;
   messages: Message[];
   // Định tuyến kênh để operator gửi tin can thiệp tới đúng nơi (kèm tag tên + trích dẫn).
-  channel?: 'telegram' | 'facebook' | 'zalo' | 'botcake';
+  channel?: 'telegram' | 'facebook' | 'zalo' | 'botcake' | 'web';
   channelChatId?: string;     // đích gửi: Telegram chat.id / Zalo groupId / FB psid
   channelIsGroup?: boolean;   // true nếu là nhóm (cần @tag + reply rõ người)
   channelSenderId?: string;   // id khách trên kênh (để @mention)

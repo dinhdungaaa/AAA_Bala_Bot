@@ -88,6 +88,9 @@ import {
   logoutZalo, listBindings, upsertBinding, initZaloGroupBot,
   sendOperatorMessage as sendZaloOperatorMessage,
 } from "./zaloGroupBot/index.js";
+import { isValidWidgetKey, isValidVisitorId, clampWidgetText, filterMessagesAfter, resolveWidgetConfig } from "./widget/embed.js";
+import { buildLoaderJs } from "./widget/loaderJs.js";
+import { buildFrameHtml } from "./widget/frameHtml.js";
 
 // Helper for type compatibility (since we'll import types in types.ts but write server)
 const app = express();
@@ -220,7 +223,7 @@ function getRequestConfig(req: express.Request): { url: string; key: string } | 
     if (userConfig?.url && userConfig?.key) return userConfig;
   }
 
-  const botMatch = req.path.match(/^\/api\/(?:bots|telegram-webhook|facebook-webhook|bridge\/botcake(?:-async)?)\/([^/]+)/);
+  const botMatch = req.path.match(/^\/api\/(?:bots|telegram-webhook|facebook-webhook|widget|bridge\/botcake(?:-async)?)\/([^/]+)/);
   const botId = botMatch?.[1];
   if (botId) {
     const botConfig = byoBotConfigs[botId];
@@ -1214,6 +1217,136 @@ app.post("/api/site-assistant/lead", async (req, res) => {
   res.json({ ok, message: "Cảm ơn anh/chị! Bên em sẽ liên hệ trong thời gian sớm nhất ạ." });
 });
 
+// ===== WIDGET CHAT NHÚNG WEBSITE (công khai, gate bằng widgetKey per-bot) =====
+const widgetRate = new Map<string, { n: number; reset: number }>();
+function widgetAllow(ip: string): boolean {
+  const now = Date.now();
+  const r = widgetRate.get(ip);
+  if (!r || now > r.reset) { widgetRate.set(ip, { n: 1, reset: now + 60_000 }); return true; }
+  r.n += 1;
+  return r.n <= 8;
+}
+
+// Tìm bot + kiểm widget key. Trả null nếu không hợp lệ (caller tự trả 403).
+async function findWidgetBot(botId: string, key: string): Promise<BotConfig | null> {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === botId);
+  if (!bot || !isValidWidgetKey(bot.widgetKey || undefined, key)) return null;
+  return bot;
+}
+
+let widgetLoaderCache: string | null = null;
+app.get("/api/widget/loader.js", (_req, res) => {
+  if (!widgetLoaderCache) widgetLoaderCache = buildLoaderJs();
+  res.set("Content-Type", "application/javascript; charset=utf-8");
+  res.set("Cache-Control", "public, max-age=300");
+  res.send(widgetLoaderCache);
+});
+
+app.get("/api/widget/:botId/config", async (req, res) => {
+  const bot = await findWidgetBot(req.params.botId, String(req.query.key || ""));
+  if (!bot) return res.status(403).json({ error: "Widget chưa được bật cho bot này." });
+  res.json(resolveWidgetConfig(bot));
+});
+
+app.get("/api/widget/:botId/frame", async (req, res) => {
+  const key = String(req.query.key || "");
+  const visitor = String(req.query.visitor || "");
+  const bot = await findWidgetBot(req.params.botId, key);
+  if (!bot || !isValidVisitorId(visitor)) {
+    return res.status(403).set("Content-Type", "text/html; charset=utf-8")
+      .send("<!doctype html><meta charset='utf-8'><p style='font-family:sans-serif;padding:24px'>Widget chưa được bật hoặc liên kết không hợp lệ.</p>");
+  }
+  const cfg = resolveWidgetConfig(bot);
+  res.set("Content-Type", "text/html; charset=utf-8");
+  res.send(buildFrameHtml({ botId: bot.id, widgetKey: key, visitorId: visitor, ...cfg }));
+});
+
+app.get("/api/widget/:botId/messages", async (req, res) => {
+  const bot = await findWidgetBot(req.params.botId, String(req.query.key || ""));
+  const visitor = String(req.query.visitor || "");
+  if (!bot || !isValidVisitorId(visitor)) return res.status(403).json({ messages: [] });
+  const userKey = `web:${visitor}`;
+  const session = chatSessions.find(s => s.botId === bot.id && s.telegramUserId === userKey);
+  const msgs = session ? filterMessagesAfter(session.messages as any, String(req.query.after || "") || undefined) : [];
+  res.json({ messages: msgs, humanTakeover: isHumanTakeoverActive(session) });
+});
+
+app.post("/api/widget/:botId/chat", async (req, res) => {
+  const ip = (req.headers["x-real-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").toString().split(",")[0].trim();
+  if (!widgetAllow(ip)) return res.status(429).json({ reply: "Anh/chị nhắn hơi nhanh ạ, chờ em chút rồi thử lại nhé.", humanTakeover: false });
+
+  const { key, visitor } = req.body || {};
+  const text = clampWidgetText(req.body?.text);
+  const bot = await findWidgetBot(req.params.botId, String(key || ""));
+  if (!bot || !isValidVisitorId(String(visitor || ""))) return res.status(403).json({ error: "Widget chưa được bật cho bot này." });
+  if (!text) return res.status(400).json({ error: "Thiếu nội dung tin nhắn." });
+
+  const userKey = `web:${visitor}`;
+  let session = chatSessions.find(s => s.botId === bot.id && s.telegramUserId === userKey);
+  if (!session) {
+    session = {
+      id: "sess-web-" + Math.random().toString(36).substr(2, 9),
+      botId: bot.id,
+      telegramUserId: userKey,
+      telegramUsername: `web_${visitor}`,
+      telegramFullName: "Khách website",
+      lastMessageText: text,
+      lastMessageTime: new Date().toISOString(),
+      status: "bot_answered",
+      internalNotes: "Đến từ widget website",
+      messages: [],
+    };
+    chatSessions.unshift(session);
+    analytics.totalUsers += 1;
+  }
+  session.channel = "web";
+  session.channelChatId = String(visitor);
+  session.channelIsGroup = false;
+  session.channelSenderId = String(visitor);
+
+  const hasPriorBotReply = session.messages.some(m => m.sender === "bot");
+  const userMsg: Message = {
+    id: "m-web-" + Math.random().toString(36).substr(2, 9),
+    sender: "user", username: `web_${visitor}`, fullName: "Khách website", text,
+    timestamp: new Date().toISOString(),
+  };
+  session.messages.push(userMsg);
+  session.lastMessageText = text;
+  session.lastMessageTime = userMsg.timestamp;
+
+  if (isHumanTakeoverActive(session)) {
+    await absorbMessageDuringTakeover(session);
+    return res.json({ reply: "", humanTakeover: true, ts: userMsg.timestamp });
+  }
+
+  let ai: { text: string; sources: any[]; fallbackTriggered: boolean };
+  const gate = await checkUsageGate(bot);
+  if (!gate.allowed) {
+    ai = { text: BLOCK_MESSAGE, sources: [], fallbackTriggered: true };
+  } else {
+    ai = await generateRAGAnswer(bot, text,
+      { fullName: "Khách website", username: `web_${visitor}`, id: userKey },
+      { shouldGreet: !hasPriorBotReply, recentMessages: session.messages.slice(-8, -1) });
+    await recordUsageForBot(bot);
+  }
+
+  const botMsg: Message = {
+    id: "m-web-bot-" + Math.random().toString(36).substr(2, 9),
+    sender: "bot", username: bot.name, text: ai.text,
+    timestamp: new Date().toISOString(),
+    sourcesUsed: ai.sources, fallbackTriggered: ai.fallbackTriggered,
+  };
+  session.messages.push(botMsg);
+  session.lastMessageText = ai.text;
+  session.lastMessageTime = botMsg.timestamp;
+  session.status = ai.fallbackTriggered ? "escalated" : "bot_answered";
+  analytics.totalMessages += 2;
+  try { await dbSaveConversation(session); } catch (e) { console.warn("[Widget] Skip Supabase:", e); }
+
+  res.json({ reply: ai.text, humanTakeover: false, ts: botMsg.timestamp });
+});
+
 // ---- Admin: xem danh sách leads (chỉ owner) ----
 app.get("/api/admin/leads", async (req, res) => {
   if (!requireOwnerAdmin(req, res)) return;
@@ -1624,8 +1757,15 @@ async function deliverOperatorReply(session: ChatSession, text: string): Promise
     if (!channel) {
       if (key.startsWith("facebook:")) { channel = "facebook"; chatId = chatId || key.slice("facebook:".length); senderId = senderId || chatId; isGroup = false; }
       else if (key.startsWith("botcake:")) { channel = "botcake"; chatId = chatId || key.slice("botcake:".length); senderId = senderId || chatId; isGroup = false; }
+      else if (key.startsWith("web:")) { channel = "web"; chatId = chatId || key.slice("web:".length); isGroup = false; }
       else if (key.startsWith("zalo:")) { const p = key.split(":"); channel = "zalo"; chatId = chatId || p[1]; senderId = senderId || p[2]; isGroup = true; }
       else { channel = "telegram"; chatId = chatId || key; senderId = senderId || key; }
+    }
+
+    if (channel === "web") {
+      // Widget nhận tin qua polling GET /messages — không có kênh push. Tin đã nằm
+      // trong session.messages nên coi như giao thành công.
+      return { delivered: true, channel: "web" };
     }
 
     if (channel === "telegram") {
