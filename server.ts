@@ -3294,6 +3294,44 @@ app.post("/api/bots/:botId/assistant-config", async (req, res) => {
   res.json({ success: true });
 });
 
+// Bật/tắt + tùy biến widget website. enable lần đầu tự sinh widgetKey.
+app.post("/api/bots/:botId/widget-config", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Bot không tồn tại." });
+
+  const { enable, disable, widgetColor, widgetTitle, widgetGreeting } = req.body || {};
+  const updates: Partial<BotConfig> = {};
+  if (enable && !bot.widgetKey) updates.widgetKey = "wk_" + randomToken(12); // 24 hex
+  if (disable) updates.widgetKey = null;
+  if (typeof widgetColor === "string") updates.widgetColor = /^#[0-9a-fA-F]{6}$/.test(widgetColor) ? widgetColor : "";
+  if (typeof widgetTitle === "string") updates.widgetTitle = widgetTitle.trim().slice(0, 60);
+  if (typeof widgetGreeting === "string") updates.widgetGreeting = widgetGreeting.trim().slice(0, 300);
+
+  const idx = bots.findIndex(b => b.id === bot.id);
+  if (idx !== -1) bots[idx] = { ...bots[idx], ...updates };
+  await dbUpdateBot(bot.id, updates);
+  const merged = { ...bot, ...updates };
+  res.json({ success: true, bot: {
+    widgetKey: merged.widgetKey || null,
+    widgetColor: merged.widgetColor || "",
+    widgetTitle: merged.widgetTitle || "",
+    widgetGreeting: merged.widgetGreeting || "",
+  }});
+});
+
+// Đổi khóa: mã nhúng cũ trên site shop chết ngay (thu hồi khi bị nhúng trộm).
+app.post("/api/bots/:botId/widget-key/regenerate", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Bot không tồn tại." });
+  const widgetKey = "wk_" + randomToken(12);
+  const idx = bots.findIndex(b => b.id === bot.id);
+  if (idx !== -1) bots[idx] = { ...bots[idx], widgetKey };
+  await dbUpdateBot(bot.id, { widgetKey });
+  res.json({ success: true, widgetKey });
+});
+
 // ===== Facebook OAuth 1 chạm (app chung BalaBot) =====
 function getFacebookAppCreds() {
   const appId = process.env.FACEBOOK_APP_ID || "";
