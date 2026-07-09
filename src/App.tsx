@@ -4024,7 +4024,10 @@ export default function App() {
 
           {/* TAB: WEBSITE WIDGET */}
           {activeTab === 'website' && bots.length > 0 && (() => {
-            const embedCode = `<script src="${window.location.origin}${window.location.pathname.startsWith('/balabot') ? '/balabot' : ''}/api/widget/loader.js" data-bot="${selectedBotId}" data-key="${widgetCfg?.widgetKey || ''}" async></script>`;
+            // Mã nhúng LUÔN trỏ về base công khai chuẩn (proxy Cloudflare) — không suy từ
+            // window.location: mở dashboard bằng URL Pages/Railway thô sẽ sinh snippet chết.
+            const WIDGET_PUBLIC_BASE = 'https://antiantiai.xyz/balabot';
+            const embedCode = `<script src="${WIDGET_PUBLIC_BASE}/api/widget/loader.js" data-bot="${selectedBotId}" data-key="${widgetCfg?.widgetKey || ''}" async></script>`;
             return (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-xs p-6 md:p-8 space-y-6">
