@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Bot, GraduationCap, Database, Play, Send, Sliders,
   History, BarChart3, Settings, CreditCard, Plus, Trash2, CheckCircle2,
   AlertCircle, Upload, MessageSquare, ArrowRight, ThumbsUp, ThumbsDown, RefreshCw, Key, Link2, HelpCircle, Check, Search, FileText, ChevronRight, User2, MessageCircle, Info, Sparkles, Shield,
-  Menu, X, Clock, Calendar, Zap, Power, Eye
+  Menu, X, Clock, Calendar, Zap, Power, Eye, Globe
 } from 'lucide-react';
 import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSummary, SaasCustomer, ScheduleItem, ReminderLog } from './types';
 import { PLAN_LIMITS } from '../billing';
@@ -75,7 +75,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'facebook' | 'zalo' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin' | 'leads'>(() => isAdminRoute() ? 'admin' : 'dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'facebook' | 'zalo' | 'website' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin' | 'leads'>(() => isAdminRoute() ? 'admin' : 'dashboard');
   const [telegramPanel, setTelegramPanel] = useState<'connection' | 'schedules' | 'train-schedules'>('connection');
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
@@ -330,6 +330,12 @@ export default function App() {
   const [facebookSimText, setFacebookSimText] = useState('Shop tư vấn giúp mình sản phẩm/dịch vụ phù hợp với nhu cầu hiện tại nhé.');
   const [facebookSimUserId, setFacebookSimUserId] = useState('fb-test-user-001');
   const [isSimulatingFacebook, setIsSimulatingFacebook] = useState(false);
+
+  // Widget website states (đặt cạnh các state kênh khác)
+  const [widgetCfg, setWidgetCfg] = useState<{ widgetKey: string | null; widgetColor: string; widgetTitle: string; widgetGreeting: string } | null>(null);
+  const [widgetSaving, setWidgetSaving] = useState(false);
+  const [widgetRegenerating, setWidgetRegenerating] = useState(false);
+  const [widgetCopied, setWidgetCopied] = useState(false);
 
   // Sales Assistant: leads + assistant config states
   const [leads, setLeads] = useState<any[]>([]);
@@ -847,6 +853,57 @@ export default function App() {
       zaloPollerRef.current = null;
     }
   }, [activeTab, sbUser]);
+
+  // Nạp cấu hình widget website khi mở tab Website hoặc đổi bot
+  useEffect(() => {
+    if (activeTab !== 'website' || !selectedBotId) return;
+    const bot = bots.find(b => b.id === selectedBotId);
+    setWidgetCfg({
+      widgetKey: bot?.widgetKey || null,
+      widgetColor: bot?.widgetColor || '',
+      widgetTitle: bot?.widgetTitle || '',
+      widgetGreeting: bot?.widgetGreeting || '',
+    });
+    setWidgetCopied(false);
+  }, [activeTab, selectedBotId, bots]);
+
+  const saveWidgetConfig = async (body: Record<string, unknown>) => {
+    if (!selectedBotId) return;
+    setWidgetSaving(true);
+    try {
+      const res = await fetch(`/api/bots/${selectedBotId}/widget-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
+        body: JSON.stringify(body)
+      });
+      const d = await res.json();
+      if (d.success) { setWidgetCfg(d.bot); fetchBots(sbUser?.id); }
+      else alert(d.error || 'Lưu thất bại');
+    } catch (err: any) {
+      alert('Lỗi lưu cấu hình widget: ' + err.message);
+    } finally {
+      setWidgetSaving(false);
+    }
+  };
+
+  const handleRegenerateWidgetKey = async () => {
+    if (!selectedBotId) return;
+    if (!window.confirm('Mã nhúng cũ trên website sẽ ngừng hoạt động, shop phải dán lại mã mới. Tiếp tục?')) return;
+    setWidgetRegenerating(true);
+    try {
+      const res = await fetch(`/api/bots/${selectedBotId}/widget-key/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() }
+      });
+      const d = await res.json();
+      if (d.success) { setWidgetCfg(prev => prev ? { ...prev, widgetKey: d.widgetKey } : prev); fetchBots(sbUser?.id); }
+      else alert(d.error || 'Đổi khóa thất bại');
+    } catch (err: any) {
+      alert('Lỗi đổi khóa widget: ' + err.message);
+    } finally {
+      setWidgetRegenerating(false);
+    }
+  };
 
   // Fetch initial bots when user session changes
   useEffect(() => {
@@ -2185,6 +2242,14 @@ export default function App() {
             </button>
           )}
 
+          <button
+            onClick={() => { setActiveTab('website'); setIsMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'website' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <Globe className="w-4 h-4" />
+            Website
+          </button>
+
           {activeTab === 'telegram' && (
             <div className="ml-7 mr-2 mb-1 space-y-1 border-l border-slate-700/60 pl-3">
               <button
@@ -2356,6 +2421,7 @@ export default function App() {
                   {activeTab === 'telegram' && 'Liên kết Kế Nối Telegram Bot'}
                   {activeTab === 'facebook' && 'Liên kết Facebook Messenger'}
                   {activeTab === 'zalo' && 'Zalo Group Bot'}
+                  {activeTab === 'website' && 'Kết nối Website'}
                   {activeTab === 'conversations' && 'Lịch sử Hội thoại Real-time'}
                   {activeTab === 'analytics' && 'Báo cáo Đo Lường Hiệu Suất'}
                   {activeTab === 'schedules' && 'Hệ Thống Nhắc Lịch Tự Động & AI Push'}
@@ -3955,6 +4021,140 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* TAB: WEBSITE WIDGET */}
+          {activeTab === 'website' && bots.length > 0 && (() => {
+            const embedCode = `<script src="${window.location.origin}${window.location.pathname.startsWith('/balabot') ? '/balabot' : ''}/api/widget/loader.js" data-bot="${selectedBotId}" data-key="${widgetCfg?.widgetKey || ''}" async></script>`;
+            return (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-xs p-6 md:p-8 space-y-6">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">Widget chat trên website</h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Dán 1 dòng mã vào website là khách nhắn được với bot — chạy đúng bộ não đang dùng cho Telegram/Messenger.
+                  </p>
+                </div>
+
+                {!widgetCfg?.widgetKey ? (
+                  <button
+                    type="button"
+                    onClick={() => saveWidgetConfig({ enable: true })}
+                    disabled={widgetSaving || !widgetCfg}
+                    className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg text-sm flex items-center gap-2"
+                  >
+                    {widgetSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
+                    Bật widget & tạo mã nhúng
+                  </button>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Màu chủ đạo</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={widgetCfg.widgetColor || '#059669'}
+                            onChange={(e) => setWidgetCfg(prev => prev ? { ...prev, widgetColor: e.target.value } : prev)}
+                            className="w-10 h-9 rounded border border-slate-200 cursor-pointer"
+                          />
+                          <span className="text-xs font-mono text-slate-500">{widgetCfg.widgetColor || '#059669'}</span>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Tên hiển thị</label>
+                        <input
+                          type="text"
+                          maxLength={60}
+                          placeholder={activeBot?.name || 'Tên bot'}
+                          value={widgetCfg.widgetTitle}
+                          onChange={(e) => setWidgetCfg(prev => prev ? { ...prev, widgetTitle: e.target.value } : prev)}
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div className="space-y-1.5 md:col-span-1">
+                        <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Lời chào</label>
+                        <textarea
+                          maxLength={300}
+                          rows={1}
+                          placeholder="Dạ em chào anh/chị! Anh/chị cần em tư vấn gì ạ? 😊"
+                          value={widgetCfg.widgetGreeting}
+                          onChange={(e) => setWidgetCfg(prev => prev ? { ...prev, widgetGreeting: e.target.value } : prev)}
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => saveWidgetConfig({ widgetColor: widgetCfg.widgetColor, widgetTitle: widgetCfg.widgetTitle, widgetGreeting: widgetCfg.widgetGreeting })}
+                      disabled={widgetSaving}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center gap-2"
+                    >
+                      {widgetSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      Lưu tùy biến
+                    </button>
+
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                      <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Mã nhúng</label>
+                      <textarea
+                        readOnly
+                        rows={3}
+                        value={embedCode}
+                        onFocus={(e) => e.target.select()}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-700 resize-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => { navigator.clipboard?.writeText(embedCode); setWidgetCopied(true); setTimeout(() => setWidgetCopied(false), 2000); }}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs"
+                      >
+                        {widgetCopied ? '✓ Đã copy' : '📋 Copy mã'}
+                      </button>
+                    </div>
+
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-1.5">
+                      <p className="font-bold text-slate-800">Cách nhúng vào website:</p>
+                      <p>1. Copy mã nhúng ở trên.</p>
+                      <p>2. Dán trước thẻ <code className="font-mono bg-white px-1 rounded border border-slate-200">&lt;/body&gt;</code> (hoặc mục "Mã tùy chỉnh/Custom code" của WordPress, Haravan, LadiPage...).</p>
+                      <p>3. Tải lại trang web sẽ thấy bong bóng chat xuất hiện.</p>
+                    </div>
+
+                    <div className="flex gap-4 flex-wrap pt-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={handleRegenerateWidgetKey}
+                        disabled={widgetRegenerating}
+                        className="text-xs font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50"
+                      >
+                        {widgetRegenerating ? 'Đang đổi khóa...' : '🔄 Đổi khóa'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { if (window.confirm('Widget sẽ ngừng hoạt động trên website, khách sẽ không thấy bong bóng chat nữa. Tiếp tục?')) saveWidgetConfig({ disable: true }); }}
+                        disabled={widgetSaving}
+                        className="text-xs font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50"
+                      >
+                        Tắt widget
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="bg-slate-900 text-white p-6 rounded-xl shadow-md flex flex-col gap-4">
+                <div className="flex items-center gap-2">
+                  <Globe className="w-5 h-5 text-emerald-400" />
+                  <h3 className="font-bold text-sm uppercase tracking-wider text-white">Hướng dẫn Website Widget</h3>
+                </div>
+                <div className="text-xs text-slate-300 leading-relaxed space-y-2">
+                  <p>1. Bật widget để hệ thống tạo mã nhúng riêng cho bot này.</p>
+                  <p>2. Tùy biến màu, tên hiển thị và lời chào cho khớp thương hiệu shop.</p>
+                  <p>3. Dán mã nhúng vào website — bot trả lời khách bằng đúng bộ não đang dùng cho các kênh khác.</p>
+                  <p className="text-amber-300 font-medium">Lưu ý: đổi khóa sẽ làm mã nhúng cũ ngừng hoạt động ngay lập tức trên mọi website đang dùng.</p>
+                </div>
+              </div>
+            </div>
+            );
+          })()}
 
           {/* TAB 7: HISTORIC CONVERSATIONS & OPERATOR TAKEOVER */}
           {activeTab === 'conversations' && bots.length > 0 && (
