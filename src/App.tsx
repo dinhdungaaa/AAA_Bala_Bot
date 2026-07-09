@@ -149,13 +149,17 @@ export default function App() {
     const savedUrl = localStorage.getItem("sbUrl");
     const savedKey = localStorage.getItem("sbKey");
     let email = sbUser?.email || "";
-    if (!email && savedUser) {
+    let userId = sbUser?.id || "";
+    if ((!email || !userId) && savedUser) {
       try {
-        email = JSON.parse(savedUser)?.email || "";
+        const parsed = JSON.parse(savedUser);
+        email = email || parsed?.email || "";
+        userId = userId || parsed?.id || "";
       } catch (_) {}
     }
     const headers: Record<string, string> = {};
     if (email) headers["x-balabot-user-email"] = email;
+    if (userId) headers["x-balabot-user-id"] = userId; // server dùng để khóa bot theo chủ sở hữu
     if (savedUrl) headers["x-balabot-supabase-url"] = savedUrl;
     if (savedKey) headers["x-balabot-supabase-key"] = savedKey;
     return headers;

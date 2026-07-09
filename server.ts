@@ -253,6 +253,36 @@ app.use((req, _res, next) => {
   withSupabaseConfig(getRequestConfig(req), next);
 });
 
+// ===== Cách ly bot theo chủ sở hữu =====
+// "Ẩn khỏi danh sách" chưa phải là khóa cửa: trước đây ai biết botId gọi thẳng
+// GET/PUT/DELETE /api/bots/:id hay các route con đều xem/sửa được bot người khác
+// (kể cả token kênh). Middleware này chặn: bot có chủ (userId) thì chỉ chủ đó
+// (header x-balabot-user-id từ dashboard) hoặc admin được đi qua.
+// Ngoại lệ: route được nền tảng NGOÀI gọi (không có header dashboard) hoặc đã có khóa riêng.
+const BOT_ROUTE_PUBLIC_SUBPATHS = new Set(["telegram-webhook", "facebook-webhook", "botcake-debug"]);
+
+app.use(async (req, res, next) => {
+  const m = req.path.match(/^\/api\/bots\/([^/]+)(?:\/([^/]+))?/);
+  if (!m) return next();
+  const [, botId, subPath] = m;
+  if (BOT_ROUTE_PUBLIC_SUBPATHS.has(subPath || "")) return next();
+
+  try {
+    const allBots = await dbGetBots(bots);
+    const bot = allBots.find(b => b.id === botId);
+    // Bot không tồn tại → để handler tự 404; bot cũ chưa gắn chủ → không khóa được.
+    if (!bot || !bot.userId) return next();
+
+    const requesterId = (req.headers["x-balabot-user-id"] || req.query.userId || "").toString().trim();
+    if (requesterId === bot.userId || getRequestUserEmail(req) === ADMIN_EMAIL) return next();
+    return res.status(403).json({ error: "Bạn không có quyền truy cập bot này. Vui lòng tải lại trang (Ctrl+Shift+R) rồi đăng nhập lại." });
+  } catch (e: any) {
+    // Fail-open: lỗi DB không được đánh sập toàn bộ API bot.
+    console.warn("[BotGuard] Bỏ qua kiểm tra chủ sở hữu do lỗi:", e?.message || e);
+    return next();
+  }
+});
+
 // Lazy initializer for Gemini Client
 let _aiClient: GoogleGenAI | null = null;
 function getAIClient(): GoogleGenAI | null {
