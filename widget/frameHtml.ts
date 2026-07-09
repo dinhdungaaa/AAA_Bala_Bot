@@ -1,5 +1,12 @@
 // Frame HTML: trang chat mini render trong <iframe>, tự chứa (style + script nội tuyến).
-import { escapeWidgetHtml } from "./embed.js";
+import { escapeWidgetHtml, WIDGET_DEFAULT_COLOR } from "./embed.js";
+
+// Nhúng giá trị động vào <script> an toàn: JSON.stringify KHÔNG escape "<",
+// attacker có thể gửi chuỗi dạng đóng-thẻ-script để thoát thẻ script. Đổi mọi "<"
+// thành chuỗi escape unicode 003c (tương đương trong chuỗi JS, vô hại với HTML parser).
+function jsEmbed(v: unknown): string {
+  return JSON.stringify(v).replace(/</g, "\\u003c");
+}
 
 export interface BuildFrameHtmlOpts {
   botId: string;
@@ -13,14 +20,19 @@ export interface BuildFrameHtmlOpts {
 export function buildFrameHtml(opts: BuildFrameHtmlOpts): string {
   const { botId, widgetKey, visitorId, title, color, greeting } = opts;
   const safeTitle = escapeWidgetHtml(title);
-  const safeColor = /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#059669";
+  const safeColor = /^#[0-9a-fA-F]{6}$/.test(color) ? color : WIDGET_DEFAULT_COLOR;
 
-  const safeGreeting = escapeWidgetHtml(greeting);
-  const clientConfig = JSON.stringify({
+  // botId xuất hiện trong 1 dòng comment của script — dù là comment JS, "<" vẫn được
+  // HTML parser đọc, nên cũng phải chặn breakout như mọi giá trị nhúng khác.
+  const botIdForComment = botId.replace(/</g, "\\u003c");
+
+  // greeting nhúng THÔ qua jsEmbed (đường JS → textContent, không phải HTML):
+  // jsEmbed đã chặn breakout, còn textContent hiển thị đúng ký tự gốc (& < > " ').
+  const clientConfig = jsEmbed({
     botId,
     key: widgetKey,
     visitor: visitorId,
-    greeting: safeGreeting,
+    greeting,
   });
 
   return [
@@ -82,7 +94,7 @@ export function buildFrameHtml(opts: BuildFrameHtmlOpts): string {
     "  var GREETING = CFG.greeting;",
     "",
     "  // API tinh dong tu URL frame hien tai (chay dung ca qua proxy /balabot lan goi thang Railway).",
-    "  // Voi bot nay, endpoint thuc te la: /api/widget/" + botId + "/chat , /api/widget/" + botId + "/messages",
+    "  // Voi bot nay, endpoint thuc te la: /api/widget/" + botIdForComment + "/chat , /api/widget/" + botIdForComment + "/messages",
     "  var API = location.pathname.replace(/\\/frame.*$/, \"\");",
     "",
     "  var msgsEl = document.getElementById(\"msgs\");",
@@ -188,6 +200,9 @@ export function buildFrameHtml(opts: BuildFrameHtmlOpts): string {
     "      hideTyping();",
     "      var reply = data && data.reply;",
     "      var humanTakeover = data && data.humanTakeover;",
+    "      // Backend trả ts = timestamp tin bot: cập nhật lastTs để poll không append lại",
+    "      // chính tin này (chống nhân đôi bubble). Không có ts thì giữ nguyên lastTs.",
+    "      if (data && data.ts) lastTs = data.ts;",
     "      if (reply) {",
     "        addMsg(\"bot\", reply);",
     "      } else if (humanTakeover) {",

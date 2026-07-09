@@ -29,6 +29,24 @@ describe("buildFrameHtml", () => {
     expect(html).not.toContain("<b>");
     expect(html).not.toContain("Chào <script>");
     expect(html).toContain("&lt;b&gt;");
+    // greeting nhung THO qua jsEmbed (khong HTML-escape): "<" thanh escape unicode 003c,
+    // hien thi qua textContent nen khach thay dung ky tu goc.
+    expect(html).toContain("Chào \\u003cscript");
+    expect(html).not.toContain("&lt;script&gt;");
+  });
+  it("chan </script> breakout voi moi gia tri nhung vao script", () => {
+    const evil = buildFrameHtml({
+      botId: "bot-</script><script>alert(0)</script>",
+      widgetKey: 'wk"</script><script>alert(1)</script>',
+      visitorId: "</script><script>alert(2)</script>",
+      title: "Shop",
+      color: "#123456",
+      greeting: "</script><script>alert(3)</script>",
+    });
+    expect(evil).not.toContain("</script><script>");
+    expect(evil).not.toContain("alert(1)</script>");
+    // the </script> hop le duy nhat la the dong cua script noi tuyen
+    expect(evil.split("</script>").length).toBe(2);
   });
   it("nhung dung endpoint chat/messages + polling 5000ms", () => {
     expect(html).toContain("/api/widget/bot-1/chat");
