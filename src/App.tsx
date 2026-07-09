@@ -1273,17 +1273,44 @@ export default function App() {
     }
   };
 
-  const handleUpdateBotSettings = async (updatedFields: Partial<BotConfig>) => {
-    if (!selectedBotId) return;
-    const res = await fetch(`/api/bots/${selectedBotId}`, {
+  // Lưu cấu hình bot kiểu debounce: UI cập nhật NGAY (optimistic), thay đổi được gom
+  // lại và chỉ PUT 1 lần sau khi ngừng gõ 800ms. Trước đây mỗi PHÍM gõ bắn 1 PUT
+  // (server còn ghi Supabase + đăng ký lại webhook Telegram mỗi lần) và ô nhập chỉ
+  // hiện chữ khi response quay về → gõ chữ rất lag, responses lộn thứ tự làm mất chữ.
+  const pendingBotUpdates = useRef<{ botId: string; fields: Partial<BotConfig> } | null>(null);
+  const botSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushBotUpdates = () => {
+    const pending = pendingBotUpdates.current;
+    pendingBotUpdates.current = null;
+    if (botSaveTimer.current) { clearTimeout(botSaveTimer.current); botSaveTimer.current = null; }
+    if (!pending) return;
+    fetch(`/api/bots/${pending.botId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedFields)
-    });
-    if (res.ok) {
-      const updated = await res.json();
-      setBots(bots.map(b => b.id === selectedBotId ? updated : b));
+      body: JSON.stringify(pending.fields)
+    }).then(res => {
+      if (!res.ok) console.warn('Lưu cấu hình bot thất bại:', res.status);
+    }).catch(e => console.warn('Lưu cấu hình bot lỗi mạng:', e));
+    // Không setBots từ response: state cục bộ đã đi trước (user có thể đang gõ tiếp),
+    // đè lại bằng bản server cũ hơn sẽ làm nhảy/mất chữ.
+  };
+
+  const handleUpdateBotSettings = (updatedFields: Partial<BotConfig>) => {
+    if (!selectedBotId) return;
+    // 1) Giao diện phản hồi tức thì
+    setBots(prev => prev.map(b => b.id === selectedBotId ? { ...b, ...updatedFields } : b));
+    // 2) Đổi bot đang chọn giữa chừng → đẩy phần dồn của bot cũ đi ngay
+    if (pendingBotUpdates.current && pendingBotUpdates.current.botId !== selectedBotId) {
+      flushBotUpdates();
     }
+    // 3) Gom thay đổi, hẹn giờ lưu
+    pendingBotUpdates.current = {
+      botId: selectedBotId,
+      fields: { ...(pendingBotUpdates.current?.fields || {}), ...updatedFields }
+    };
+    if (botSaveTimer.current) clearTimeout(botSaveTimer.current);
+    botSaveTimer.current = setTimeout(flushBotUpdates, 800);
   };
 
   const handleSaveAssistantConfig = async () => {
