@@ -86,11 +86,12 @@ import {
   dbGetUnmatchedPayments,
   dbClaimPaymentOrder,
   dbRevertPaymentOrderClaim,
-  dbExpirePaymentOrderIfPending
+  dbExpirePaymentOrderIfPending,
+  dbGetPaidPaymentOrders
 } from "./supabaseService.js";
 import type { PaymentOrder } from "./supabaseService.js";
 import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
-import { computeOrderAmount, generateOrderCode, extractOrderCode, buildSepayQrUrl, verifySepayApiKey, resolveNewExpiry, parseSepayWebhook } from "./payments/sepay.js";
+import { computeOrderAmount, generateOrderCode, extractOrderCode, buildSepayQrUrl, verifySepayApiKey, resolveNewExpiry, parseSepayWebhook, computeRevenueSummary } from "./payments/sepay.js";
 import { resolveLimitForOwner } from "./billingResolve.js";
 
 import {
@@ -1519,6 +1520,13 @@ app.post("/api/payments/sepay-webhook", async (req, res) => {
 app.get("/api/admin/payments/unmatched", async (req, res) => {
   if (!requireOwnerAdmin(req, res)) return;
   res.json({ items: await dbGetUnmatchedPayments(50) });
+});
+
+// Doanh thu từ thanh toán tự động (chỉ đơn paid) — tổng hợp phía server theo giờ VN.
+app.get("/api/admin/payments/revenue", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  const orders = await dbGetPaidPaymentOrders(500);
+  res.json(computeRevenueSummary(orders));
 });
 
 // ---- Admin: xem danh sách leads (chỉ owner) ----

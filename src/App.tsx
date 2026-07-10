@@ -121,6 +121,13 @@ export default function App() {
   const [qrImgFailed, setQrImgFailed] = useState(false); // ảnh QR SePay lỗi tải -> hiện fallback chuyển khoản tay
   // Admin: giao dịch SePay báo tiền vào nhưng không khớp nội dung đơn nào.
   const [unmatchedPayments, setUnmatchedPayments] = useState<Array<{ id: string; amount: number; content: string; received_at: string }>>([]);
+  // Admin: tổng hợp doanh thu từ đơn SePay đã trả (null = chưa nạp/lỗi -> ẩn khối).
+  const [revenueData, setRevenueData] = useState<null | {
+    totals: { all: number; thisMonth: number; lastMonth: number; growthPct: number | null };
+    monthly: Array<{ ym: string; total: number; orders: number }>;
+    byTier: Record<'starter' | 'pro', { orders: number; total: number; monthly: number; yearly: number }>;
+    recent: Array<{ id: string; email: string | null; tier: string; months: number; amount: number; paidAt: string }>;
+  }>(null);
   const [sbAuthMode, setSbAuthMode] = useState<'signin' | 'signup'>('signin');
   const [sbAuthLoading, setSbAuthLoading] = useState(false);
   const [sbAuthError, setSbAuthError] = useState('');
@@ -737,6 +744,10 @@ export default function App() {
       .then(r => r.json())
       .then(d => setUnmatchedPayments(Array.isArray(d.items) ? d.items : []))
       .catch(() => { /* bỏ qua */ });
+    fetch('/api/admin/payments/revenue', { headers: getScopedApiHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setRevenueData(d && d.totals ? d : null))
+      .catch(() => setRevenueData(null));
   }, [activeTab, sbUser?.email]);
 
   // Import allowlist từ FILE (.txt/.csv): tách email/domain theo dòng/dấu phẩy/khoảng trắng.
@@ -6700,6 +6711,98 @@ WHERE email = 'customer-email@example.com';`}
                   </p>
                 </div>
               </div>
+
+              {/* 💰 DOANH THU — từ đơn thanh toán SePay đã trả */}
+              {revenueData && (
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-5">
+                  <h3 className="text-base font-extrabold text-slate-800">💰 Doanh thu</h3>
+
+                  {/* 3 thẻ tổng quan */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tổng doanh thu</div>
+                      <div className="text-xl font-extrabold text-slate-800 mt-1">{revenueData.totals.all.toLocaleString('vi-VN')}đ</div>
+                    </div>
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                      <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Tháng này</div>
+                      <div className="text-xl font-extrabold text-slate-800 mt-1 flex items-center gap-2 flex-wrap">
+                        {revenueData.totals.thisMonth.toLocaleString('vi-VN')}đ
+                        {revenueData.totals.growthPct !== null && revenueData.totals.growthPct !== 0 && (
+                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${revenueData.totals.growthPct > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                            {revenueData.totals.growthPct > 0 ? '↑' : '↓'} {Math.abs(revenueData.totals.growthPct)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tháng trước</div>
+                      <div className="text-xl font-extrabold text-slate-800 mt-1">{revenueData.totals.lastMonth.toLocaleString('vi-VN')}đ</div>
+                    </div>
+                  </div>
+
+                  {/* Biểu đồ 6 tháng */}
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">6 tháng gần nhất</div>
+                    <div className="flex items-end gap-2 h-24">
+                      {(() => {
+                        const max = Math.max(...revenueData.monthly.map(m => m.total));
+                        return revenueData.monthly.map(m => (
+                          <div key={m.ym} className="flex-1 flex flex-col items-center gap-1" title={`${m.ym}: ${m.total.toLocaleString('vi-VN')}đ (${m.orders} đơn)`}>
+                            <div
+                              className={`w-full rounded-t ${m.total > 0 ? 'bg-emerald-500' : 'bg-slate-200'}`}
+                              style={{ height: `${max > 0 ? Math.max(4, (m.total / max) * 80) : 4}px` }}
+                            ></div>
+                            <span className="text-[10px] text-slate-400 font-medium">T{Number(m.ym.slice(5))}</span>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Cơ cấu theo gói */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="border border-slate-200 rounded-lg p-3">
+                      <div className="text-xs font-bold text-slate-500">Starter</div>
+                      <div className="text-base font-extrabold text-slate-800 mt-0.5">{revenueData.byTier.starter.total.toLocaleString('vi-VN')}đ</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{revenueData.byTier.starter.orders} đơn • {revenueData.byTier.starter.monthly} tháng • {revenueData.byTier.starter.yearly} năm</div>
+                    </div>
+                    <div className="border border-indigo-200 rounded-lg p-3 bg-indigo-50/40">
+                      <div className="text-xs font-bold text-indigo-500">Pro</div>
+                      <div className="text-base font-extrabold text-slate-800 mt-0.5">{revenueData.byTier.pro.total.toLocaleString('vi-VN')}đ</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{revenueData.byTier.pro.orders} đơn • {revenueData.byTier.pro.monthly} tháng • {revenueData.byTier.pro.yearly} năm</div>
+                    </div>
+                  </div>
+
+                  {/* Đơn gần nhất */}
+                  <div className="overflow-x-auto">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Đơn thanh toán gần nhất</div>
+                    <table className="w-full text-xs text-left">
+                      <thead>
+                        <tr className="text-[10px] text-slate-400 uppercase tracking-wider border-b border-slate-200">
+                          <th className="p-2 pl-0">Email</th>
+                          <th className="p-2">Gói</th>
+                          <th className="p-2">Chu kỳ</th>
+                          <th className="p-2">Số tiền</th>
+                          <th className="p-2">Lúc trả</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {revenueData.recent.length === 0 ? (
+                          <tr><td colSpan={5} className="p-4 text-center text-slate-400">Chưa có doanh thu — đơn thanh toán đầu tiên sẽ hiện ở đây.</td></tr>
+                        ) : revenueData.recent.map(r => (
+                          <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="p-2 pl-0 text-slate-700">{r.email || '—'}</td>
+                            <td className="p-2"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${r.tier === 'pro' ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-700'}`}>{r.tier}</span></td>
+                            <td className="p-2 text-slate-600">{r.months === 12 ? 'Năm' : 'Tháng'}</td>
+                            <td className="p-2 font-bold text-slate-800">{r.amount.toLocaleString('vi-VN')}đ</td>
+                            <td className="p-2 text-slate-500">{new Date(r.paidAt).toLocaleString('vi-VN')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* ALLOWLIST GÓI FREE — cộng đồng Peace Solution */}
               <div className="bg-white border border-emerald-200 rounded-xl p-5 shadow-xs space-y-4">

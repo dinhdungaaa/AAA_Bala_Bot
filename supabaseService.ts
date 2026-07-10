@@ -1738,3 +1738,15 @@ export async function dbGetUnmatchedPayments(limit = 50): Promise<Array<{ id: st
     return rows.map((row) => ({ ...row, amount: Number(row.amount) }));
   } catch { return []; }
 }
+
+// Đơn ĐÃ TRẢ mới nhất — nguồn cho mục Doanh thu tab Quản trị.
+export async function dbGetPaidPaymentOrders(limit = 500): Promise<PaymentOrder[]> {
+  const client = getRootSupabaseClient();
+  if (!client) return [];
+  try {
+    const { data, error } = await client.from("payment_orders").select("*")
+      .eq("status", "paid").order("paid_at", { ascending: false }).limit(limit);
+    if (error || !data) return [];
+    return (data as any[]).map(r => ({ ...r, amount: Number(r.amount) })) as PaymentOrder[];
+  } catch { return []; }
+}
