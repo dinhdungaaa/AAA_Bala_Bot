@@ -21,3 +21,6 @@ create table if not exists payment_unmatched (
   content text,
   received_at timestamptz default now()
 );
+
+-- Khóa cứng tầng DB: 1 giao dịch SePay chỉ gắn được vào 1 đơn (partial unique cho phép nhiều NULL).
+create unique index if not exists payment_orders_tx_unique on payment_orders (sepay_tx_id) where sepay_tx_id is not null;

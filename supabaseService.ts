@@ -1668,6 +1668,30 @@ export async function dbUpdatePaymentOrder(id: string, updates: Partial<PaymentO
   } catch (e: any) { console.warn("dbUpdatePaymentOrder failed:", e?.message || e); return false; }
 }
 
+// Claim đơn theo kiểu điều kiện: chỉ 1 request thắng (status != 'paid' → paid).
+// Trả true nếu CHÍNH request này claim được; false nếu đơn đã paid/không tồn tại/lỗi.
+export async function dbClaimPaymentOrder(id: string, sepayTxId: string): Promise<boolean> {
+  const client = getRootSupabaseClient();
+  if (!client || !id) return false;
+  try {
+    const { data, error } = await client.from("payment_orders")
+      .update({ status: "paid", paid_at: new Date().toISOString(), sepay_tx_id: sepayTxId })
+      .eq("id", id).neq("status", "paid").select("id");
+    if (error) { console.warn("dbClaimPaymentOrder:", error.message); return false; }
+    return Array.isArray(data) && data.length > 0;
+  } catch (e: any) { console.warn("dbClaimPaymentOrder failed:", e?.message || e); return false; }
+}
+
+export async function dbRevertPaymentOrderClaim(id: string): Promise<boolean> {
+  const client = getRootSupabaseClient();
+  if (!client || !id) return false;
+  try {
+    const { error } = await client.from("payment_orders")
+      .update({ status: "pending", paid_at: null, sepay_tx_id: null }).eq("id", id);
+    return !error;
+  } catch { return false; }
+}
+
 export async function dbFindOrderBySepayTx(txId: string): Promise<PaymentOrder | null> {
   const client = getRootSupabaseClient();
   if (!client || !txId) return null;

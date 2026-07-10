@@ -84,7 +84,9 @@ import {
   dbUpdatePaymentOrder,
   dbFindOrderBySepayTx,
   dbAddUnmatchedPayment,
-  dbGetUnmatchedPayments
+  dbGetUnmatchedPayments,
+  dbClaimPaymentOrder,
+  dbRevertPaymentOrderClaim
 } from "./supabaseService.js";
 import type { PaymentOrder } from "./supabaseService.js";
 import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
@@ -1474,7 +1476,12 @@ app.post("/api/payments/sepay-webhook", async (req, res) => {
       return res.json({ success: true });
     }
 
-    // Kích hoạt gói — bước không được rơi: lỗi thì 500 để SePay retry.
+    // CLAIM TRƯỚC - KÍCH HOẠT SAU: update điều kiện (status != 'paid' → paid) đảm bảo
+    // chỉ đúng 1 request thắng kể cả khi 2 webhook cùng tx chạy song song.
+    const claimed = await dbClaimPaymentOrder(order.id, tx.txId);
+    if (!claimed) return res.json({ success: true }); // request khác đã xử / đơn đã paid — idempotent tuyệt đối
+
+    // Kích hoạt gói — bước không được rơi: lỗi thì nhả claim + 500 để SePay retry.
     const profile = await dbGetProfilePlan(order.user_id);
     const expiry = resolveNewExpiry({
       currentTier: profile?.tier || null,
@@ -1485,10 +1492,10 @@ app.post("/api/payments/sepay-webhook", async (req, res) => {
     const limit = PLAN_LIMITS[order.tier as "starter" | "pro"].messages;
     const saved = await dbUpdateProfilePlan(order.user_id, order.email || "", order.tier, limit, expiry);
     if (!saved) {
+      await dbRevertPaymentOrderClaim(order.id);
       console.error(`[Payment] KHÔNG ghi được profiles cho đơn ${order.id} — trả 500 để SePay retry`);
       return res.status(500).json({ success: false });
     }
-    await dbUpdatePaymentOrder(order.id, { status: "paid", paid_at: new Date().toISOString(), sepay_tx_id: tx.txId });
     void notifyOwnerPayment(`💰 ĐƠN MỚI: ${order.email || order.user_id} • ${order.tier.toUpperCase()} ${order.months} tháng • ${order.amount.toLocaleString("vi-VN")}đ • hạn mới ${new Date(expiry).toLocaleDateString("vi-VN")}`);
     console.log(`[Payment] Kích hoạt ${order.tier} cho ${order.user_id} tới ${expiry} (đơn ${order.id})`);
     res.json({ success: true });
