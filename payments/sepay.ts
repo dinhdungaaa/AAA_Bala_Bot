@@ -24,7 +24,7 @@ export function generateOrderCode(): string {
 // Regex RONG hon bang sinh ma co chu dich: ma sinh ra luon khop; chuoi la khop
 // nham chi dan toi "khong tim thay don" -> roi vao giao dich lac, vo hai.
 export function extractOrderCode(content: string): string | null {
-  const m = String(content || "").toUpperCase().match(/BLB[A-Z0-9]{9}/);
+  const m = String(content || "").toUpperCase().match(/BLB[A-Z0-9]{8}/);
   return m ? m[0] : null;
 }
 

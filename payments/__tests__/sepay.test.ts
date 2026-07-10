@@ -29,9 +29,15 @@ describe("generateOrderCode", () => {
 
 describe("extractOrderCode", () => {
   it("tim thay ma trong noi dung ngan hang thuc te (hoa/thuong/dinh chu)", () => {
-    expect(extractOrderCode("BLBK7M2P4Q9X")).toBe("BLBK7M2P4Q9X");
-    expect(extractOrderCode("chuyen tien blbk7m2p4q9x thanh toan")).toBe("BLBK7M2P4Q9X");
-    expect(extractOrderCode("MBVCB.123.BLBK7M2P4Q9X.CT tu 090")).toBe("BLBK7M2P4Q9X");
+    expect(extractOrderCode("BLBK7M2P4Q9")).toBe("BLBK7M2P4Q9");
+    expect(extractOrderCode("chuyen tien blbk7m2p4q9 thanh toan")).toBe("BLBK7M2P4Q9");
+    expect(extractOrderCode("MBVCB.123.BLBK7M2P4Q9.CT tu 090")).toBe("BLBK7M2P4Q9");
+  });
+  it("round-trip: ma sinh ra luon extract lai duoc", () => {
+    for (let i = 0; i < 20; i++) {
+      const code = generateOrderCode();
+      expect(extractOrderCode("MBVCB.123." + code.toLowerCase() + ".CT tu 090")).toBe(code);
+    }
   });
   it("khong co ma -> null", () => {
     expect(extractOrderCode("chuyen khoan an trua")).toBeNull();
