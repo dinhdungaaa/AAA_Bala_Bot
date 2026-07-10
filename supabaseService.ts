@@ -1623,3 +1623,77 @@ export async function dbUpdateBotLead(botId: string, id: string, updates: Partia
   } catch (err) { console.warn("Supabase dbUpdateBotLead failed:", err); return false; }
 }
 
+// ================= PAYMENT ORDERS (SePay — dữ liệu NỀN TẢNG, luôn root client) =================
+export interface PaymentOrder {
+  id: string;
+  user_id: string;
+  email?: string | null;
+  tier: string;
+  months: number;
+  amount: number;
+  status: "pending" | "paid" | "expired";
+  sepay_tx_id?: string | null;
+  created_at?: string;
+  paid_at?: string | null;
+}
+
+export async function dbCreatePaymentOrder(order: PaymentOrder): Promise<boolean> {
+  const client = getRootSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from("payment_orders").insert(order);
+    if (error) { console.warn("dbCreatePaymentOrder:", error.message); return false; }
+    return true;
+  } catch (e: any) { console.warn("dbCreatePaymentOrder failed:", e?.message || e); return false; }
+}
+
+export async function dbGetPaymentOrder(id: string): Promise<PaymentOrder | null> {
+  const client = getRootSupabaseClient();
+  if (!client || !id) return null;
+  try {
+    const { data, error } = await client.from("payment_orders").select("*").eq("id", id).maybeSingle();
+    if (error || !data) return null;
+    return data as PaymentOrder;
+  } catch { return null; }
+}
+
+export async function dbUpdatePaymentOrder(id: string, updates: Partial<PaymentOrder>): Promise<boolean> {
+  const client = getRootSupabaseClient();
+  if (!client || !id) return false;
+  try {
+    const { error } = await client.from("payment_orders").update(updates).eq("id", id);
+    if (error) { console.warn("dbUpdatePaymentOrder:", error.message); return false; }
+    return true;
+  } catch (e: any) { console.warn("dbUpdatePaymentOrder failed:", e?.message || e); return false; }
+}
+
+export async function dbFindOrderBySepayTx(txId: string): Promise<PaymentOrder | null> {
+  const client = getRootSupabaseClient();
+  if (!client || !txId) return null;
+  try {
+    const { data, error } = await client.from("payment_orders").select("*").eq("sepay_tx_id", txId).limit(1);
+    if (error || !data || data.length === 0) return null;
+    return data[0] as PaymentOrder;
+  } catch { return null; }
+}
+
+export async function dbAddUnmatchedPayment(row: { id: string; amount: number; content: string }): Promise<boolean> {
+  const client = getRootSupabaseClient();
+  if (!client) return false;
+  try {
+    // upsert theo id: SePay retry cùng giao dịch không tạo dòng trùng
+    const { error } = await client.from("payment_unmatched").upsert(row, { onConflict: "id" });
+    if (error) { console.warn("dbAddUnmatchedPayment:", error.message); return false; }
+    return true;
+  } catch (e: any) { console.warn("dbAddUnmatchedPayment failed:", e?.message || e); return false; }
+}
+
+export async function dbGetUnmatchedPayments(limit = 50): Promise<Array<{ id: string; amount: number; content: string; received_at: string }>> {
+  const client = getRootSupabaseClient();
+  if (!client) return [];
+  try {
+    const { data, error } = await client.from("payment_unmatched").select("*").order("received_at", { ascending: false }).limit(limit);
+    if (error || !data) return [];
+    return data as any;
+  } catch { return []; }
+}
