@@ -81,12 +81,12 @@ import {
   dbUpdateBotLead,
   dbCreatePaymentOrder,
   dbGetPaymentOrder,
-  dbUpdatePaymentOrder,
   dbFindOrderBySepayTx,
   dbAddUnmatchedPayment,
   dbGetUnmatchedPayments,
   dbClaimPaymentOrder,
-  dbRevertPaymentOrderClaim
+  dbRevertPaymentOrderClaim,
+  dbExpirePaymentOrderIfPending
 } from "./supabaseService.js";
 import type { PaymentOrder } from "./supabaseService.js";
 import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
@@ -1397,7 +1397,10 @@ async function notifyOwnerPayment(text: string): Promise<void> {
 }
 
 app.post("/api/payments/orders", async (req, res) => {
-  const ip = ((req.headers["x-real-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?") as string).toString().split(",")[0].trim();
+  const cfIp = (req.headers["cf-connecting-ip"] || "").toString().trim();
+  const realIp = (req.headers["x-real-ip"] || "").toString().trim();
+  const forwardedIp = (req.headers["x-forwarded-for"] || "").toString().split(",").pop()?.trim() || "";
+  const ip = cfIp || realIp || forwardedIp || req.socket.remoteAddress || "?";
   if (!paymentAllow(ip)) return res.status(429).json({ error: "Anh/chị thao tác hơi nhanh, chờ chút rồi thử lại nhé." });
 
   const { tier, months, userId, email, amountOverride } = req.body || {};
@@ -1405,6 +1408,8 @@ app.post("/api/payments/orders", async (req, res) => {
   if (months !== 1 && months !== 12) return res.status(400).json({ error: "Chu kỳ không hợp lệ." });
   const uid = String(userId || "").trim();
   if (!uid) return res.status(400).json({ error: "Vui lòng đăng nhập để nâng gói." });
+  const headerUid = (req.headers["x-balabot-user-id"] || "").toString().trim();
+  if (headerUid && headerUid !== uid) return res.status(403).json({ error: "Thông tin tài khoản không khớp — vui lòng tải lại trang và đăng nhập lại." });
 
   const env = SEPAY_ENV();
   if (!env.bankAccount || !env.bankCode) {
@@ -1443,7 +1448,7 @@ app.get("/api/payments/orders/:orderId", async (req, res) => {
   if (!order) return res.status(404).json({ error: "Không tìm thấy đơn." });
   if (order.status === "pending" && order.created_at && Date.now() - new Date(order.created_at).getTime() > ORDER_TTL_MS) {
     order.status = "expired";
-    void dbUpdatePaymentOrder(order.id, { status: "expired" });
+    void dbExpirePaymentOrderIfPending(order.id);
   }
   res.json({ status: order.status, tier: order.tier, months: order.months, amount: order.amount, paidAt: order.paid_at || null });
 });
@@ -1492,8 +1497,13 @@ app.post("/api/payments/sepay-webhook", async (req, res) => {
     const limit = PLAN_LIMITS[order.tier as "starter" | "pro"].messages;
     const saved = await dbUpdateProfilePlan(order.user_id, order.email || "", order.tier, limit, expiry);
     if (!saved) {
-      await dbRevertPaymentOrderClaim(order.id);
+      const reverted = await dbRevertPaymentOrderClaim(order.id);
+      if (!reverted) console.error(`[Payment] REVERT CLAIM CŨNG LỖI — đơn ${order.id} kẹt trạng thái paid, PHẢI xử tay`);
       console.error(`[Payment] KHÔNG ghi được profiles cho đơn ${order.id} — trả 500 để SePay retry`);
+      void notifyOwnerPayment(
+        `🔴 Đơn ${order.id} ĐÃ NHẬN TIỀN nhưng GHI GÓI THẤT BẠI — cần kích hoạt tay cho ${order.email || order.user_id}` +
+        (reverted ? "" : ` — REVERT CLAIM CŨNG LỖI, đơn đang kẹt trạng thái paid, PHẢI xử tay ngay`)
+      );
       return res.status(500).json({ success: false });
     }
     void notifyOwnerPayment(`💰 ĐƠN MỚI: ${order.email || order.user_id} • ${order.tier.toUpperCase()} ${order.months} tháng • ${order.amount.toLocaleString("vi-VN")}đ • hạn mới ${new Date(expiry).toLocaleDateString("vi-VN")}`);

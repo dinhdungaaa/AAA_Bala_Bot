@@ -118,6 +118,7 @@ export default function App() {
   const [upgradeCopied, setUpgradeCopied] = useState(false);
   const [upgradeCreating, setUpgradeCreating] = useState(false);
   const [upgradeShowHelp, setUpgradeShowHelp] = useState(false);
+  const [qrImgFailed, setQrImgFailed] = useState(false); // ảnh QR SePay lỗi tải -> hiện fallback chuyển khoản tay
   // Admin: giao dịch SePay báo tiền vào nhưng không khớp nội dung đơn nào.
   const [unmatchedPayments, setUnmatchedPayments] = useState<Array<{ id: string; amount: number; content: string; received_at: string }>>([]);
   const [sbAuthMode, setSbAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -717,6 +718,7 @@ export default function App() {
     setUpgradeErr('');
     setUpgradeCopied(false);
     setUpgradeShowHelp(false);
+    setQrImgFailed(false);
   };
 
   // Admin: nạp allowlist gói Free khi mở tab Quản trị.
@@ -2650,154 +2652,6 @@ export default function App() {
                 </div>
               )}
 
-              {showUpgrade && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeUpgradeModal}>
-                  <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center justify-between mb-1">
-                      <h3 className="font-bold text-lg text-slate-800">Nâng gói dịch vụ</h3>
-                      <button onClick={closeUpgradeModal} aria-label="Đóng" className="text-slate-400 hover:text-slate-600 text-xl leading-none px-1">×</button>
-                    </div>
-
-                    {upgradeStatus === 'choosing' && (
-                      <div className="space-y-4 mt-3">
-                        <p className="text-sm text-slate-500">Chọn gói phù hợp, thanh toán qua mã QR — hệ thống tự kích hoạt trong khoảng 1 phút.</p>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setUpgradeTier('starter')}
-                            className={`text-left p-3 rounded-xl border-2 transition-all ${upgradeTier === 'starter' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
-                          >
-                            <div className="font-bold text-slate-800 text-sm">Starter</div>
-                            <div className="text-emerald-600 font-extrabold text-sm mt-1">249.000đ<span className="text-slate-400 font-normal text-xs">/tháng</span></div>
-                            <div className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">3.000 tin/tháng • 3 bot • Đủ kênh</div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setUpgradeTier('pro')}
-                            className={`text-left p-3 rounded-xl border-2 transition-all ${upgradeTier === 'pro' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
-                          >
-                            <div className="font-bold text-slate-800 text-sm">Pro</div>
-                            <div className="text-emerald-600 font-extrabold text-sm mt-1">649.000đ<span className="text-slate-400 font-normal text-xs">/tháng</span></div>
-                            <div className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">10.000 tin/tháng • 10 bot • Supabase riêng • White-label</div>
-                          </button>
-                        </div>
-
-                        <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg p-1 text-xs font-semibold">
-                          <button
-                            type="button"
-                            onClick={() => setUpgradeMonths(1)}
-                            className={`flex-1 py-1.5 rounded-md transition-all cursor-pointer ${upgradeMonths === 1 ? 'bg-white shadow-xs text-slate-800' : 'text-slate-500'}`}
-                          >Tháng</button>
-                          <button
-                            type="button"
-                            onClick={() => setUpgradeMonths(12)}
-                            className={`flex-1 py-1.5 rounded-md transition-all cursor-pointer ${upgradeMonths === 12 ? 'bg-white shadow-xs text-slate-800' : 'text-slate-500'}`}
-                          >Năm -20%</button>
-                        </div>
-
-                        <div className="text-center text-xs text-slate-500">
-                          {upgradeMonths === 12
-                            ? <>Thanh toán <b className="text-slate-800">{(Math.round((upgradeTier === 'starter' ? 249000 : 649000) * 12 * 0.8 / 1000) * 1000).toLocaleString('vi-VN')}đ/năm</b></>
-                            : <>Thanh toán <b className="text-slate-800">{(upgradeTier === 'starter' ? 249000 : 649000).toLocaleString('vi-VN')}đ/tháng</b></>}
-                        </div>
-
-                        {upgradeErr && <p className="text-xs text-rose-600 font-medium bg-rose-50 border border-rose-200 rounded-lg p-2">{upgradeErr}</p>}
-
-                        <button
-                          type="button"
-                          disabled={upgradeCreating}
-                          onClick={async () => {
-                            setUpgradeErr('');
-                            setUpgradeCreating(true);
-                            try {
-                              const res = await fetch('/api/payments/orders', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ tier: upgradeTier, months: upgradeMonths, userId: sbUser?.id, email: sbUser?.email })
-                              });
-                              const data = await res.json();
-                              if (!res.ok) { setUpgradeErr(data?.error || 'Không tạo được đơn — thử lại sau ít phút nhé.'); return; }
-                              setUpgradeOrder({
-                                orderId: data.orderId, amount: data.amount, qrUrl: data.qrUrl,
-                                bankAccount: data.bankAccount, bankName: data.bankName,
-                                accountName: data.accountName, transferContent: data.transferContent
-                              });
-                              setUpgradeStatus('waiting');
-                            } catch (e) {
-                              setUpgradeErr('Lỗi kết nối — thử lại sau ít phút nhé.');
-                            } finally {
-                              setUpgradeCreating(false);
-                            }
-                          }}
-                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-lg text-sm transition-all cursor-pointer"
-                        >
-                          {upgradeCreating ? 'Đang tạo mã...' : 'Tạo mã thanh toán'}
-                        </button>
-
-                        <p className="text-[11px] text-slate-400 text-center">Cần Enterprise? Liên hệ <b className="text-slate-500">ox102.crypto@gmail.com</b></p>
-                      </div>
-                    )}
-
-                    {upgradeStatus === 'waiting' && upgradeOrder && (
-                      <div className="space-y-3 mt-3">
-                        <div className="flex justify-center">
-                          <img src={upgradeOrder.qrUrl} alt="Mã QR thanh toán SePay" className="w-[220px] h-[220px] border border-slate-200 rounded-lg" />
-                        </div>
-                        <div className="text-center text-2xl font-extrabold text-slate-800">{upgradeOrder.amount.toLocaleString('vi-VN')}đ</div>
-
-                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1.5">
-                          <div>Ngân hàng: <b>{upgradeOrder.bankName}</b> • STK <b>{upgradeOrder.bankAccount}</b></div>
-                          <div>Chủ TK: <b>{upgradeOrder.accountName}</b></div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span>Nội dung: <b>{upgradeOrder.transferContent}</b></span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const text = upgradeOrder.transferContent;
-                                if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(text).catch(() => {}); }
-                                setUpgradeCopied(true);
-                                setTimeout(() => setUpgradeCopied(false), 2000);
-                              }}
-                              className="px-2 py-0.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[10px] font-bold cursor-pointer"
-                            >{upgradeCopied ? '✓' : 'Copy'}</button>
-                          </div>
-                        </div>
-
-                        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 font-medium">Nếu nhập tay, PHẢI ghi đúng nội dung chuyển khoản.</p>
-                        <p className="text-[11px] text-slate-400 text-center">Đơn có hiệu lực 24 giờ — quét xong hệ thống tự kích hoạt trong khoảng 1 phút.</p>
-
-                        <button
-                          type="button"
-                          onClick={() => setUpgradeShowHelp(v => !v)}
-                          className="w-full text-center text-xs text-slate-500 hover:text-slate-700 underline cursor-pointer"
-                        >Tôi đã chuyển nhưng chưa thấy xác nhận</button>
-
-                        {upgradeShowHelp && (
-                          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[11px] text-slate-600 space-y-1">
-                            <div>• Chờ 1-2 phút để hệ thống đối soát tự động.</div>
-                            <div>• Kiểm tra lại nội dung chuyển khoản đã ghi đúng mã đơn chưa.</div>
-                            <div>• Vẫn chưa thấy? Liên hệ <b>ox102.crypto@gmail.com</b> kèm mã đơn <b>{upgradeOrder.orderId}</b>.</div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {upgradeStatus === 'paid' && (
-                      <div className="text-center space-y-3 py-4 mt-3">
-                        <div className="text-lg font-bold text-slate-800">🎉 Gói {upgradeTier === 'starter' ? 'Starter' : 'Pro'} đã kích hoạt!</div>
-                        <p className="text-sm text-slate-500">Cảm ơn anh/chị đã tin dùng BalaBot</p>
-                        <button
-                          type="button"
-                          onClick={closeUpgradeModal}
-                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-sm transition-all cursor-pointer"
-                        >Đóng</button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
               {/* Top Row Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
@@ -3376,6 +3230,165 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* MODAL NÂNG GÓI — top-level: mở được từ MỌI tab (dashboard, billing...) */}
+              {showUpgrade && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeUpgradeModal}>
+                  <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-1">
+                      <h3 className="font-bold text-lg text-slate-800">Nâng gói dịch vụ</h3>
+                      <button onClick={closeUpgradeModal} aria-label="Đóng" className="text-slate-400 hover:text-slate-600 text-xl leading-none px-1">×</button>
+                    </div>
+
+                    {upgradeStatus === 'choosing' && (
+                      <div className="space-y-4 mt-3">
+                        <p className="text-sm text-slate-500">Chọn gói phù hợp, thanh toán qua mã QR — hệ thống tự kích hoạt trong khoảng 1 phút.</p>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setUpgradeTier('starter')}
+                            className={`text-left p-3 rounded-xl border-2 transition-all ${upgradeTier === 'starter' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                          >
+                            <div className="font-bold text-slate-800 text-sm">Starter</div>
+                            <div className="text-emerald-600 font-extrabold text-sm mt-1">249.000đ<span className="text-slate-400 font-normal text-xs">/tháng</span></div>
+                            <div className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">3.000 tin/tháng • 3 bot • Đủ kênh</div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setUpgradeTier('pro')}
+                            className={`text-left p-3 rounded-xl border-2 transition-all ${upgradeTier === 'pro' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                          >
+                            <div className="font-bold text-slate-800 text-sm">Pro</div>
+                            <div className="text-emerald-600 font-extrabold text-sm mt-1">649.000đ<span className="text-slate-400 font-normal text-xs">/tháng</span></div>
+                            <div className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">10.000 tin/tháng • 10 bot • Supabase riêng • White-label</div>
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg p-1 text-xs font-semibold">
+                          <button
+                            type="button"
+                            onClick={() => setUpgradeMonths(1)}
+                            className={`flex-1 py-1.5 rounded-md transition-all cursor-pointer ${upgradeMonths === 1 ? 'bg-white shadow-xs text-slate-800' : 'text-slate-500'}`}
+                          >Tháng</button>
+                          <button
+                            type="button"
+                            onClick={() => setUpgradeMonths(12)}
+                            className={`flex-1 py-1.5 rounded-md transition-all cursor-pointer ${upgradeMonths === 12 ? 'bg-white shadow-xs text-slate-800' : 'text-slate-500'}`}
+                          >Năm -20%</button>
+                        </div>
+
+                        <div className="text-center text-xs text-slate-500">
+                          {upgradeMonths === 12
+                            ? <>Thanh toán <b className="text-slate-800">{(Math.round((upgradeTier === 'starter' ? 249000 : 649000) * 12 * 0.8 / 1000) * 1000).toLocaleString('vi-VN')}đ/năm</b></>
+                            : <>Thanh toán <b className="text-slate-800">{(upgradeTier === 'starter' ? 249000 : 649000).toLocaleString('vi-VN')}đ/tháng</b></>}
+                        </div>
+
+                        {upgradeErr && <p className="text-xs text-rose-600 font-medium bg-rose-50 border border-rose-200 rounded-lg p-2">{upgradeErr}</p>}
+
+                        <button
+                          type="button"
+                          disabled={upgradeCreating}
+                          onClick={async () => {
+                            setUpgradeErr('');
+                            setUpgradeCreating(true);
+                            try {
+                              const res = await fetch('/api/payments/orders', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ tier: upgradeTier, months: upgradeMonths, userId: sbUser?.id, email: sbUser?.email })
+                              });
+                              const data = await res.json();
+                              if (!res.ok) { setUpgradeErr(data?.error || 'Không tạo được đơn — thử lại sau ít phút nhé.'); return; }
+                              setUpgradeOrder({
+                                orderId: data.orderId, amount: data.amount, qrUrl: data.qrUrl,
+                                bankAccount: data.bankAccount, bankName: data.bankName,
+                                accountName: data.accountName, transferContent: data.transferContent
+                              });
+                              setQrImgFailed(false);
+                              setUpgradeStatus('waiting');
+                            } catch (e) {
+                              setUpgradeErr('Lỗi kết nối — thử lại sau ít phút nhé.');
+                            } finally {
+                              setUpgradeCreating(false);
+                            }
+                          }}
+                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-lg text-sm transition-all cursor-pointer"
+                        >
+                          {upgradeCreating ? 'Đang tạo mã...' : 'Tạo mã thanh toán'}
+                        </button>
+
+                        <p className="text-[11px] text-slate-400 text-center">Cần Enterprise? Liên hệ <b className="text-slate-500">ox102.crypto@gmail.com</b></p>
+                      </div>
+                    )}
+
+                    {upgradeStatus === 'waiting' && upgradeOrder && (
+                      <div className="space-y-3 mt-3">
+                        {!qrImgFailed ? (
+                          <div className="flex justify-center">
+                            <img
+                              src={upgradeOrder.qrUrl}
+                              alt="Mã QR thanh toán SePay"
+                              className="w-[220px] h-[220px] border border-slate-200 rounded-lg"
+                              onError={() => setQrImgFailed(true)}
+                            />
+                          </div>
+                        ) : (
+                          <p className="text-center text-xs text-rose-600 font-medium bg-rose-50 border border-rose-200 rounded-lg p-3">Không tải được mã QR — anh/chị chuyển khoản tay theo thông tin bên dưới nhé.</p>
+                        )}
+                        <div className="text-center text-2xl font-extrabold text-slate-800">{upgradeOrder.amount.toLocaleString('vi-VN')}đ</div>
+
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1.5">
+                          <div>Ngân hàng: <b>{upgradeOrder.bankName}</b> • STK <b>{upgradeOrder.bankAccount}</b></div>
+                          <div>Chủ TK: <b>{upgradeOrder.accountName}</b></div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span>Nội dung: <b>{upgradeOrder.transferContent}</b></span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const text = upgradeOrder.transferContent;
+                                if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(text).catch(() => {}); }
+                                setUpgradeCopied(true);
+                                setTimeout(() => setUpgradeCopied(false), 2000);
+                              }}
+                              className="px-2 py-0.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[10px] font-bold cursor-pointer"
+                            >{upgradeCopied ? '✓' : 'Copy'}</button>
+                          </div>
+                        </div>
+
+                        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 font-medium">Nếu nhập tay, PHẢI ghi đúng nội dung chuyển khoản.</p>
+                        <p className="text-[11px] text-slate-400 text-center">Đơn có hiệu lực 24 giờ — quét xong hệ thống tự kích hoạt trong khoảng 1 phút.</p>
+
+                        <button
+                          type="button"
+                          onClick={() => setUpgradeShowHelp(v => !v)}
+                          className="w-full text-center text-xs text-slate-500 hover:text-slate-700 underline cursor-pointer"
+                        >Tôi đã chuyển nhưng chưa thấy xác nhận</button>
+
+                        {upgradeShowHelp && (
+                          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[11px] text-slate-600 space-y-1">
+                            <div>• Chờ 1-2 phút để hệ thống đối soát tự động.</div>
+                            <div>• Kiểm tra lại nội dung chuyển khoản đã ghi đúng mã đơn chưa.</div>
+                            <div>• Vẫn chưa thấy? Liên hệ <b>ox102.crypto@gmail.com</b> kèm mã đơn <b>{upgradeOrder.orderId}</b>.</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {upgradeStatus === 'paid' && (
+                      <div className="text-center space-y-3 py-4 mt-3">
+                        <div className="text-lg font-bold text-slate-800">🎉 Gói {upgradeTier === 'starter' ? 'Starter' : 'Pro'} đã kích hoạt!</div>
+                        <p className="text-sm text-slate-500">Cảm ơn anh/chị đã tin dùng BalaBot</p>
+                        <button
+                          type="button"
+                          onClick={closeUpgradeModal}
+                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-sm transition-all cursor-pointer"
+                        >Đóng</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
           {/* TAB 4: KNOWLEDGE BASE SEARCH ENGINE */}
           {activeTab === 'kb' && bots.length > 0 && (
@@ -5720,7 +5733,7 @@ export default function App() {
 
                     <div className="pt-4 border-t border-slate-100 mt-4">
                       <button
-                        onClick={() => setShowUpgrade(true)}
+                        onClick={() => { setUpgradeTier('starter'); setShowUpgrade(true); }}
                         className="w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-all cursor-pointer text-center font-sans tracking-wide"
                       >
                         Đăng Ký Gói Starter
@@ -5787,10 +5800,7 @@ export default function App() {
 
                     <div className="pt-4 border-t border-slate-100 mt-4">
                       <button
-                        onClick={() => {
-                          setCheckoutPlan('pro');
-                          setCheckoutCompleted(false);
-                        }}
+                        onClick={() => { setUpgradeTier('pro'); setShowUpgrade(true); }}
                         className="w-full py-2.5 bg-indigo-600 hover:bg-slate-900 hover:text-white text-white rounded-lg text-xs font-bold transition-all cursor-pointer text-center font-sans tracking-wide"
                       >
                         Nâng Cấp Bản Pro Ngay

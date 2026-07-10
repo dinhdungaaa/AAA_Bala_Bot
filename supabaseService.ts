@@ -1682,6 +1682,19 @@ export async function dbClaimPaymentOrder(id: string, sepayTxId: string): Promis
   } catch (e: any) { console.warn("dbClaimPaymentOrder failed:", e?.message || e); return false; }
 }
 
+// Hết hạn có điều kiện: chỉ chuyển sang "expired" nếu đơn ĐANG pending — tránh
+// race điều kiện giữa lúc đọc (GET lazy-expire) và lúc ghi khi webhook đã claim "paid" song song.
+export async function dbExpirePaymentOrderIfPending(id: string): Promise<boolean> {
+  const client = getRootSupabaseClient();
+  if (!client || !id) return false;
+  try {
+    const { error } = await client.from("payment_orders")
+      .update({ status: "expired" }).eq("id", id).eq("status", "pending");
+    if (error) { console.warn("dbExpirePaymentOrderIfPending:", error.message); return false; }
+    return true;
+  } catch (e: any) { console.warn("dbExpirePaymentOrderIfPending failed:", e?.message || e); return false; }
+}
+
 export async function dbRevertPaymentOrderClaim(id: string): Promise<boolean> {
   const client = getRootSupabaseClient();
   if (!client || !id) return false;
