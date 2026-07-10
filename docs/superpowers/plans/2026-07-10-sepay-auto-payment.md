@@ -77,10 +77,18 @@ describe("generateOrderCode", () => {
 });
 
 describe("extractOrderCode", () => {
+  // LƯU Ý: mã mẫu phải đúng BLB + 8 ký tự (bản đầu của plan bị typo 9 ký tự —
+  // đã gây bug Critical ở lần triển khai đầu; test round-trip bên dưới khóa lại).
   it("tim thay ma trong noi dung ngan hang thuc te (hoa/thuong/dinh chu)", () => {
-    expect(extractOrderCode("BLBK7M2P4Q9X")).toBe("BLBK7M2P4Q9X");
-    expect(extractOrderCode("chuyen tien blbk7m2p4q9x thanh toan")).toBe("BLBK7M2P4Q9X");
-    expect(extractOrderCode("MBVCB.123.BLBK7M2P4Q9X.CT tu 090")).toBe("BLBK7M2P4Q9X");
+    expect(extractOrderCode("BLBK7M2P4Q9")).toBe("BLBK7M2P4Q9");
+    expect(extractOrderCode("chuyen tien blbk7m2p4q9 thanh toan")).toBe("BLBK7M2P4Q9");
+    expect(extractOrderCode("MBVCB.123.BLBK7M2P4Q9.CT tu 090")).toBe("BLBK7M2P4Q9");
+  });
+  it("round-trip: ma sinh ra luon extract lai duoc", () => {
+    for (let i = 0; i < 20; i++) {
+      const code = generateOrderCode();
+      expect(extractOrderCode("MBVCB.123." + code.toLowerCase() + ".CT tu 090")).toBe(code);
+    }
   });
   it("khong co ma -> null", () => {
     expect(extractOrderCode("chuyen khoan an trua")).toBeNull();
@@ -91,8 +99,8 @@ describe("extractOrderCode", () => {
 
 describe("buildSepayQrUrl", () => {
   it("dung host + encode tham so", () => {
-    const url = buildSepayQrUrl({ account: "0011002 233", bank: "VPBank", amount: 249000, orderCode: "BLBK7M2P4Q9X" });
-    expect(url).toBe("https://qr.sepay.vn/img?acc=0011002%20233&bank=VPBank&amount=249000&des=BLBK7M2P4Q9X");
+    const url = buildSepayQrUrl({ account: "0011002 233", bank: "VPBank", amount: 249000, orderCode: "BLBK7M2P4Q9" });
+    expect(url).toBe("https://qr.sepay.vn/img?acc=0011002%20233&bank=VPBank&amount=249000&des=BLBK7M2P4Q9");
   });
 });
 
@@ -138,10 +146,10 @@ describe("parseSepayWebhook", () => {
   it("payload chuan SePay tien VAO", () => {
     const out = parseSepayWebhook({
       id: 92704, gateway: "Vietcombank", transactionDate: "2026-07-10 10:00:00",
-      accountNumber: "0011002233", content: "BLBK7M2P4Q9X", transferType: "in",
+      accountNumber: "0011002233", content: "BLBK7M2P4Q9", transferType: "in",
       transferAmount: 249000, accumulated: 19077000, referenceCode: "MBVCB.123",
     });
-    expect(out).toEqual({ txId: "92704", amount: 249000, content: "BLBK7M2P4Q9X", isIncoming: true });
+    expect(out).toEqual({ txId: "92704", amount: 249000, content: "BLBK7M2P4Q9", isIncoming: true });
   });
   it("tien RA -> isIncoming false", () => {
     const out = parseSepayWebhook({ id: 1, transferType: "out", transferAmount: 5000, content: "x" });
