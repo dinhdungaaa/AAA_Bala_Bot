@@ -78,9 +78,17 @@ import {
   dbGetLeads,
   dbGetBotLeads,
   dbSaveBotLead,
-  dbUpdateBotLead
+  dbUpdateBotLead,
+  dbCreatePaymentOrder,
+  dbGetPaymentOrder,
+  dbUpdatePaymentOrder,
+  dbFindOrderBySepayTx,
+  dbAddUnmatchedPayment,
+  dbGetUnmatchedPayments
 } from "./supabaseService.js";
+import type { PaymentOrder } from "./supabaseService.js";
 import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
+import { computeOrderAmount, generateOrderCode, extractOrderCode, buildSepayQrUrl, verifySepayApiKey, resolveNewExpiry, parseSepayWebhook } from "./payments/sepay.js";
 import { resolveLimitForOwner } from "./billingResolve.js";
 
 import {
@@ -1353,6 +1361,146 @@ app.post("/api/widget/:botId/chat", async (req, res) => {
   try { await dbSaveConversation(session); } catch (e) { console.warn("[Widget] Skip Supabase:", e); }
 
   res.json({ reply: ai.text, humanTakeover: false, ts: botMsg.timestamp });
+});
+
+// ===== THANH TOÁN TỰ ĐỘNG QUA SEPAY =====
+const SEPAY_ENV = () => ({
+  webhookKey: (process.env.SEPAY_WEBHOOK_KEY || "").trim(),
+  bankAccount: (process.env.SEPAY_BANK_ACCOUNT || "").trim(),
+  bankCode: (process.env.SEPAY_BANK_CODE || "").trim(),
+  accountName: (process.env.SEPAY_ACCOUNT_NAME || "").trim(),
+});
+const ORDER_TTL_MS = 24 * 60 * 60 * 1000;
+
+const paymentRate = new Map<string, { n: number; reset: number }>();
+function paymentAllow(ip: string): boolean {
+  const now = Date.now();
+  const r = paymentRate.get(ip);
+  if (!r || now > r.reset) { paymentRate.set(ip, { n: 1, reset: now + 60_000 }); return true; }
+  r.n += 1;
+  return r.n <= 5;
+}
+
+// Báo Telegram cho owner (env riêng, thiếu env thì bỏ qua — không chặn kích hoạt).
+async function notifyOwnerPayment(text: string): Promise<void> {
+  const token = (process.env.OWNER_NOTIFY_TELEGRAM_TOKEN || "").trim();
+  const chatId = (process.env.OWNER_NOTIFY_TELEGRAM_CHAT_ID || "").trim();
+  if (!token || !chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch (e: any) { console.warn("[Payment] notifyOwner lỗi:", e?.message || e); }
+}
+
+app.post("/api/payments/orders", async (req, res) => {
+  const ip = ((req.headers["x-real-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?") as string).toString().split(",")[0].trim();
+  if (!paymentAllow(ip)) return res.status(429).json({ error: "Anh/chị thao tác hơi nhanh, chờ chút rồi thử lại nhé." });
+
+  const { tier, months, userId, email, amountOverride } = req.body || {};
+  if (tier !== "starter" && tier !== "pro") return res.status(400).json({ error: "Gói không hợp lệ." });
+  if (months !== 1 && months !== 12) return res.status(400).json({ error: "Chu kỳ không hợp lệ." });
+  const uid = String(userId || "").trim();
+  if (!uid) return res.status(400).json({ error: "Vui lòng đăng nhập để nâng gói." });
+
+  const env = SEPAY_ENV();
+  if (!env.bankAccount || !env.bankCode) {
+    return res.status(503).json({ error: "Thanh toán tự động đang bảo trì — vui lòng liên hệ ox102.crypto@gmail.com để được kích hoạt thủ công." });
+  }
+
+  // PAYMENT_TEST_MODE=1 cho phép ép số tiền nhỏ để owner UAT bằng tiền thật; tắt env là hết đường.
+  let amount = computeOrderAmount(tier, months);
+  if (process.env.PAYMENT_TEST_MODE === "1" && Number(amountOverride) >= 1000) {
+    amount = Math.floor(Number(amountOverride));
+  }
+
+  const order: PaymentOrder = {
+    id: generateOrderCode(),
+    user_id: uid,
+    email: String(email || "").trim().toLowerCase() || null,
+    tier, months, amount, status: "pending",
+  };
+  const ok = await dbCreatePaymentOrder(order);
+  if (!ok) return res.status(500).json({ error: "Không tạo được đơn — thử lại sau ít phút nhé." });
+
+  res.status(201).json({
+    orderId: order.id,
+    amount,
+    qrUrl: buildSepayQrUrl({ account: env.bankAccount, bank: env.bankCode, amount, orderCode: order.id }),
+    bankAccount: env.bankAccount,
+    bankName: env.bankCode,
+    accountName: env.accountName,
+    transferContent: order.id,
+    expiresInHours: 24,
+  });
+});
+
+app.get("/api/payments/orders/:orderId", async (req, res) => {
+  const order = await dbGetPaymentOrder(String(req.params.orderId || "").toUpperCase());
+  if (!order) return res.status(404).json({ error: "Không tìm thấy đơn." });
+  if (order.status === "pending" && order.created_at && Date.now() - new Date(order.created_at).getTime() > ORDER_TTL_MS) {
+    order.status = "expired";
+    void dbUpdatePaymentOrder(order.id, { status: "expired" });
+  }
+  res.json({ status: order.status, tier: order.tier, months: order.months, amount: order.amount, paidAt: order.paid_at || null });
+});
+
+app.post("/api/payments/sepay-webhook", async (req, res) => {
+  const env = SEPAY_ENV();
+  if (!verifySepayApiKey(req.headers.authorization as string | undefined, env.webhookKey)) {
+    return res.status(401).json({ success: false });
+  }
+  try {
+    const tx = parseSepayWebhook(req.body);
+    if (!tx || !tx.isIncoming) return res.json({ success: true }); // tiền ra / payload lạ: bỏ qua có chủ đích
+
+    // Idempotent lớp 1: giao dịch này đã kích hoạt một đơn nào đó rồi
+    const already = await dbFindOrderBySepayTx(tx.txId);
+    if (already) return res.json({ success: true });
+
+    const code = extractOrderCode(tx.content);
+    const order = code ? await dbGetPaymentOrder(code) : null;
+    if (!order) {
+      await dbAddUnmatchedPayment({ id: tx.txId, amount: tx.amount, content: tx.content.slice(0, 500) });
+      void notifyOwnerPayment(`⚠️ Tiền vào KHÔNG khớp đơn: ${tx.amount.toLocaleString("vi-VN")}đ — "${tx.content.slice(0, 120)}"`);
+      return res.json({ success: true });
+    }
+    if (order.status === "paid") return res.json({ success: true }); // idempotent lớp 2
+
+    if (tx.amount < order.amount) {
+      await dbAddUnmatchedPayment({ id: tx.txId, amount: tx.amount, content: `CHUYỂN THIẾU cho đơn ${order.id} (cần ${order.amount}): ${tx.content.slice(0, 400)}` });
+      void notifyOwnerPayment(`⚠️ Chuyển THIẾU tiền đơn ${order.id}: nhận ${tx.amount.toLocaleString("vi-VN")}đ / cần ${order.amount.toLocaleString("vi-VN")}đ (${order.email || order.user_id})`);
+      return res.json({ success: true });
+    }
+
+    // Kích hoạt gói — bước không được rơi: lỗi thì 500 để SePay retry.
+    const profile = await dbGetProfilePlan(order.user_id);
+    const expiry = resolveNewExpiry({
+      currentTier: profile?.tier || null,
+      currentExpiresAt: profile?.plan_expires_at || null,
+      newTier: order.tier,
+      months: order.months,
+    });
+    const limit = PLAN_LIMITS[order.tier as "starter" | "pro"].messages;
+    const saved = await dbUpdateProfilePlan(order.user_id, order.email || "", order.tier, limit, expiry);
+    if (!saved) {
+      console.error(`[Payment] KHÔNG ghi được profiles cho đơn ${order.id} — trả 500 để SePay retry`);
+      return res.status(500).json({ success: false });
+    }
+    await dbUpdatePaymentOrder(order.id, { status: "paid", paid_at: new Date().toISOString(), sepay_tx_id: tx.txId });
+    void notifyOwnerPayment(`💰 ĐƠN MỚI: ${order.email || order.user_id} • ${order.tier.toUpperCase()} ${order.months} tháng • ${order.amount.toLocaleString("vi-VN")}đ • hạn mới ${new Date(expiry).toLocaleDateString("vi-VN")}`);
+    console.log(`[Payment] Kích hoạt ${order.tier} cho ${order.user_id} tới ${expiry} (đơn ${order.id})`);
+    res.json({ success: true });
+  } catch (e: any) {
+    console.error("[Payment] webhook lỗi bất ngờ:", e?.message || e);
+    res.json({ success: true }); // lỗi ngoài bước kích hoạt: nuốt để không bão retry
+  }
+});
+
+app.get("/api/admin/payments/unmatched", async (req, res) => {
+  if (!requireOwnerAdmin(req, res)) return;
+  res.json({ items: await dbGetUnmatchedPayments(50) });
 });
 
 // ---- Admin: xem danh sách leads (chỉ owner) ----
