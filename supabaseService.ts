@@ -1639,7 +1639,7 @@ export interface PaymentOrder {
 
 export async function dbCreatePaymentOrder(order: PaymentOrder): Promise<boolean> {
   const client = getRootSupabaseClient();
-  if (!client) return false;
+  if (!client || !order?.id) return false;
   try {
     const { error } = await client.from("payment_orders").insert(order);
     if (error) { console.warn("dbCreatePaymentOrder:", error.message); return false; }
@@ -1653,7 +1653,8 @@ export async function dbGetPaymentOrder(id: string): Promise<PaymentOrder | null
   try {
     const { data, error } = await client.from("payment_orders").select("*").eq("id", id).maybeSingle();
     if (error || !data) return null;
-    return data as PaymentOrder;
+    // PostgREST trả bigint dạng chuỗi — ép Number để khớp type
+    return { ...(data as any), amount: Number((data as any).amount) } as PaymentOrder;
   } catch { return null; }
 }
 
@@ -1673,7 +1674,8 @@ export async function dbFindOrderBySepayTx(txId: string): Promise<PaymentOrder |
   try {
     const { data, error } = await client.from("payment_orders").select("*").eq("sepay_tx_id", txId).limit(1);
     if (error || !data || data.length === 0) return null;
-    return data[0] as PaymentOrder;
+    // PostgREST trả bigint dạng chuỗi — ép Number để khớp type
+    return { ...(data[0] as any), amount: Number((data[0] as any).amount) } as PaymentOrder;
   } catch { return null; }
 }
 
@@ -1694,6 +1696,8 @@ export async function dbGetUnmatchedPayments(limit = 50): Promise<Array<{ id: st
   try {
     const { data, error } = await client.from("payment_unmatched").select("*").order("received_at", { ascending: false }).limit(limit);
     if (error || !data) return [];
-    return data as any;
+    // PostgREST trả bigint dạng chuỗi — ép Number để khớp type
+    const rows = data as Array<{ id: string; amount: number; content: string; received_at: string }>;
+    return rows.map((row) => ({ ...row, amount: Number(row.amount) }));
   } catch { return []; }
 }
