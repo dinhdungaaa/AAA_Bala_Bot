@@ -109,6 +109,17 @@ export default function App() {
   const [sbUser, setSbUser] = useState<any | null>(null);
   const [usage, setUsage] = useState<{ count: number; limit: number; tier: string; verdict: string } | null>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  // Modal "Nâng gói" 3 bước: chọn gói -> QR SePay -> hoàn tất.
+  const [upgradeTier, setUpgradeTier] = useState<'starter' | 'pro'>('starter');
+  const [upgradeMonths, setUpgradeMonths] = useState<1 | 12>(1);
+  const [upgradeOrder, setUpgradeOrder] = useState<{ orderId: string; amount: number; qrUrl: string; bankAccount: string; bankName: string; accountName: string; transferContent: string } | null>(null);
+  const [upgradeStatus, setUpgradeStatus] = useState<'choosing' | 'waiting' | 'paid'>('choosing');
+  const [upgradeErr, setUpgradeErr] = useState('');
+  const [upgradeCopied, setUpgradeCopied] = useState(false);
+  const [upgradeCreating, setUpgradeCreating] = useState(false);
+  const [upgradeShowHelp, setUpgradeShowHelp] = useState(false);
+  // Admin: giao dịch SePay báo tiền vào nhưng không khớp nội dung đơn nào.
+  const [unmatchedPayments, setUnmatchedPayments] = useState<Array<{ id: string; amount: number; content: string; received_at: string }>>([]);
   const [sbAuthMode, setSbAuthMode] = useState<'signin' | 'signup'>('signin');
   const [sbAuthLoading, setSbAuthLoading] = useState(false);
   const [sbAuthError, setSbAuthError] = useState('');
@@ -672,6 +683,42 @@ export default function App() {
       .catch(() => setUsage(null));
   }, [sbUser?.id, activeTab]);
 
+  // Poll trạng thái đơn thanh toán SePay khi modal Nâng gói đang ở bước chờ quét QR.
+  // Dừng poll khi modal đóng (showUpgrade=false) hoặc rời khỏi bước 'waiting'.
+  useEffect(() => {
+    if (!showUpgrade || upgradeStatus !== 'waiting' || !upgradeOrder) return;
+    const orderId = upgradeOrder.orderId;
+    const timer = setInterval(() => {
+      fetch(`/api/payments/orders/${encodeURIComponent(orderId)}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d.status === 'paid') {
+            setUpgradeStatus('paid');
+            fetch(`/api/usage/me?userId=${encodeURIComponent(sbUser?.id || '')}&email=${encodeURIComponent(sbUser?.email || '')}`)
+              .then(r => r.json())
+              .then(du => setUsage(du))
+              .catch(() => { /* bỏ qua */ });
+          } else if (d.status === 'expired') {
+            setUpgradeErr('Đơn đã hết hạn — tạo lại mã mới nhé.');
+            setUpgradeStatus('choosing');
+            setUpgradeOrder(null);
+          }
+        })
+        .catch(() => { /* bỏ qua, thử lại vòng sau */ });
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [showUpgrade, upgradeStatus, upgradeOrder?.orderId, sbUser?.id, sbUser?.email]);
+
+  // Đóng modal Nâng gói: không hủy đơn (đơn còn 24h) — chỉ reset UI về bước chọn gói.
+  const closeUpgradeModal = () => {
+    setShowUpgrade(false);
+    setUpgradeStatus('choosing');
+    setUpgradeOrder(null);
+    setUpgradeErr('');
+    setUpgradeCopied(false);
+    setUpgradeShowHelp(false);
+  };
+
   // Admin: nạp allowlist gói Free khi mở tab Quản trị.
   useEffect(() => {
     if (activeTab !== 'admin') return;
@@ -683,6 +730,10 @@ export default function App() {
     fetch('/api/admin/leads', { headers: getScopedApiHeaders() })
       .then(r => r.json())
       .then(d => setLeadsList(Array.isArray(d.leads) ? d.leads : []))
+      .catch(() => { /* bỏ qua */ });
+    fetch('/api/admin/payments/unmatched', { headers: getScopedApiHeaders() })
+      .then(r => r.json())
+      .then(d => setUnmatchedPayments(Array.isArray(d.items) ? d.items : []))
       .catch(() => { /* bỏ qua */ });
   }, [activeTab, sbUser?.email]);
 
@@ -2600,18 +2651,149 @@ export default function App() {
               )}
 
               {showUpgrade && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowUpgrade(false)}>
-                  <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
-                    <h3 className="font-bold text-lg text-slate-800 mb-1">Nâng gói dịch vụ</h3>
-                    <p className="text-sm text-slate-500 mb-4">Chuyển khoản theo thông tin dưới đây, ghi rõ email tài khoản. Chúng tôi sẽ kích hoạt gói trong vòng 24h làm việc.</p>
-                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm space-y-1 font-mono">
-                      <div>Ngân hàng: <b>[Tên ngân hàng]</b></div>
-                      <div>Số TK: <b>[Số tài khoản]</b></div>
-                      <div>Chủ TK: <b>[Tên chủ tài khoản]</b></div>
-                      <div>Nội dung: <b>BALABOT {sbUser?.email || ''}</b></div>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeUpgradeModal}>
+                  <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-1">
+                      <h3 className="font-bold text-lg text-slate-800">Nâng gói dịch vụ</h3>
+                      <button onClick={closeUpgradeModal} aria-label="Đóng" className="text-slate-400 hover:text-slate-600 text-xl leading-none px-1">×</button>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-3">Hỗ trợ / đổi gói: [email hoặc Zalo hỗ trợ của bạn].</p>
-                    <button onClick={() => setShowUpgrade(false)} className="mt-4 w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-sm font-semibold">Đóng</button>
+
+                    {upgradeStatus === 'choosing' && (
+                      <div className="space-y-4 mt-3">
+                        <p className="text-sm text-slate-500">Chọn gói phù hợp, thanh toán qua mã QR — hệ thống tự kích hoạt trong khoảng 1 phút.</p>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setUpgradeTier('starter')}
+                            className={`text-left p-3 rounded-xl border-2 transition-all ${upgradeTier === 'starter' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                          >
+                            <div className="font-bold text-slate-800 text-sm">Starter</div>
+                            <div className="text-emerald-600 font-extrabold text-sm mt-1">249.000đ<span className="text-slate-400 font-normal text-xs">/tháng</span></div>
+                            <div className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">3.000 tin/tháng • 3 bot • Đủ kênh</div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setUpgradeTier('pro')}
+                            className={`text-left p-3 rounded-xl border-2 transition-all ${upgradeTier === 'pro' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                          >
+                            <div className="font-bold text-slate-800 text-sm">Pro</div>
+                            <div className="text-emerald-600 font-extrabold text-sm mt-1">649.000đ<span className="text-slate-400 font-normal text-xs">/tháng</span></div>
+                            <div className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">10.000 tin/tháng • 10 bot • Supabase riêng • White-label</div>
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg p-1 text-xs font-semibold">
+                          <button
+                            type="button"
+                            onClick={() => setUpgradeMonths(1)}
+                            className={`flex-1 py-1.5 rounded-md transition-all cursor-pointer ${upgradeMonths === 1 ? 'bg-white shadow-xs text-slate-800' : 'text-slate-500'}`}
+                          >Tháng</button>
+                          <button
+                            type="button"
+                            onClick={() => setUpgradeMonths(12)}
+                            className={`flex-1 py-1.5 rounded-md transition-all cursor-pointer ${upgradeMonths === 12 ? 'bg-white shadow-xs text-slate-800' : 'text-slate-500'}`}
+                          >Năm -20%</button>
+                        </div>
+
+                        <div className="text-center text-xs text-slate-500">
+                          {upgradeMonths === 12
+                            ? <>Thanh toán <b className="text-slate-800">{(Math.round((upgradeTier === 'starter' ? 249000 : 649000) * 12 * 0.8 / 1000) * 1000).toLocaleString('vi-VN')}đ/năm</b></>
+                            : <>Thanh toán <b className="text-slate-800">{(upgradeTier === 'starter' ? 249000 : 649000).toLocaleString('vi-VN')}đ/tháng</b></>}
+                        </div>
+
+                        {upgradeErr && <p className="text-xs text-rose-600 font-medium bg-rose-50 border border-rose-200 rounded-lg p-2">{upgradeErr}</p>}
+
+                        <button
+                          type="button"
+                          disabled={upgradeCreating}
+                          onClick={async () => {
+                            setUpgradeErr('');
+                            setUpgradeCreating(true);
+                            try {
+                              const res = await fetch('/api/payments/orders', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ tier: upgradeTier, months: upgradeMonths, userId: sbUser?.id, email: sbUser?.email })
+                              });
+                              const data = await res.json();
+                              if (!res.ok) { setUpgradeErr(data?.error || 'Không tạo được đơn — thử lại sau ít phút nhé.'); return; }
+                              setUpgradeOrder({
+                                orderId: data.orderId, amount: data.amount, qrUrl: data.qrUrl,
+                                bankAccount: data.bankAccount, bankName: data.bankName,
+                                accountName: data.accountName, transferContent: data.transferContent
+                              });
+                              setUpgradeStatus('waiting');
+                            } catch (e) {
+                              setUpgradeErr('Lỗi kết nối — thử lại sau ít phút nhé.');
+                            } finally {
+                              setUpgradeCreating(false);
+                            }
+                          }}
+                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-lg text-sm transition-all cursor-pointer"
+                        >
+                          {upgradeCreating ? 'Đang tạo mã...' : 'Tạo mã thanh toán'}
+                        </button>
+
+                        <p className="text-[11px] text-slate-400 text-center">Cần Enterprise? Liên hệ <b className="text-slate-500">ox102.crypto@gmail.com</b></p>
+                      </div>
+                    )}
+
+                    {upgradeStatus === 'waiting' && upgradeOrder && (
+                      <div className="space-y-3 mt-3">
+                        <div className="flex justify-center">
+                          <img src={upgradeOrder.qrUrl} alt="Mã QR thanh toán SePay" className="w-[220px] h-[220px] border border-slate-200 rounded-lg" />
+                        </div>
+                        <div className="text-center text-2xl font-extrabold text-slate-800">{upgradeOrder.amount.toLocaleString('vi-VN')}đ</div>
+
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1.5">
+                          <div>Ngân hàng: <b>{upgradeOrder.bankName}</b> • STK <b>{upgradeOrder.bankAccount}</b></div>
+                          <div>Chủ TK: <b>{upgradeOrder.accountName}</b></div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span>Nội dung: <b>{upgradeOrder.transferContent}</b></span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const text = upgradeOrder.transferContent;
+                                if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(text).catch(() => {}); }
+                                setUpgradeCopied(true);
+                                setTimeout(() => setUpgradeCopied(false), 2000);
+                              }}
+                              className="px-2 py-0.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[10px] font-bold cursor-pointer"
+                            >{upgradeCopied ? '✓' : 'Copy'}</button>
+                          </div>
+                        </div>
+
+                        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 font-medium">Nếu nhập tay, PHẢI ghi đúng nội dung chuyển khoản.</p>
+                        <p className="text-[11px] text-slate-400 text-center">Đơn có hiệu lực 24 giờ — quét xong hệ thống tự kích hoạt trong khoảng 1 phút.</p>
+
+                        <button
+                          type="button"
+                          onClick={() => setUpgradeShowHelp(v => !v)}
+                          className="w-full text-center text-xs text-slate-500 hover:text-slate-700 underline cursor-pointer"
+                        >Tôi đã chuyển nhưng chưa thấy xác nhận</button>
+
+                        {upgradeShowHelp && (
+                          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[11px] text-slate-600 space-y-1">
+                            <div>• Chờ 1-2 phút để hệ thống đối soát tự động.</div>
+                            <div>• Kiểm tra lại nội dung chuyển khoản đã ghi đúng mã đơn chưa.</div>
+                            <div>• Vẫn chưa thấy? Liên hệ <b>ox102.crypto@gmail.com</b> kèm mã đơn <b>{upgradeOrder.orderId}</b>.</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {upgradeStatus === 'paid' && (
+                      <div className="text-center space-y-3 py-4 mt-3">
+                        <div className="text-lg font-bold text-slate-800">🎉 Gói {upgradeTier === 'starter' ? 'Starter' : 'Pro'} đã kích hoạt!</div>
+                        <p className="text-sm text-slate-500">Cảm ơn anh/chị đã tin dùng BalaBot</p>
+                        <button
+                          type="button"
+                          onClick={closeUpgradeModal}
+                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-sm transition-all cursor-pointer"
+                        >Đóng</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -7045,7 +7227,38 @@ WHERE email = 'customer-email@example.com';`}
                     </div>
                   </div>
 
-
+                  {/* GIAO DỊCH LẠC — tiền SePay báo vào nhưng không khớp nội dung đơn nào */}
+                  <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
+                    <h3 className="font-extrabold text-slate-800 text-sm uppercase tracking-wider flex items-center gap-1.5">
+                      ⚠️ Giao dịch lạc (tiền vào không khớp đơn)
+                    </h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-550 font-sans font-bold text-[10.5px] uppercase tracking-wider">
+                            <th className="p-3 pl-4">Mã GD</th>
+                            <th className="p-3">Số tiền</th>
+                            <th className="p-3">Nội dung CK</th>
+                            <th className="p-3">Lúc nhận</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {unmatchedPayments.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="p-4 text-center text-slate-400">Không có giao dịch lạc 🎉</td>
+                            </tr>
+                          ) : unmatchedPayments.map((p) => (
+                            <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="p-3 pl-4 font-mono text-slate-700">{p.id}</td>
+                              <td className="p-3 font-bold text-slate-800">{Number(p.amount).toLocaleString('vi-VN')}đ</td>
+                              <td className="p-3 text-slate-600">{p.content}</td>
+                              <td className="p-3 text-slate-500">{new Date(p.received_at).toLocaleString('vi-VN')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
 
                 </div>
 
