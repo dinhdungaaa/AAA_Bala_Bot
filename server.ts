@@ -1110,18 +1110,25 @@ Trợ lý: "Dạ với nhu cầu đó em gợi ý gói Starter 249.000đ/tháng 
 # 1. BalaBot là gì
 Nền tảng SaaS chatbot AI chăm sóc khách hàng & bán hàng ĐA KÊNH (omnichannel) cho doanh nghiệp, shop, đại lý tại Việt Nam. Bot tự trả lời khách 24/7 dựa trên tri thức bạn nạp vào, dùng công nghệ RAG (truy hồi tri thức) nên trả lời bám sát dữ liệu thật của bạn, hạn chế bịa. Mô hình AI: Google Gemini.
 
-# 2. Kênh tích hợp
+# 2. Kênh tích hợp (5 kênh)
 - Telegram: tạo bot riêng qua @BotFather, dán token vào mục "Tích hợp Telegram", hệ thống tự đăng ký webhook. Hỗ trợ cả chat riêng và nhóm; tự bắt nhóm bot được add để đặt lịch nhắc.
-- Facebook Messenger: kết nối Fanpage bằng Page Access Token; bot trả lời tin nhắn Page, lấy được tên khách.
+- Facebook Messenger: kết nối Fanpage bằng Page Access Token; hoặc nếu Page đang dùng Botcake thì nối qua cầu Botcake (bot vẫn trả lời khách nhắn Page như thường). Bot lấy được tên khách.
 - Zalo: chạy bằng NICK CÁ NHÂN (không cần OA) — đăng nhập bằng quét mã QR. Bot trả lời trong NHÓM Zalo khi được @nhắc hoặc reply; nhận diện tên riêng từng người trong nhóm, có ngữ cảnh riêng cho mỗi người để gợi ý sản phẩm phù hợp; có hiệu ứng "đang soạn tin". (Lưu ý: dùng nick phụ vì có rủi ro khoá nick.)
+- Website (MỚI): vào tab "Website" bật widget, copy 1 dòng mã dán vào website của mình (WordPress, Haravan, LadiPage, web tự code đều được) — bong bóng chat hiện góc màn hình, khách vãng lai chat với bot ngay trên web. Tuỳ biến được màu, tên hiển thị, lời chào; khách quay lại vẫn nhớ mạch hội thoại cũ.
+- Playground trong dashboard: chat thử với chính bộ não bot đang chạy thật trước khi đưa lên kênh.
 
 # 3. Tạo & cấu hình bot
 - Tạo nhiều bot, mỗi bot 1 lĩnh vực/nhiệm vụ riêng.
 - Chọn tone giọng: chuyên nghiệp, thân thiện, ngắn gọn, bán hàng, hỗ trợ.
 - Kiểu bot: "bán hàng" (chủ động tư vấn/chốt đơn) hoặc "tư vấn kiến thức" (chuyên trả lời kiến thức đã nạp, hạn chế bán hàng, chỉ giới thiệu sản phẩm khi khách hỏi liên quan).
 - Tuỳ chọn: cho phép báo giá, cho phép gợi ý sản phẩm, giới hạn chỉ trả lời trong phạm vi tri thức, chủ đề cấm, giờ làm việc, lời chào, ngưỡng chuyển người thật.
-- Thông minh hội thoại: nhận diện & gọi đúng tên khách (tự bỏ emoji trong tên), viết hoa đầu câu, không lặp lời chào, hiểu câu nối tiếp ngữ cảnh.
-- Fallback: khi không trả lời được sẽ chuyển hướng (email/SĐT/Zalo/website bạn cấu hình) hoặc chuyển cho nhân viên.
+- Mục tiêu hội thoại (chủ shop tự chọn): lấy thông tin liên hệ / chốt đơn / chỉ tư vấn — bot dẫn dắt khách theo đúng mục tiêu đó.
+- Thông minh hội thoại: bot có 2 tầng — tầng HIỂU phân tích ý định khách (hỏi giá, hỏi sản phẩm, tín hiệu muốn mua, phàn nàn...) rồi tầng TRẢ LỜI mới soạn câu; nhận diện & gọi đúng tên khách, không lặp lời chào, câu mơ hồ kiểu "thật hả", "sao á" được hiểu theo mạch hội thoại trước đó thay vì hỏi lại trống không.
+- Fallback: khi không trả lời được sẽ chuyển hướng (email/SĐT/Zalo/website bạn cấu hình) hoặc chuyển cho nhân viên; tài liệu chưa nạp gì thì bot không bịa, chỉ hỏi mở và mời để lại liên hệ.
+
+# 3b. Trợ lý bán hàng & khách tiềm năng (điểm mạnh riêng)
+- Bot tự nhận ra khi khách để lại SĐT trong lúc chat → lưu vào tab "Khách tiềm năng" (kèm tên, món quan tâm, mức độ nóng/ấm/lạnh, kênh) và BÁO NGAY về Telegram của chủ shop để gọi chốt.
+- Chủ shop đánh dấu trạng thái từng khách: mới → đã liên hệ → chốt/không — khép kín quy trình từ chat đến đơn.
 
 # 4. Nạp tri thức (training)
 - Nguồn: file PDF/Excel, văn bản dán tay, URL (tự cào nội dung trang web), và FAQ (hỏi-đáp).
@@ -1130,10 +1137,10 @@ Nền tảng SaaS chatbot AI chăm sóc khách hàng & bán hàng ĐA KÊNH (omn
 - Có Playground để chat thử bot trước khi đưa lên kênh thật.
 
 # 5. Tính năng vận hành
-- Can thiệp / Takeover: nhân viên vào lịch sử hội thoại trả lời thay bot; tin gửi thẳng tới khách, tự @tag tên và trích dẫn (quote) đúng tin của khách (Telegram/Zalo nhóm); Messenger thì gọi tên ở đầu.
+- Can thiệp / Takeover: nhân viên vào lịch sử hội thoại trả lời thay bot; tin gửi thẳng tới khách trên đúng kênh (Telegram/Zalo/Messenger/widget web), tự @tag tên và trích dẫn đúng tin của khách trong nhóm. QUAN TRỌNG: hễ nhân viên nhắn là bot TỰ ĐỘNG IM LẶNG 30 phút để người thật xử lý (mỗi tin nhân viên gửi lại gia hạn 30 phút), có nút "trả lại cho bot" ngay hoặc hẹn thời gian tạm dừng.
 - Đặt lịch nhắc tự động (nhóm Telegram): theo giờ, tần suất một lần / hằng ngày / hằng tuần / hằng tháng / ngày trong tuần / tuỳ chỉnh; có thể để AI viết lại nội dung mỗi lần nhắc.
-- Báo cáo & phân tích: tổng số khách, số tin nhắn, tỉ lệ trả lời thành công, tỉ lệ phải chuyển người thật, câu hỏi phổ biến, câu chưa trả lời được, đánh giá hữu ích, khoảng trống tri thức.
-- Kết nối Supabase riêng để lưu dữ liệu của bạn (gói Pro trở lên).
+- Báo cáo & phân tích: ngoài số khách/tin nhắn/tỉ lệ bot tự xử lý/câu hỏi phổ biến/khoảng trống tri thức, còn có BÁO CÁO BÁN HÀNG: phễu chuyển đổi (khách nhắn → tương tác thật → để lại SĐT → chốt đơn kèm % từng bước), món khách quan tâm nhất, khung giờ vàng khách hay nhắn (gợi ý giờ nên trực chốt đơn), hiệu quả từng kênh.
+- Kết nối Supabase riêng để mọi dữ liệu bot (tri thức, hội thoại, khách tiềm năng) lưu về tài khoản cloud CỦA BẠN — bạn sở hữu dữ liệu tuyệt đối (gói Pro trở lên).
 
 # 6. Bảng giá (VND/tháng; trả theo năm giảm 20%; thanh toán chuyển khoản, kích hoạt trong 24h)
 - Free 0đ: 150 tin/tháng, 1 bot, kênh Telegram. CHỈ dành cho thành viên cộng đồng Peace Solution (cần được cấp quyền mới dùng được).
@@ -1141,6 +1148,7 @@ Nền tảng SaaS chatbot AI chăm sóc khách hàng & bán hàng ĐA KÊNH (omn
 - Pro 649.000đ (KHUYÊN DÙNG): 10.000 tin, 10 bot, kết nối Supabase/Cloud riêng, gỡ thương hiệu (white-label), webhook nâng cao, hỗ trợ chuyên gia 24/7.
 - Enterprise: liên hệ — gói tin tuỳ biến & vô giới hạn, hạ tầng riêng (on-premise), tích hợp ERP/CRM, cam kết SLA 99.99%.
 - Hạn mức tính theo SỐ TIN BOT TRẢ LỜI mỗi tháng (reset hằng tháng). Gần hết hạn mức sẽ được cảnh báo; vượt thì bot tạm dừng & nhắc nâng gói.
+- Gói trả phí có hạn dùng 30 NGÀY kể từ lúc kích hoạt; gia hạn/thanh toán tiếp thì cộng thêm 30 ngày TỪ HẠN CŨ (không mất ngày còn dư); chỉ thanh toán khi hết hạn.
 
 # 6b. Bản đồ NHU CẦU → GÓI (chỉ gợi ý SAU khi đã hiểu nhu cầu khách)
 - Thử nghiệm/dùng rất ít, hoặc thuộc cộng đồng Peace Solution → Free.
@@ -1150,14 +1158,14 @@ Nền tảng SaaS chatbot AI chăm sóc khách hàng & bán hàng ĐA KÊNH (omn
 - Mẹo ước lượng tin/tháng nếu khách chưa biết: (số khách nhắn mỗi ngày) × (số lượt hỏi mỗi khách) × 30. Nếu vẫn mơ hồ, gợi ý Starter để khởi đầu an toàn rồi nâng gói sau khi biết lượng thật.
 
 # 7. Cách bắt đầu
-1) Đăng nhập tài khoản. 2) Bấm "Tạo Bot", đặt tên & chọn tone. 3) Nạp tri thức (PDF/Excel/URL/FAQ). 4) Chat thử ở Playground. 5) Kết nối kênh: lấy token Telegram từ @BotFather (hoặc kết nối Facebook/quét QR Zalo). 6) Bot chạy 24/7.
+1) Đăng nhập tài khoản. 2) Bấm "Tạo Bot", đặt tên & chọn tone + mục tiêu hội thoại. 3) Nạp tri thức (PDF/Excel/URL/FAQ). 4) Chat thử ở Playground. 5) Kết nối kênh: lấy token Telegram từ @BotFather, kết nối Facebook, quét QR Zalo, hoặc dán 1 dòng mã widget vào website. 6) Bot chạy 24/7, khách để SĐT là được báo về Telegram.
 
 # 8. Liên hệ / hỗ trợ
 Email & hỗ trợ nâng/đổi gói: ox102.crypto@gmail.com.
 
 # 9. Xử lý các thắc mắc/băn khoăn thường gặp (trả lời tự tin, ngắn gọn)
 - "Có dùng thử không / có mất phí setup không": có thể bắt đầu với gói thấp, tự tạo bot ngay, không tính phí cài đặt; gói Pro có hỗ trợ chuyên gia giúp setup.
-- "Khác gì các nền tảng khác / ManyChat": BalaBot đa kênh (kể cả Zalo nhóm bằng nick cá nhân), trả lời theo TRI THỨC riêng của bạn (RAG) nên sát nghiệp vụ, có can thiệp người thật, đặt lịch nhắc, giá Việt hợp lý.
+- "Khác gì các nền tảng khác / ManyChat": BalaBot 5 kênh trong 1 (kể cả Zalo nhóm bằng nick cá nhân + widget website), trả lời theo TRI THỨC riêng của bạn (RAG) nên sát nghiệp vụ, bot chủ động dẫn dắt theo mục tiêu bán hàng và TỰ BẮT SĐT khách báo về Telegram, nhân viên nhắn là bot tự nhường 30 phút, có báo cáo phễu bán hàng — và giá Việt hợp lý.
 - "Bot có tự bịa không / có chính xác không": bot bám tri thức bạn nạp; nếu không có dữ liệu sẽ xin phép chuyển người thật thay vì bịa.
 - "Dữ liệu có an toàn không": gói Pro trở lên cho kết nối Supabase/Cloud riêng của bạn để tự sở hữu dữ liệu.
 - "Cài khó không / mất bao lâu": vài bước, lấy token Telegram từ @BotFather là chạy; thường dưới 15-30 phút.
