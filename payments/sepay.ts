@@ -1,5 +1,6 @@
 // Logic thuần cho thanh toán SePay — không side effect, test độc lập.
 import crypto from "node:crypto";
+import { currentYearMonth } from "../billing.js";
 
 export const PLAN_PRICES: Record<"starter" | "pro", number> = {
   starter: 249000,
@@ -72,5 +73,68 @@ export function parseSepayWebhook(body: unknown): { txId: string; amount: number
     amount,
     content: String(b.content ?? ""),
     isIncoming: String(b.transferType ?? "") === "in",
+  };
+}
+
+// ================= TỔNG HỢP DOANH THU (tab Quản trị) =================
+
+// Dịch nhãn "YYYY-MM" đi delta tháng (delta âm = lùi về quá khứ).
+function shiftYm(ym: string, delta: number): string {
+  const [y, m] = ym.split("-").map(Number);
+  const idx = y * 12 + (m - 1) + delta;
+  return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, "0")}`;
+}
+
+export interface RevenueSummary {
+  totals: { all: number; thisMonth: number; lastMonth: number; growthPct: number | null };
+  monthly: Array<{ ym: string; total: number; orders: number }>;
+  byTier: Record<"starter" | "pro", { orders: number; total: number; monthly: number; yearly: number }>;
+  recent: Array<{ id: string; email: string | null; tier: string; months: number; amount: number; paidAt: string }>;
+}
+
+// Tổng hợp doanh thu từ đơn ĐÃ TRẢ. Mọi mốc tháng tính theo giờ VN (UTC+7) qua
+// currentYearMonth — đơn trả 23h59 UTC cuối tháng thuộc về THÁNG SAU theo giờ VN.
+export function computeRevenueSummary(
+  orders: Array<{ id: string; email?: string | null; tier: string; months: number; amount: number; paid_at?: string | null }>,
+  now: Date = new Date()
+): RevenueSummary {
+  const nowYm = currentYearMonth(now);
+  const lastYm = shiftYm(nowYm, -1);
+  const monthlyMap = new Map<string, { total: number; orders: number }>();
+  for (let i = 5; i >= 0; i--) monthlyMap.set(shiftYm(nowYm, -i), { total: 0, orders: 0 });
+
+  const byTier: RevenueSummary["byTier"] = {
+    starter: { orders: 0, total: 0, monthly: 0, yearly: 0 },
+    pro: { orders: 0, total: 0, monthly: 0, yearly: 0 },
+  };
+  let all = 0, thisMonth = 0, lastMonth = 0;
+  const paid = orders.filter(od => !!od.paid_at);
+
+  for (const od of paid) {
+    const ym = currentYearMonth(new Date(od.paid_at!));
+    all += od.amount;
+    if (ym === nowYm) thisMonth += od.amount;
+    if (ym === lastYm) lastMonth += od.amount;
+    const slot = monthlyMap.get(ym);
+    if (slot) { slot.total += od.amount; slot.orders += 1; }
+    if (od.tier === "starter" || od.tier === "pro") {
+      const t = byTier[od.tier];
+      t.orders += 1;
+      t.total += od.amount;
+      if (od.months === 12) t.yearly += 1; else t.monthly += 1;
+    }
+  }
+
+  const growthPct = lastMonth === 0 ? null : Math.round(((thisMonth - lastMonth) / lastMonth) * 1000) / 10;
+  const recent = [...paid]
+    .sort((a, b) => new Date(b.paid_at!).getTime() - new Date(a.paid_at!).getTime())
+    .slice(0, 20)
+    .map(od => ({ id: od.id, email: od.email ?? null, tier: od.tier, months: od.months, amount: od.amount, paidAt: od.paid_at! }));
+
+  return {
+    totals: { all, thisMonth, lastMonth, growthPct },
+    monthly: [...monthlyMap.entries()].map(([ym, v]) => ({ ym, ...v })),
+    byTier,
+    recent,
   };
 }

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   PLAN_PRICES, computeOrderAmount, generateOrderCode, extractOrderCode,
   buildSepayQrUrl, verifySepayApiKey, resolveNewExpiry, parseSepayWebhook,
+  computeRevenueSummary,
 } from "../sepay.js";
 
 describe("computeOrderAmount", () => {
@@ -108,5 +109,68 @@ describe("parseSepayWebhook", () => {
     expect(parseSepayWebhook({ transferType: "in", content: "x" })).toBeNull();
     expect(parseSepayWebhook(null)).toBeNull();
     expect(parseSepayWebhook("string")).toBeNull();
+  });
+});
+
+describe("computeRevenueSummary", () => {
+  const now = new Date("2026-07-15T05:00:00.000Z"); // 12:00 VN 15/7
+  const o = (id: string, tier: string, months: number, amount: number, paidAtIso: string, email = "a@b.c") =>
+    ({ id, email, tier, months, amount, paid_at: paidAtIso });
+
+  it("mang rong -> so 0, monthly du 6 thang, growth null", () => {
+    const r = computeRevenueSummary([], now);
+    expect(r.totals).toEqual({ all: 0, thisMonth: 0, lastMonth: 0, growthPct: null });
+    expect(r.monthly).toHaveLength(6);
+    expect(r.monthly[0].ym).toBe("2026-02");
+    expect(r.monthly[5]).toEqual({ ym: "2026-07", total: 0, orders: 0 });
+    expect(r.byTier.starter).toEqual({ orders: 0, total: 0, monthly: 0, yearly: 0 });
+    expect(r.recent).toEqual([]);
+  });
+
+  it("bien mui gio VN: 17:30 UTC 30/6 = 00:30 VN 1/7 -> tinh vao thang 7", () => {
+    const r = computeRevenueSummary([o("BLB1", "starter", 1, 249000, "2026-06-30T17:30:00.000Z")], now);
+    expect(r.totals.thisMonth).toBe(249000);
+    expect(r.totals.lastMonth).toBe(0);
+  });
+
+  it("tong + growth binh thuong", () => {
+    const r = computeRevenueSummary([
+      o("BLB1", "starter", 1, 249000, "2026-07-02T03:00:00.000Z"),
+      o("BLB2", "pro", 1, 649000, "2026-07-05T03:00:00.000Z"),
+      o("BLB3", "starter", 1, 249000, "2026-06-10T03:00:00.000Z"),
+    ], now);
+    expect(r.totals.all).toBe(1147000);
+    expect(r.totals.thisMonth).toBe(898000);
+    expect(r.totals.lastMonth).toBe(249000);
+    expect(r.totals.growthPct).toBe(260.6);
+    const june = r.monthly.find(m => m.ym === "2026-06");
+    expect(june).toEqual({ ym: "2026-06", total: 249000, orders: 1 });
+  });
+
+  it("byTier dem don + chu ky; tier la vao totals nhung khong vao byTier", () => {
+    const r = computeRevenueSummary([
+      o("BLB1", "starter", 1, 249000, "2026-07-02T03:00:00.000Z"),
+      o("BLB2", "starter", 12, 2390000, "2026-07-03T03:00:00.000Z"),
+      o("BLB3", "pro", 12, 6230000, "2026-07-04T03:00:00.000Z"),
+      o("BLB4", "business", 1, 999000, "2026-07-05T03:00:00.000Z"),
+    ], now);
+    expect(r.byTier.starter).toEqual({ orders: 2, total: 2639000, monthly: 1, yearly: 1 });
+    expect(r.byTier.pro).toEqual({ orders: 1, total: 6230000, monthly: 0, yearly: 1 });
+    expect(r.totals.all).toBe(9868000);
+  });
+
+  it("recent: sap xep moi nhat truoc, cat 20, dung shape", () => {
+    const many = Array.from({ length: 25 }, (_, i) =>
+      o(`BLB${i}`, "starter", 1, 1000 + i, new Date(Date.UTC(2026, 6, 1, i)).toISOString()));
+    const r = computeRevenueSummary(many, now);
+    expect(r.recent).toHaveLength(20);
+    expect(r.recent[0].id).toBe("BLB24");
+    expect(r.recent[0]).toEqual({ id: "BLB24", email: "a@b.c", tier: "starter", months: 1, amount: 1024, paidAt: new Date(Date.UTC(2026, 6, 1, 24)).toISOString() });
+  });
+
+  it("don thieu paid_at bi bo qua", () => {
+    const r = computeRevenueSummary([{ id: "BLBX", tier: "starter", months: 1, amount: 249000, paid_at: null }], now);
+    expect(r.totals.all).toBe(0);
+    expect(r.recent).toEqual([]);
   });
 });
