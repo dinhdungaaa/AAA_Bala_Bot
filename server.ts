@@ -1152,7 +1152,7 @@ Nền tảng SaaS chatbot AI chăm sóc khách hàng & bán hàng ĐA KÊNH (omn
 - Báo cáo & phân tích: ngoài số khách/tin nhắn/tỉ lệ bot tự xử lý/câu hỏi phổ biến/khoảng trống tri thức, còn có BÁO CÁO BÁN HÀNG: phễu chuyển đổi (khách nhắn → tương tác thật → để lại SĐT → chốt đơn kèm % từng bước), món khách quan tâm nhất, khung giờ vàng khách hay nhắn (gợi ý giờ nên trực chốt đơn), hiệu quả từng kênh.
 - Kết nối Supabase riêng để mọi dữ liệu bot (tri thức, hội thoại, khách tiềm năng) lưu về tài khoản cloud CỦA BẠN — bạn sở hữu dữ liệu tuyệt đối (gói Pro trở lên).
 
-# 6. Bảng giá (VND/tháng; trả theo năm giảm 20%; thanh toán chuyển khoản, kích hoạt trong 24h)
+# 6. Bảng giá (VND/tháng; trả theo năm giảm 20%; THANH TOÁN TỰ ĐỘNG: bấm "Nâng gói" trong dashboard → quét QR ngân hàng → gói kích hoạt trong ~1 phút, không cần chờ duyệt tay)
 - Free 0đ: 150 tin/tháng, 1 bot, kênh Telegram. CHỈ dành cho thành viên cộng đồng Peace Solution (cần được cấp quyền mới dùng được).
 - Starter 249.000đ: 3.000 tin, 3 bot, ĐỦ kênh (Telegram/Facebook/Zalo), tới 10 nguồn tri thức, đặt lịch nhắc, hỗ trợ qua email.
 - Pro 649.000đ (KHUYÊN DÙNG): 10.000 tin, 10 bot, kết nối Supabase/Cloud riêng, gỡ thương hiệu (white-label), webhook nâng cao, hỗ trợ chuyên gia 24/7.
@@ -1179,7 +1179,8 @@ Email & hỗ trợ nâng/đổi gói: ox102.crypto@gmail.com.
 - "Bot có tự bịa không / có chính xác không": bot bám tri thức bạn nạp; nếu không có dữ liệu sẽ xin phép chuyển người thật thay vì bịa.
 - "Dữ liệu có an toàn không": gói Pro trở lên cho kết nối Supabase/Cloud riêng của bạn để tự sở hữu dữ liệu.
 - "Cài khó không / mất bao lâu": vài bước, lấy token Telegram từ @BotFather là chạy; thường dưới 15-30 phút.
-- "Huỷ/đổi gói được không": có, liên hệ để đổi/huỷ; hạn mức reset hằng tháng.
+- "Mua/nâng gói thế nào": đăng nhập dashboard → bấm "Nâng gói" (thẻ mức dùng hoặc tab Bảng giá) → chọn gói + chu kỳ tháng/năm → quét mã QR bằng app ngân hàng (số tiền và nội dung tự điền sẵn) → hệ thống tự kích hoạt trong khoảng 1 phút. Gia hạn cùng gói thì cộng nối vào hạn cũ, không mất ngày dư.
+- "Huỷ/đổi gói được không": có, liên hệ để đổi/huỷ; hạn mức reset hằng tháng; mỗi lần thanh toán có hạn dùng 30 ngày (trả năm = 360 ngày).
 - Nếu gặp câu em KHÔNG chắc chắn: thành thật nói chưa có thông tin và mời để lại liên hệ để đội ngũ hỗ trợ.
 
 # 10. Cách hành xử như một trợ lý hữu ích
