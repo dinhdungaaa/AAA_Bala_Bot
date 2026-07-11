@@ -6858,6 +6858,7 @@ WHERE email = 'customer-email@example.com';`}
               )}
 
               {/* ALLOWLIST GÓI FREE — cộng đồng Peace Solution */}
+              {adminSection === 'allowlist' && (
               <div className="bg-white border border-emerald-200 rounded-xl p-5 shadow-xs space-y-4">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
@@ -6927,8 +6928,10 @@ WHERE email = 'customer-email@example.com';`}
                   )}
                 </div>
               </div>
+              )}
 
               {/* LEADS — khách để lại liên hệ qua Trợ lý web */}
+              {adminSection === 'leads' && (
               <div className="bg-white border border-indigo-200 rounded-xl p-5 shadow-xs space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
@@ -6967,7 +6970,10 @@ WHERE email = 'customer-email@example.com';`}
                   </div>
                 )}
               </div>
+              )}
 
+              {/* 👥 MỤC NGƯỜI DÙNG — stats strip + bảng người dùng */}
+              {adminSection === 'users' && (<>
               {/* TOP AGGREGATE STATS STRIP */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white border border-slate-200 rounded-xl p-4.5 shadow-2xs">
@@ -7398,6 +7404,7 @@ WHERE email = 'customer-email@example.com';`}
 
 
               </div>
+              </>)}
 
             </div>
           )}
