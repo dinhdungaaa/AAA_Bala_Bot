@@ -6731,7 +6731,7 @@ WHERE email = 'customer-email@example.com';`}
               </div>
 
               {/* 💰 DOANH THU — từ đơn thanh toán SePay đã trả */}
-              {revenueData && (
+              {adminSection === 'revenue' && revenueData && (
                 <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-5">
                   <h3 className="text-base font-extrabold text-slate-800">💰 Doanh thu</h3>
 
@@ -6820,6 +6820,41 @@ WHERE email = 'customer-email@example.com';`}
                     </table>
                   </div>
                 </div>
+              )}
+
+              {/* ⚠️ GIAO DỊCH LẠC — tiền SePay vào nhưng không khớp đơn (thuộc mục Doanh thu) */}
+              {adminSection === 'revenue' && (
+              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
+                <h3 className="font-extrabold text-slate-800 text-sm uppercase tracking-wider flex items-center gap-1.5">
+                  ⚠️ Giao dịch lạc (tiền vào không khớp đơn)
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-550 font-sans font-bold text-[10.5px] uppercase tracking-wider">
+                        <th className="p-3 pl-4">Mã GD</th>
+                        <th className="p-3">Số tiền</th>
+                        <th className="p-3">Nội dung CK</th>
+                        <th className="p-3">Lúc nhận</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {unmatchedPayments.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="p-4 text-center text-slate-400">Không có giao dịch lạc 🎉</td>
+                        </tr>
+                      ) : unmatchedPayments.map((p) => (
+                        <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-3 pl-4 font-mono text-slate-700">{p.id}</td>
+                          <td className="p-3 font-bold text-slate-800">{Number(p.amount).toLocaleString('vi-VN')}đ</td>
+                          <td className="p-3 text-slate-600">{p.content}</td>
+                          <td className="p-3 text-slate-500">{new Date(p.received_at).toLocaleString('vi-VN')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
               )}
 
               {/* ALLOWLIST GÓI FREE — cộng đồng Peace Solution */}
@@ -7355,39 +7390,6 @@ WHERE email = 'customer-email@example.com';`}
                           </tbody>
                         </table>
                       </div>
-                    </div>
-                  </div>
-
-                  {/* GIAO DỊCH LẠC — tiền SePay báo vào nhưng không khớp nội dung đơn nào */}
-                  <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
-                    <h3 className="font-extrabold text-slate-800 text-sm uppercase tracking-wider flex items-center gap-1.5">
-                      ⚠️ Giao dịch lạc (tiền vào không khớp đơn)
-                    </h3>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-550 font-sans font-bold text-[10.5px] uppercase tracking-wider">
-                            <th className="p-3 pl-4">Mã GD</th>
-                            <th className="p-3">Số tiền</th>
-                            <th className="p-3">Nội dung CK</th>
-                            <th className="p-3">Lúc nhận</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {unmatchedPayments.length === 0 ? (
-                            <tr>
-                              <td colSpan={4} className="p-4 text-center text-slate-400">Không có giao dịch lạc 🎉</td>
-                            </tr>
-                          ) : unmatchedPayments.map((p) => (
-                            <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                              <td className="p-3 pl-4 font-mono text-slate-700">{p.id}</td>
-                              <td className="p-3 font-bold text-slate-800">{Number(p.amount).toLocaleString('vi-VN')}đ</td>
-                              <td className="p-3 text-slate-600">{p.content}</td>
-                              <td className="p-3 text-slate-500">{new Date(p.received_at).toLocaleString('vi-VN')}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
                     </div>
                   </div>
 
