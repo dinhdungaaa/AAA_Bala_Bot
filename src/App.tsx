@@ -121,6 +121,8 @@ export default function App() {
   const [qrImgFailed, setQrImgFailed] = useState(false); // ảnh QR SePay lỗi tải -> hiện fallback chuyển khoản tay
   // Admin: giao dịch SePay báo tiền vào nhưng không khớp nội dung đơn nào.
   const [unmatchedPayments, setUnmatchedPayments] = useState<Array<{ id: string; amount: number; content: string; received_at: string }>>([]);
+  // Admin: mục đang mở trong tab Quản trị (pill sub-tab). Không lưu URL — mở lại luôn về 'users'.
+  const [adminSection, setAdminSection] = useState<'users' | 'revenue' | 'allowlist' | 'leads'>('users');
   // Admin: tổng hợp doanh thu từ đơn SePay đã trả (null = chưa nạp/lỗi -> ẩn khối).
   const [revenueData, setRevenueData] = useState<null | {
     totals: { all: number; thisMonth: number; lastMonth: number; growthPct: number | null };
@@ -6710,6 +6712,22 @@ WHERE email = 'customer-email@example.com';`}
                     Chủ động ghi đè gói cước, bổ sung lưu lượng tin nhắn cho các đại lý VIP, kiểm soát ranh giới người dùng và tra cứu cấu trúc Mô-đun Cơ sở dữ liệu thực sự tương tác với API Supabase.
                   </p>
                 </div>
+              </div>
+
+              {/* SUB-NAV 4 MỤC QUẢN TRỊ */}
+              <div className="flex bg-white border border-slate-200 rounded-xl p-1 gap-1 shadow-xs">
+                {([['users', '👥 Người dùng'], ['revenue', '💰 Doanh thu'], ['allowlist', '🛡️ Allowlist'], ['leads', '📇 Leads']] as ['users' | 'revenue' | 'allowlist' | 'leads', string][]).map(([key, label]) => (
+                  <button key={key} onClick={() => setAdminSection(key)}
+                    className={`relative flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${adminSection === key ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}>
+                    {label}
+                    {key === 'revenue' && adminSection !== 'revenue' && unmatchedPayments.length > 0 && (
+                      <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-rose-500" title="Có giao dịch lạc chưa xử lý"></span>
+                    )}
+                    {key === 'leads' && adminSection !== 'leads' && leadsList.length > 0 && (
+                      <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-indigo-500" title="Có khách để lại liên hệ"></span>
+                    )}
+                  </button>
+                ))}
               </div>
 
               {/* 💰 DOANH THU — từ đơn thanh toán SePay đã trả */}
