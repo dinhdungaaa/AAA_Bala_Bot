@@ -3868,6 +3868,13 @@ app.post("/api/facebook-webhook/:botId", async (req, res) => {
   }
 });
 
+// Trang hướng dẫn khách tự kết nối Fanpage qua Botcake — phục vụ file tĩnh hoàn chỉnh
+// (public/guide-botcake.html). Đặt DƯỚI /api/ để proxy Cloudflare (chỉ chuyển
+// /balabot/api/* về Railway) forward được; đồng thời không bị catch-all SPA nuốt.
+app.get("/api/huong-dan-botcake", (_req, res) => {
+  res.sendFile(path.join(process.cwd(), "public", "guide-botcake.html"));
+});
+
 // Health check cho uptime pinger (giu Render thuc khi chay listener Zalo).
 app.get("/health", (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kết nối Fanpage với BalaBot qua Botcake — 5 bước</title>
+<style>
+  :root {
+    --ground: #f5f8f5; --surface: #ffffff; --surface-sunk: #eef3ee;
+    --ink: #16241d; --ink-soft: #4a5a51; --ink-faint: #7a8a80; --line: #dde6de;
+    --brand: #12a150; --brand-deep: #0c7d3d; --brand-wash: #e7f5ec;
+    --bc: #2563eb; --bc-wash: #e6edfd; --code-bg: #14241d; --code-ink: #d7efe0;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(20,36,29,.05), 0 8px 24px -12px rgba(20,36,29,.18);
+    --maxw: 680px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0e1512; --surface: #151e1a; --surface-sunk: #101815;
+      --ink: #e8f0ea; --ink-soft: #a6b6ac; --ink-faint: #74857a; --line: #26332c;
+      --brand: #34c874; --brand-deep: #2bb267; --brand-wash: #12281c;
+      --bc: #6d9bff; --bc-wash: #16233f; --code-bg: #0a110d; --code-ink: #cfe9d9;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.6);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 40px 20px 80px; }
+
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--brand-deep); }
+  :root[data-theme] { }
+  @media (prefers-color-scheme: dark) { .eyebrow { color: var(--brand); } }
+  h1 { font-size: clamp(1.7rem, 5vw, 2.3rem); line-height: 1.15; margin: 10px 0 12px; letter-spacing: -.02em; text-wrap: balance; }
+  .lede { font-size: 1.05rem; color: var(--ink-soft); margin: 0 0 22px; max-width: 56ch; }
+  .prep { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); font-size: .92rem; }
+  .prep b { color: var(--ink); }
+  .prep .item { color: var(--ink-soft); }
+  .prep .item strong { color: var(--ink); font-weight: 650; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 26px 0 8px; }
+  .tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: .02em; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+  .tag::before { content: ""; width: 8px; height: 8px; border-radius: 50%; }
+  .tag.bc { background: var(--bc-wash); color: var(--bc); }
+  .tag.bc::before { background: var(--bc); }
+  .tag.bb { background: var(--brand-wash); color: var(--brand-deep); }
+  .tag.bb::before { background: var(--brand); }
+  @media (prefers-color-scheme: dark) { .tag.bb { color: var(--brand); } }
+
+  .steps { display: flex; flex-direction: column; gap: 16px; margin-top: 18px; }
+  .step { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 22px 22px 64px; }
+  .step .num { position: absolute; left: 18px; top: 20px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; font-weight: 800; font-size: .95rem; font-variant-numeric: tabular-nums; color: #fff; background: var(--brand); }
+  .step.in-bc .num { background: var(--bc); }
+  .step-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .step h2 { font-size: 1.12rem; margin: 0; letter-spacing: -.01em; }
+  .step p { margin: 0 0 4px; color: var(--ink-soft); font-size: .96rem; }
+  .step ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-soft); font-size: .95rem; }
+  .step li { margin: 4px 0; }
+  .step li strong, .step p strong { color: var(--ink); font-weight: 650; }
+  kbd { font: inherit; font-size: .86em; font-weight: 600; background: var(--surface-sunk); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; color: var(--ink); white-space: nowrap; }
+
+  .code { position: relative; margin-top: 12px; background: var(--code-bg); border-radius: 10px; overflow: hidden; }
+  .code-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 8px 14px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .code-bar span { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: rgba(215,239,224,.6); }
+  .code pre { margin: 0; padding: 14px; overflow-x: auto; font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace; font-size: .86rem; line-height: 1.7; color: var(--code-ink); }
+  .copy { font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06); color: #eafaf0; padding: 5px 12px; border-radius: 7px; transition: background .15s, border-color .15s; }
+  .copy:hover { background: rgba(255,255,255,.14); }
+  .copy.done { color: #7ff0ae; border-color: rgba(127,240,174,.5); }
+  .copy:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+  .note { margin-top: 12px; font-size: .88rem; color: var(--ink-faint); border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
+
+  details.trouble { margin-top: 28px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+  details.trouble > summary { cursor: pointer; list-style: none; padding: 16px 20px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
+  details.trouble > summary::-webkit-details-marker { display: none; }
+  details.trouble > summary::after { content: "＋"; color: var(--ink-faint); font-weight: 400; }
+  details.trouble[open] > summary::after { content: "－"; }
+  .tbody { padding: 0 20px 18px; }
+  .tbody dl { margin: 0; }
+  .tbody dt { font-weight: 650; color: var(--ink); margin-top: 12px; font-size: .95rem; }
+  .tbody dd { margin: 2px 0 0; color: var(--ink-soft); font-size: .93rem; }
+
+  footer { margin-top: 34px; text-align: center; color: var(--ink-faint); font-size: .84rem; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">BalaBot · Tích hợp Facebook</div>
+    <h1>Kết nối Fanpage với bot qua Botcake</h1>
+    <p class="lede">Chỉ 5 bước, không cần biết code. Sau khi làm xong, bot sẽ tự trả lời mọi khách nhắn vào Fanpage của bạn 24/7.</p>
+    <div class="prep">
+      <b>Cần chuẩn bị:</b>
+      <span class="item">✅ Một tài khoản <strong>Botcake</strong> (miễn phí)</span>
+      <span class="item">✅ Quyền quản trị <strong>Fanpage</strong></span>
+      <span class="item">✅ Khoảng <strong>10 phút</strong></span>
+    </div>
+  </header>
+
+  <div class="legend">
+    <span class="tag bc">Làm trong Botcake</span>
+    <span class="tag bb">Làm trong BalaBot</span>
+    <span style="font-size:12px;color:var(--ink-faint);align-self:center">— màu ở mỗi bước cho biết bạn đang thao tác trong ứng dụng nào</span>
+  </div>
+
+  <div class="steps">
+
+    <section class="step in-bc">
+      <div class="num">1</div>
+      <div class="step-head"><span class="tag bc">Botcake</span><h2>Kết nối Fanpage vào Botcake</h2></div>
+      <p>Nếu Fanpage đã nối Botcake từ trước thì bỏ qua, sang bước 2.</p>
+      <ul>
+        <li>Vào <kbd>botcake.io</kbd> → <strong>Đăng nhập bằng Facebook</strong>.</li>
+        <li>Chọn đúng <strong>Fanpage của shop</strong> → bấm đồng ý cấp quyền.</li>
+      </ul>
+    </section>
+
+    <section class="step in-bc">
+      <div class="num">2</div>
+      <div class="step-head"><span class="tag bc">Botcake</span><h2>Lấy Page ID và Access Token</h2></div>
+      <p>Đây là 2 “chìa khóa” để BalaBot gửi trả lời qua Botcake. Ghi lại cẩn thận.</p>
+      <ul>
+        <li><strong>Access Token:</strong> vào <kbd>Cấu hình</kbd> → <kbd>Tích hợp</kbd> → bấm <strong>Tạo/Generate Token</strong> rồi copy. Token thường chỉ hiện đầy đủ <strong>một lần</strong> — lưu ngay, đừng chia sẻ cho ai.</li>
+        <li><strong>Page ID:</strong> mở một Luồng bất kỳ → bấm <strong>“Chia sẻ Payload”</strong>. Bạn sẽ thấy chuỗi dạng <kbd>__bc_1234567890123456_0</kbd>. Dãy <strong>16 chữ số</strong> ngay sau <kbd>__bc_</kbd> chính là Page ID.</li>
+      </ul>
+    </section>
+
+    <section class="step">
+      <div class="num">3</div>
+      <div class="step-head"><span class="tag bb">BalaBot</span><h2>Dán 2 chìa khóa &amp; lấy Bridge URL</h2></div>
+      <ul>
+        <li>Mở <strong>BalaBot</strong> → chọn đúng bot → tab <kbd>Tích hợp Facebook</kbd>.</li>
+        <li>Kéo tới card <strong>“Kết nối Fanpage qua Botcake”</strong> → bấm <kbd>Tạo / Hiện Bridge URL</kbd>.</li>
+        <li>Điền <strong>Page ID</strong> và <strong>Access token</strong> (từ bước 2) → bấm <kbd>Lưu cấu hình Botcake</kbd>.</li>
+        <li>Bấm <kbd>Copy URL</kbd> ở ô <strong>Bridge URL</strong> để copy. Giữ link này bí mật — nó là đường riêng của bot bạn.</li>
+      </ul>
+      <p class="note">Lần sau quay lại, ô Access token hiện “••• đã lưu” — cứ để trống nếu không đổi token.</p>
+    </section>
+
+    <section class="step in-bc">
+      <div class="num">4</div>
+      <div class="step-head"><span class="tag bc">Botcake</span><h2>Trỏ tin nhắn khách sang BalaBot</h2></div>
+      <p>Bước quan trọng nhất — đây là nơi tin của khách được chuyển cho bot.</p>
+      <ul>
+        <li>Vào <kbd>Automation</kbd> → <kbd>Tin nhắn mặc định</kbd>.</li>
+        <li>Gạt công tắc sang chế độ <strong>“Mặc định”</strong> — <strong>TẮT chế độ “AI”</strong> (để AI thì tin sẽ không sang được BalaBot).</li>
+        <li>Bấm <kbd>Chỉnh sửa</kbd> → trong khối Nội dung, thêm một <strong>JSON API / Dynamic Block</strong> với: <br><strong>Method</strong> = <kbd>POST</kbd> · <strong>URL</strong> = dán <strong>Bridge URL</strong> đã copy ở bước 3 (phải còn đủ phần <kbd>?key=…</kbd> ở cuối).</li>
+        <li>Ở ô <strong>Body</strong>, dán đoạn JSON bên dưới:</li>
+      </ul>
+      <div class="code">
+        <div class="code-bar"><span>Body (JSON)</span><button class="copy" type="button" data-copy='{ "text": "{{last_text_input}}", "psid": "{{psid}}", "name": "{{user_full_name}}" }'>Copy</button></div>
+<pre>{
+  "text": "{{last_text_input}}",
+  "psid": "{{psid}}",
+  "name": "{{user_full_name}}"
+}</pre>
+      </div>
+      <p class="note">Khi gõ <kbd>{{</kbd> Botcake sẽ gợi ý biến — chọn đúng: tin gần nhất của khách → <b>text</b>, PSID → <b>psid</b>, họ tên → <b>name</b>. Không cần thêm khối văn bản trả lời nào khác.</p>
+      <ul>
+        <li>Bật <strong>“Gửi ngay lập tức”</strong> + <strong>“Kích hoạt”</strong> → bấm <kbd>Lưu</kbd>.</li>
+      </ul>
+    </section>
+
+    <section class="step">
+      <div class="num">5</div>
+      <div class="step-head"><span class="tag bb">Kiểm tra</span><h2>Nhắn thử vào Fanpage</h2></div>
+      <ul>
+        <li>Dùng một <strong>nick Facebook khác</strong> (không phải admin của Page) nhắn vào Fanpage.</li>
+        <li>Chờ vài giây — bot sẽ trả lời ngay trong Messenger. Đúng nội dung đã huấn luyện là <strong>thành công 🎉</strong>.</li>
+      </ul>
+    </section>
+
+  </div>
+
+  <details class="trouble">
+    <summary>Bot chưa trả lời? Xem nhanh cách khắc phục</summary>
+    <div class="tbody">
+      <dl>
+        <dt>Bot im lặng, không trả lời gì</dt>
+        <dd>Kiểm tra Tin nhắn mặc định đã ở chế độ <b>“Mặc định”</b> (không phải AI), đã <b>Kích hoạt</b> và <b>Lưu</b> chưa.</dd>
+        <dt>Vẫn không được</dt>
+        <dd>Mở lại khối JSON API, chắc chắn <b>Bridge URL còn đủ phần <kbd>?key=…</kbd></b> ở cuối và Method là <b>POST</b>.</dd>
+        <dt>Báo thiếu cấu hình</dt>
+        <dd>Quay lại bước 3, kiểm tra đã dán đúng <b>Page ID</b> và <b>Access Token</b>, rồi bấm Lưu lại.</dd>
+        <dt>Token bị sai / hết hạn</dt>
+        <dd>Tạo lại Access Token mới trong Botcake (bước 2) rồi dán lại vào BalaBot (bước 3).</dd>
+      </dl>
+      <p class="note" style="margin-top:14px">Vẫn kẹt? Gửi ảnh chụp màn hình cho đội hỗ trợ BalaBot để được xem giúp.</p>
+    </div>
+  </details>
+
+  <footer>Cần hỗ trợ thêm? Liên hệ đội BalaBot — chúng tôi sẽ đồng hành cùng bạn.</footer>
+</div>
+
+<script>
+  document.querySelectorAll(".copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var text = btn.getAttribute("data-copy");
+      navigator.clipboard.writeText(text).then(function () {
+        var old = btn.textContent;
+        btn.textContent = "Đã copy ✓";
+        btn.classList.add("done");
+        setTimeout(function () { btn.textContent = old; btn.classList.remove("done"); }, 1800);
+      });
+    });
+  });
+</script>
+</body>
+</html>

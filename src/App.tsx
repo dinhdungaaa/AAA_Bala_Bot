@@ -25,6 +25,17 @@ const isAdminRoute = () => {
     window.location.pathname.replace(/\/+$/, '') === '/admin';
 };
 
+// URL trang hướng dẫn Botcake. Là thẻ <a> (không phải fetch) nên phải TỰ thêm prefix
+// /balabot ở production — proxy Cloudflare chỉ chuyển /balabot/api/* về Railway (nơi
+// đặt route). Local (localhost) giữ nguyên /api/... vì Express phục vụ trực tiếp.
+const botcakeGuideUrl = (): string => {
+  if (typeof window === 'undefined') return '/api/huong-dan-botcake';
+  const h = window.location.hostname;
+  const isLocal = h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.');
+  const prefix = (!isLocal && window.location.pathname.includes('/balabot')) ? '/balabot' : '';
+  return `${prefix}/api/huong-dan-botcake`;
+};
+
 // Helper function to render text with intelligent layout, smart/readable line breaks, and neat lists
 const renderFormattedText = (text: string, isUser: boolean = false) => {
   if (!text) return null;
@@ -3978,7 +3989,18 @@ export default function App() {
                   <div className="bg-white border border-emerald-200 rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Kết nối Fanpage qua Botcake</span>
-                      <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold">Khuyến nghị hiện tại</span>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={botcakeGuideUrl()}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold"
+                          title="Mở hướng dẫn từng bước trong tab mới"
+                        >
+                          📖 Xem hướng dẫn
+                        </a>
+                        <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold">Khuyến nghị hiện tại</span>
+                      </div>
                     </div>
                     <p className="text-[11px] text-slate-500 leading-relaxed">
                       Kết nối Page vào Botcake (miễn phí) rồi dán Bridge URL bên dưới vào Dynamic Block — bot trả lời <b>mọi khách vãng lai</b> ngay.
@@ -4026,7 +4048,11 @@ export default function App() {
                       </div>
                     )}
                     <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Hướng dẫn cài Botcake (async): xem file <span className="font-mono">docs/botcake-async-guide.md</span> (hoặc hỏi đội hỗ trợ BalaBot).
+                      Chưa rõ cách làm? Bấm{' '}
+                      <a href={botcakeGuideUrl()} target="_blank" rel="noopener noreferrer" className="font-bold text-emerald-600 hover:text-emerald-700 underline">
+                        Xem hướng dẫn từng bước
+                      </a>{' '}
+                      (hoặc hỏi đội hỗ trợ BalaBot).
                     </p>
                   </div>
 
