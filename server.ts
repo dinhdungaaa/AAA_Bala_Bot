@@ -3853,12 +3853,11 @@ app.get("/api/zalo/groups", async (req, res) => {
   const bindings = await listBindings(email);
   const userConfig = getSavedSupabaseConfigForEmail(email);
   const allBots = await withSupabaseConfig(userConfig, () => dbGetBots(bots));
-  // Chỉ đưa bot của chính người gọi vào dropdown (admin thấy tất cả) — trước đây
-  // trả toàn bộ bot của mọi khách, lộ id + tên bot người khác.
+  // Chỉ đưa bot của chính người gọi vào dropdown — trước đây trả toàn bộ bot của
+  // mọi khách, lộ id + tên bot người khác. Admin cũng chỉ thấy bot mình (đồng bộ
+  // với /api/bots); quyền admin chỉ áp dụng khi thao tác (binding/simulate).
   const requesterId = getRequestUserId(req);
-  const visibleBots = isRequestAdmin(req)
-    ? allBots
-    : allBots.filter((b) => b.userId && b.userId === requesterId);
+  const visibleBots = allBots.filter((b) => b.userId && b.userId === requesterId);
   res.json({ bindings, bots: visibleBots.map((b) => ({ id: b.id, name: b.name })) });
 });
 
