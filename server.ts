@@ -240,6 +240,43 @@ function canAccessBot(req: express.Request, bot: BotConfig): boolean {
   return getRequestUserId(req) === bot.userId || isRequestAdmin(req);
 }
 
+// Khóa route theo botId trực tiếp (vd /api/analytics/:botId) — các route này KHÔNG đi
+// qua middleware /api/bots/:botId nên phải tự kiểm tra. Trả false + 403 nếu không có
+// quyền; true nếu được phép (kể cả bot không tồn tại → để handler tự 404/rỗng).
+async function assertBotAccess(req: express.Request, res: express.Response, botId: string): Promise<boolean> {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === botId);
+  if (!bot) return true;
+  if (canAccessBot(req, bot)) return true;
+  res.status(403).json({ error: "Bạn không có quyền truy cập tài nguyên này." });
+  return false;
+}
+
+// Khóa route theo id tài nguyên con (chunk/source/session/schedule) — resolve botId
+// chủ quản rồi kiểm quyền. memoryBotId: botId lấy được từ mảng in-memory (nếu có) để
+// khỏi truy vấn DB. Không xác định được chủ (DB down / bản ghi lạ) → fail-open như
+// middleware bot; nếu bản ghi có thật trong DB thì luôn resolve được và bị siết đúng.
+async function assertResourceBotAccess(
+  req: express.Request,
+  res: express.Response,
+  table: "knowledge_chunks" | "knowledge_sources" | "chat_sessions" | "schedules",
+  id: string,
+  memoryBotId?: string | null
+): Promise<boolean> {
+  let botId = memoryBotId || null;
+  if (!botId) {
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        const { data } = await client.from(table).select("botId").eq("id", id).single();
+        botId = (data as any)?.botId || null;
+      } catch { /* không tra được → fail-open bên dưới */ }
+    }
+  }
+  if (!botId) return true;
+  return assertBotAccess(req, res, botId);
+}
+
 function getRequestConfig(req: express.Request): { url: string; key: string } | null {
   const url = (req.headers["x-balabot-supabase-url"] || "").toString().trim();
   const key = (req.headers["x-balabot-supabase-key"] || "").toString().trim();
@@ -1786,6 +1823,8 @@ app.post("/api/bots/:botId/sources", async (req, res) => {
 
 app.delete("/api/sources/:id", async (req, res) => {
   const id = req.params.id;
+  const srcBotId = knowledgeSources.find(s => s.id === id)?.botId;
+  if (!(await assertResourceBotAccess(req, res, "knowledge_sources", id, srcBotId))) return;
   knowledgeSources = knowledgeSources.filter(s => s.id !== id);
   knowledgeChunks = knowledgeChunks.filter(c => c.sourceId !== id);
   await dbDeleteSource(id);
@@ -1804,6 +1843,7 @@ app.get("/api/bots/:botId/chunks", async (req, res) => {
 
 app.put("/api/chunks/:id", async (req, res) => {
   const idx = knowledgeChunks.findIndex(c => c.id === req.params.id);
+  if (!(await assertResourceBotAccess(req, res, "knowledge_chunks", req.params.id, idx !== -1 ? knowledgeChunks[idx].botId : null))) return;
   const updates = req.body;
   if (idx !== -1) {
     knowledgeChunks[idx] = {
@@ -1816,6 +1856,8 @@ app.put("/api/chunks/:id", async (req, res) => {
 });
 
 app.delete("/api/chunks/:id", async (req, res) => {
+  const chunkBotId = knowledgeChunks.find(c => c.id === req.params.id)?.botId;
+  if (!(await assertResourceBotAccess(req, res, "knowledge_chunks", req.params.id, chunkBotId))) return;
   knowledgeChunks = knowledgeChunks.filter(c => c.id !== req.params.id);
   await dbDeleteChunk(req.params.id);
   res.json({ success: true });
@@ -1922,6 +1964,7 @@ app.get("/api/bots/:botId/conversations", async (req, res) => {
 // Update conversational status or notes
 app.put("/api/conversations/:sessId", async (req, res) => {
   const idx = chatSessions.findIndex(s => s.id === req.params.sessId);
+  if (!(await assertResourceBotAccess(req, res, "chat_sessions", req.params.sessId, idx !== -1 ? chatSessions[idx].botId : null))) return;
   const updates = req.body;
   if (idx !== -1) {
     chatSessions[idx] = {
@@ -2015,6 +2058,7 @@ async function deliverOperatorReply(session: ChatSession, text: string): Promise
 // Send custom support agent message into session (answering Telegram user)
 app.post("/api/conversations/:sessId/messages", async (req, res) => {
   const idx = chatSessions.findIndex(s => s.id === req.params.sessId);
+  if (!(await assertResourceBotAccess(req, res, "chat_sessions", req.params.sessId, idx !== -1 ? chatSessions[idx].botId : null))) return;
   const { text, sender, username } = req.body;
   const newMsg: Message = {
     id: "agent-m-" + Math.random().toString(36).substr(2, 9),
@@ -2079,6 +2123,8 @@ app.post("/api/conversations/:sessId/messages", async (req, res) => {
 // Bật/tắt takeover thủ công: body { release: true } = trả lại cho bot ngay;
 // { minutes } = tạm dừng bot N phút (mặc định 30).
 app.post("/api/conversations/:sessId/takeover", async (req, res) => {
+  const takeoverBotId = chatSessions.find(s => s.id === req.params.sessId)?.botId;
+  if (!(await assertResourceBotAccess(req, res, "chat_sessions", req.params.sessId, takeoverBotId))) return;
   const release = req.body?.release === true;
   const minutes = Math.min(Math.max(Number(req.body?.minutes) || 30, 1), 24 * 60);
   const until = release ? null : new Date(Date.now() + minutes * 60000).toISOString();
@@ -2178,6 +2224,7 @@ app.post("/api/bots/:botId/telegram-webhook", async (req, res) => {
 // Analytics Summary
 app.get("/api/analytics/:botId", async (req, res) => {
   const botId = req.params.botId;
+  if (!(await assertBotAccess(req, res, botId))) return;
   const botConvs = await dbGetConversations(botId, chatSessions.filter(c => c.botId === botId));
   const botSources = await dbGetSources(botId, knowledgeSources.filter(s => s.botId === botId));
   
@@ -5612,6 +5659,7 @@ app.put("/api/schedules/:id", async (req, res) => {
   const { id } = req.params;
   const updates = req.body;
   const idx = scheduleItems.findIndex(s => s.id === id);
+  if (!(await assertResourceBotAccess(req, res, "schedules", id, idx !== -1 ? scheduleItems[idx].botId : null))) return;
 
   if (idx !== -1) {
     scheduleItems[idx] = { ...scheduleItems[idx], ...updates };
@@ -5625,6 +5673,7 @@ app.put("/api/schedules/:id", async (req, res) => {
 app.put("/api/schedules/:id/toggle", async (req, res) => {
   const { id } = req.params;
   const idx = scheduleItems.findIndex(s => s.id === id);
+  if (!(await assertResourceBotAccess(req, res, "schedules", id, idx !== -1 ? scheduleItems[idx].botId : null))) return;
 
   if (idx === -1) {
     return res.status(404).json({ error: "Không tìm thấy lịch nhắc." });
@@ -5640,6 +5689,8 @@ app.put("/api/schedules/:id/toggle", async (req, res) => {
 // DELETE a schedule
 app.delete("/api/schedules/:id", async (req, res) => {
   const { id } = req.params;
+  const delSchedBotId = scheduleItems.find(s => s.id === id)?.botId;
+  if (!(await assertResourceBotAccess(req, res, "schedules", id, delSchedBotId))) return;
   scheduleItems = scheduleItems.filter(s => s.id !== id);
   reminderLogs = reminderLogs.filter(l => l.scheduleId !== id);
   await dbDeleteSchedule(id);
@@ -5658,6 +5709,7 @@ app.get("/api/bots/:botId/reminder-logs", async (req, res) => {
 app.post("/api/schedules/:id/trigger-now", async (req, res) => {
   const { id } = req.params;
   const schedule = scheduleItems.find(s => s.id === id);
+  if (!(await assertResourceBotAccess(req, res, "schedules", id, schedule?.botId))) return;
 
   if (!schedule) {
     return res.status(404).json({ error: "Không tìm thấy lịch nhắc." });
