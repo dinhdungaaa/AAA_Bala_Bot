@@ -223,6 +223,23 @@ function requireSignedInUser(req: express.Request, res: express.Response): strin
   return email;
 }
 
+// Danh tính chủ bot theo header dashboard (x-balabot-user-id) — cùng nguồn với
+// middleware khóa /api/bots/:id bên dưới.
+function getRequestUserId(req: express.Request): string {
+  return (req.headers["x-balabot-user-id"] || req.query.userId || "").toString().trim();
+}
+
+function isRequestAdmin(req: express.Request): boolean {
+  return getRequestUserEmail(req) === ADMIN_EMAIL;
+}
+
+// Bot có chủ (userId) thì chỉ chủ đó hoặc admin được dùng; bot cũ chưa gắn chủ thì
+// cho qua (cùng chính sách fail-open với middleware khóa bot).
+function canAccessBot(req: express.Request, bot: BotConfig): boolean {
+  if (!bot.userId) return true;
+  return getRequestUserId(req) === bot.userId || isRequestAdmin(req);
+}
+
 function getRequestConfig(req: express.Request): { url: string; key: string } | null {
   const url = (req.headers["x-balabot-supabase-url"] || "").toString().trim();
   const key = (req.headers["x-balabot-supabase-key"] || "").toString().trim();
@@ -3836,13 +3853,27 @@ app.get("/api/zalo/groups", async (req, res) => {
   const bindings = await listBindings(email);
   const userConfig = getSavedSupabaseConfigForEmail(email);
   const allBots = await withSupabaseConfig(userConfig, () => dbGetBots(bots));
-  res.json({ bindings, bots: allBots.map((b) => ({ id: b.id, name: b.name })) });
+  // Chỉ đưa bot của chính người gọi vào dropdown (admin thấy tất cả) — trước đây
+  // trả toàn bộ bot của mọi khách, lộ id + tên bot người khác.
+  const requesterId = getRequestUserId(req);
+  const visibleBots = isRequestAdmin(req)
+    ? allBots
+    : allBots.filter((b) => b.userId && b.userId === requesterId);
+  res.json({ bindings, bots: visibleBots.map((b) => ({ id: b.id, name: b.name })) });
 });
 
 app.post("/api/zalo/groups/:groupId/binding", async (req, res) => {
   const email = requireSignedInUser(req, res); if (!email) return;
   const { botId, enabled, groupName } = req.body || {};
   if (!botId) return res.status(400).json({ error: "Thieu botId" }) as any;
+  // Chặn gán bot của người khác vào nhóm Zalo của mình (dùng ké kiến thức + quota).
+  const bindConfig = getSavedSupabaseConfigForEmail(email);
+  const bindableBots = await withSupabaseConfig(bindConfig, () => dbGetBots(bots));
+  const bindBot = bindableBots.find((b) => b.id === botId);
+  if (!bindBot) return res.status(404).json({ error: "Không tìm thấy bot." }) as any;
+  if (!canAccessBot(req, bindBot)) {
+    return res.status(403).json({ error: "Bạn không có quyền dùng bot này." }) as any;
+  }
   await upsertBinding({
     owner_email: email,
     group_id: req.params.groupId,
@@ -3861,6 +3892,10 @@ app.post("/api/zalo/simulate", async (req, res) => {
   const allBots = await withSupabaseConfig(userConfig, () => dbGetBots(bots));
   const bot = allBots.find((b) => b.id === botId);
   if (!bot) return res.status(404).json({ error: "Bot not found" }) as any;
+  // Không cho chạy thử RAG trên bot của người khác (biết botId là gọi được).
+  if (!canAccessBot(req, bot)) {
+    return res.status(403).json({ error: "Bạn không có quyền dùng bot này." }) as any;
+  }
   try {
     const ai = await withSupabaseConfig(userConfig, () => generateRAGAnswer(
       bot, String(text || ""),
