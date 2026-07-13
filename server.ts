@@ -73,6 +73,8 @@ import {
   dbGetUsage,
   dbIncrementUsage,
   dbGetUsageBulk,
+  dbGetContentUsage,
+  dbIncrementContentUsage,
   dbGetProfilePlan,
   dbUpdateProfilePlan,
   dbGetFreeAllowlist,
@@ -94,7 +96,7 @@ import {
   dbGetPaidPaymentOrders
 } from "./supabaseService.js";
 import type { PaymentOrder } from "./supabaseService.js";
-import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
+import { currentYearMonth, usageVerdict, PLAN_LIMITS, CONTENT_LIMITS } from "./billing.js";
 import { computeOrderAmount, generateOrderCode, extractOrderCode, buildSepayQrUrl, verifySepayApiKey, resolveNewExpiry, parseSepayWebhook, computeRevenueSummary } from "./payments/sepay.js";
 import { resolveLimitForOwner } from "./billingResolve.js";
 
@@ -4966,6 +4968,25 @@ async function recordUsageForBot(bot: BotConfig): Promise<void> {
   const ownerKey = bot.userId || "";
   if (!ownerKey) return;
   await dbIncrementUsage(ownerKey, currentYearMonth());
+}
+
+// Kiểm tra hạn mức Content Studio TRƯỚC khi tạo bài. Fail-open: lỗi DB -> count=0 -> cho qua.
+async function checkContentGate(bot: BotConfig): Promise<{ allowed: boolean; verdict: "ok" | "warn" | "blocked"; count: number; limit: number }> {
+  const ownerKey = bot.userId || "";
+  if (!ownerKey) return { allowed: true, verdict: "ok", count: 0, limit: 0 };
+  const { tier } = await resolveOwnerPlan(ownerKey);
+  if (tier === "none") return { allowed: false, verdict: "blocked", count: 0, limit: 0 };
+  const limit = CONTENT_LIMITS[tier as keyof typeof CONTENT_LIMITS] ?? CONTENT_LIMITS.free;
+  const count = await dbGetContentUsage(ownerKey, currentYearMonth());
+  const verdict = usageVerdict(count, limit);
+  return { allowed: verdict !== "blocked", verdict, count, limit };
+}
+
+// Tăng đếm SAU khi đã tạo bài Content Studio thành công.
+async function recordContentUse(bot: BotConfig): Promise<void> {
+  const ownerKey = bot.userId || "";
+  if (!ownerKey) return;
+  await dbIncrementContentUsage(ownerKey, currentYearMonth());
 }
 
 // Sync có chủ đích (gọi trong generateRAGAnswer cho goalState nudge): KHÔNG chờ
