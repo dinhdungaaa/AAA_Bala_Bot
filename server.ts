@@ -12,6 +12,11 @@ import { synthesizeAnswer } from "./rag/synthesis.js";
 import { understand, defaultUnderstanding, isValidVNPhone, normalizeVNPhone } from "./rag/understand.js";
 import type { Understanding } from "./rag/understand.js";
 import { channelFromUserKey, formatLeadNotify } from "./leadHelpers.js";
+import { runGeneration } from "./contentEngine/generatePost.js";
+import { buildGeminiLlmClient } from "./contentEngine/llm.js";
+import { brandFromBot, ingredientsFromChunks } from "./contentEngine/brandFromBot.js";
+import { resolveLength } from "./contentEngine/length.js";
+import type { PostType } from "./contentEngine/types.js";
 import type { ConversationGoal, GoalState } from "./rag/synthesis.js";
 import {
   signOAuthState, verifyOAuthState, buildOAuthDialogUrl, verifyFacebookSignature,
@@ -73,6 +78,12 @@ import {
   dbGetUsage,
   dbIncrementUsage,
   dbGetUsageBulk,
+  dbGetContentUsage,
+  dbIncrementContentUsage,
+  dbSaveContentPost,
+  dbListContentPosts,
+  dbUpdateContentPost,
+  dbDeleteContentPost,
   dbGetProfilePlan,
   dbUpdateProfilePlan,
   dbGetFreeAllowlist,
@@ -94,7 +105,7 @@ import {
   dbGetPaidPaymentOrders
 } from "./supabaseService.js";
 import type { PaymentOrder } from "./supabaseService.js";
-import { currentYearMonth, usageVerdict, PLAN_LIMITS } from "./billing.js";
+import { currentYearMonth, usageVerdict, PLAN_LIMITS, CONTENT_LIMITS } from "./billing.js";
 import { computeOrderAmount, generateOrderCode, extractOrderCode, buildSepayQrUrl, verifySepayApiKey, resolveNewExpiry, parseSepayWebhook, computeRevenueSummary } from "./payments/sepay.js";
 import { resolveLimitForOwner } from "./billingResolve.js";
 
@@ -332,7 +343,7 @@ async function assertBotAccess(req: express.Request, res: express.Response, botI
 async function assertResourceBotAccess(
   req: express.Request,
   res: express.Response,
-  table: "knowledge_chunks" | "knowledge_sources" | "chat_sessions" | "schedules",
+  table: "knowledge_chunks" | "knowledge_sources" | "chat_sessions" | "schedules" | "content_posts",
   id: string,
   memoryBotId?: string | null
 ): Promise<boolean> {
@@ -3610,6 +3621,89 @@ app.patch("/api/bots/:botId/leads/:leadId", async (req, res) => {
   res.json({ success: true });
 });
 
+// Sinh 1 bài viết từ Kho Kiến Thức của bot. Middleware token đã bảo vệ /api/bots/:botId/*.
+app.post("/api/bots/:botId/content/generate", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+
+  const gate = await checkContentGate(bot);
+  if (!gate.allowed) {
+    return res.status(429).json({ error: "Bạn đã hết lượt tạo bài của gói tháng này. Nâng gói để tạo thêm.", gate });
+  }
+
+  const ai = getAIClient();
+  if (!ai) return res.status(400).json({ error: "Chưa cấu hình GEMINI_API_KEY." });
+
+  const postType = String(req.body?.postType || "D1") as PostType;
+  if (!["D1", "D2", "D3", "D4", "D5", "D6", "D7"].includes(postType)) {
+    return res.status(400).json({ error: "Loại bài không hợp lệ." });
+  }
+  const topic = String(req.body?.topic || "").trim();
+  if (!topic) return res.status(400).json({ error: "Thiếu chủ đề bài viết." });
+  const goal = req.body?.goal ? String(req.body.goal) : undefined;
+  const extra = req.body?.extraIngredients ? String(req.body.extraIngredients) : "";
+  const lengthPref = (req.body?.lengthPreference || "auto");
+
+  const chunks = await dbGetChunks(bot.id, knowledgeChunks.filter(c => c.botId === bot.id && c.isActive));
+  const knowledge = ingredientsFromChunks(chunks as any, 6);
+  const ingredients = [knowledge, extra].filter(Boolean).join("\n");
+
+  try {
+    const result = await runGeneration(
+      {
+        brand: brandFromBot(bot),
+        topic, postType, goal, ingredients,
+        lengthTarget: resolveLength(lengthPref),
+      },
+      { client: buildGeminiLlmClient(ai), economy: gate.limit <= CONTENT_LIMITS.free },
+    );
+    const post = {
+      id: "cpost-" + Math.random().toString(36).substr(2, 9),
+      botId: bot.id, userId: bot.userId, postType, topic,
+      content: result.content, score: result.quality.score, status: "draft",
+      createdAt: new Date().toISOString(),
+    };
+    const saved = await dbSaveContentPost(post);
+    if (!saved) {
+      return res.status(500).json({ error: "Lưu bài thất bại, thử lại sau." });
+    }
+    await recordContentUse(bot);
+    res.json({ ...post, passed: result.quality.passed, failures: result.quality.failures });
+  } catch (err: any) {
+    console.error("[Content] generate lỗi:", err?.message || err);
+    res.status(500).json({ error: "Tạo bài thất bại, thử lại sau ít phút." });
+  }
+});
+
+app.get("/api/bots/:botId/content", async (req, res) => {
+  const posts = await dbListContentPosts(req.params.botId);
+  res.json(posts);
+});
+
+app.get("/api/bots/:botId/content/usage", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+  const gate = await checkContentGate(bot);
+  res.json({ count: gate.count, limit: gate.limit, verdict: gate.verdict });
+});
+
+app.put("/api/content/:id", async (req, res) => {
+  if (!(await assertResourceBotAccess(req, res, "content_posts", req.params.id))) return;
+  const updates: any = {};
+  if (typeof req.body?.content === "string") updates.content = req.body.content;
+  if (typeof req.body?.status === "string") updates.status = req.body.status;
+  await dbUpdateContentPost(req.params.id, updates);
+  res.json({ success: true });
+});
+
+app.delete("/api/content/:id", async (req, res) => {
+  if (!(await assertResourceBotAccess(req, res, "content_posts", req.params.id))) return;
+  await dbDeleteContentPost(req.params.id);
+  res.json({ success: true });
+});
+
 // Lưu cấu hình trợ lý bán hàng (mục tiêu + chat id thông báo).
 app.post("/api/bots/:botId/assistant-config", async (req, res) => {
   const allBots = await dbGetBots(bots);
@@ -4966,6 +5060,25 @@ async function recordUsageForBot(bot: BotConfig): Promise<void> {
   const ownerKey = bot.userId || "";
   if (!ownerKey) return;
   await dbIncrementUsage(ownerKey, currentYearMonth());
+}
+
+// Kiểm tra hạn mức Content Studio TRƯỚC khi tạo bài. Fail-open: lỗi DB -> count=0 -> cho qua.
+async function checkContentGate(bot: BotConfig): Promise<{ allowed: boolean; verdict: "ok" | "warn" | "blocked"; count: number; limit: number }> {
+  const ownerKey = bot.userId || "";
+  if (!ownerKey) return { allowed: true, verdict: "ok", count: 0, limit: 0 };
+  const { tier } = await resolveOwnerPlan(ownerKey);
+  if (tier === "none") return { allowed: false, verdict: "blocked", count: 0, limit: 0 };
+  const limit = CONTENT_LIMITS[tier as keyof typeof CONTENT_LIMITS] ?? CONTENT_LIMITS.free;
+  const count = await dbGetContentUsage(ownerKey, currentYearMonth());
+  const verdict = usageVerdict(count, limit);
+  return { allowed: verdict !== "blocked", verdict, count, limit };
+}
+
+// Tăng đếm SAU khi đã tạo bài Content Studio thành công.
+async function recordContentUse(bot: BotConfig): Promise<void> {
+  const ownerKey = bot.userId || "";
+  if (!ownerKey) return;
+  await dbIncrementContentUsage(ownerKey, currentYearMonth());
 }
 
 // Sync có chủ đích (gọi trong generateRAGAnswer cho goalState nudge): KHÔNG chờ

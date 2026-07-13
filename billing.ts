@@ -10,6 +10,12 @@ export const PLAN_LIMITS: Record<"free" | "starter" | "pro" | "business" | "ente
   enterprise: { messages: 250000, bots: Infinity, channels: "all" },
 };
 
+// Hạn mức số bài Content Studio mỗi tháng theo gói. Gói cao dùng thoải mái, gói
+// thấp giới hạn. Chỉnh số tự do sau.
+export const CONTENT_LIMITS: Record<"free" | "starter" | "pro" | "business" | "enterprise", number> = {
+  free: 5, starter: 30, pro: 150, business: 600, enterprise: 999999,
+};
+
 // "YYYY-MM" theo giờ Việt Nam (UTC+7) để chu kỳ reset khớp tháng địa phương.
 export function currentYearMonth(d: Date = new Date()): string {
   const vn = new Date(d.getTime() + 7 * 3600 * 1000);
