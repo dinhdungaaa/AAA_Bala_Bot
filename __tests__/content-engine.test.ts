@@ -14,6 +14,13 @@ import {
 import { sanitizePostContent } from "../contentEngine/sanitize.js";
 import { findMarkdownViolations, hasVietnameseDiacritics } from "../contentEngine/guardrails.js";
 import { resolveLength, bucketFromWords, medianWords, countWords } from "../contentEngine/length.js";
+import {
+  buildIdeaPrompt,
+  buildDraftPrompt,
+  buildRevisePrompt,
+  buildScoringPrompt,
+  type PromptInput,
+} from "../contentEngine/prompts.js";
 
 // ============ Post Formulas Tests ============
 describe("post formulas", () => {
@@ -224,5 +231,68 @@ describe("resolveLength", () => {
   it("auto falls back to medium with no samples", () => {
     expect(resolveLength("auto", 0)).toEqual(resolveLength("medium"));
     expect(resolveLength("auto")).toEqual(resolveLength("medium"));
+  });
+});
+
+// ============ Prompts Tests ============
+const input: PromptInput = {
+  brandName: "Học & Làm cùng AI",
+  topic: "AI Agent thay đổi cách làm việc",
+  postType: "D2",
+  goal: "xây authority",
+  ingredients: "kinh nghiệm dùng AI agent",
+  writingStyle: "Câu ngắn, gần gũi.",
+  customerInsight: "Sợ tụt lại phía sau.",
+};
+
+describe("prompts", () => {
+  it("idea prompt includes the 4 poke-hole filters and the topic", () => {
+    const p = buildIdeaPrompt(input);
+    expect(p).toContain("AI Agent thay đổi cách làm việc");
+    expect(p).toContain("bão hòa");
+    expect(p).toContain("khác biệt");
+  });
+
+  it("draft prompt enforces invariant output rules", () => {
+    const p = buildDraftPrompt(input, "Góc đã chọn");
+    expect(p).toContain("tiếng Việt có dấu");
+    expect(p.toLowerCase()).toContain("markdown");
+    expect(p).toContain("hashtag");
+    expect(p).toContain("Học & Làm cùng AI");
+    expect(p).toContain("Góc đã chọn");
+  });
+
+  it("draft prompt includes the formula structure for the post type", () => {
+    const p = buildDraftPrompt(input, "x");
+    // D2 structure beat
+    expect(p).toContain("Framework");
+  });
+
+  it("draft prompt injects engagement craft rules and bans AI clichés", () => {
+    const p = buildDraftPrompt(input, "x");
+    expect(p).toContain("vòng tò mò"); // open loop
+    expect(p).toContain("Show, don't tell");
+    expect(p).toContain("Trong thời đại số"); // a banned cliché is listed
+  });
+
+  it("draft prompt demands depth and a minimum substantive length", () => {
+    const p = buildDraftPrompt(input, "x");
+    expect(p).toContain("SÂU SẮC");
+    expect(p).toContain("CƠ CHẾ");
+    expect(p).toContain("tối thiểu"); // minimum word floor stated
+  });
+
+  it("revise prompt lists the failures to fix and keeps craft rules", () => {
+    const p = buildRevisePrompt(input, "bài hiện tại", ["CTA rõ ràng", "Hook 3 dòng đầu khiến dừng scroll"]);
+    expect(p).toContain("CTA rõ ràng");
+    expect(p).toContain("bài hiện tại");
+    expect(p).toContain("vòng tò mò");
+  });
+
+  it("scoring prompt lists the quality items to evaluate", () => {
+    const p = buildScoringPrompt(input, "bài cần chấm");
+    expect(p).toContain("bài cần chấm");
+    expect(p).toContain("hook");
+    expect(p).toContain("sell_outcome");
   });
 });
