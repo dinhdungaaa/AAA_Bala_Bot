@@ -1750,3 +1750,57 @@ export async function dbGetPaidPaymentOrders(limit = 500): Promise<PaymentOrder[
     return (data as any[]).map(r => ({ ...r, amount: Number(r.amount) })) as PaymentOrder[];
   } catch { return []; }
 }
+
+// ================= CONTENT STUDIO CONTENT POSTS & USAGE =================
+
+export interface ContentPost {
+  id: string; botId: string; userId?: string; postType: string;
+  topic?: string; content?: string; score?: number; status?: string; createdAt?: string;
+}
+
+export async function dbSaveContentPost(post: ContentPost): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("content_posts").insert(post);
+  if (error) { console.warn("dbSaveContentPost:", error.message); return false; }
+  return true;
+}
+
+export async function dbListContentPosts(botId: string): Promise<ContentPost[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+  const { data, error } = await client.from("content_posts").select("*").eq("botId", botId).order("createdAt", { ascending: false });
+  if (error) { console.warn("dbListContentPosts:", error.message); return []; }
+  return (data as ContentPost[]) || [];
+}
+
+export async function dbUpdateContentPost(id: string, updates: Partial<ContentPost>): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("content_posts").update(updates).eq("id", id);
+  if (error) { console.warn("dbUpdateContentPost:", error.message); return false; }
+  return true;
+}
+
+export async function dbDeleteContentPost(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("content_posts").delete().eq("id", id);
+  if (error) { console.warn("dbDeleteContentPost:", error.message); return false; }
+  return true;
+}
+
+export async function dbGetContentUsage(ownerKey: string, ym: string): Promise<number> {
+  const client = getSupabaseClient();
+  if (!client) return 0;
+  const { data } = await client.from("content_usage").select("count").eq("owner_key", ownerKey).eq("ym", ym).maybeSingle();
+  return Number((data as any)?.count) || 0;
+}
+
+export async function dbIncrementContentUsage(ownerKey: string, ym: string): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) return;
+  const cur = await dbGetContentUsage(ownerKey, ym);
+  const { error } = await client.from("content_usage").upsert({ owner_key: ownerKey, ym, count: cur + 1 }, { onConflict: "owner_key,ym" });
+  if (error) console.warn("dbIncrementContentUsage:", error.message);
+}
