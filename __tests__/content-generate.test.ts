@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { runGeneration } from "../contentEngine/generatePost.js";
 import type { LlmClient } from "../contentEngine/llm.js";
+import { buildGeminiLlmClient } from "../contentEngine/llm.js";
 
 function fakeClient(): LlmClient {
   return {
@@ -36,5 +37,18 @@ describe("runGeneration", () => {
       { client: fakeClient(), economy: true },
     );
     expect(res.angle).toBe("Chủ đề X");
+  });
+});
+
+describe("buildGeminiLlmClient", () => {
+  it("generateJson parse JSON từ res.text", async () => {
+    const fakeAi: any = { models: { generateContent: async () => ({ text: '{"ok":true}' }) } };
+    const c = buildGeminiLlmClient(fakeAi);
+    expect(await c.generateJson<{ ok: boolean }>({}, "p", "m")).toEqual({ ok: true });
+  });
+  it("generateText trả text", async () => {
+    const fakeAi: any = { models: { generateContent: async () => ({ text: "  hello  " }) } };
+    const c = buildGeminiLlmClient(fakeAi);
+    expect(await c.generateText("p", "m")).toBe("hello");
   });
 });
