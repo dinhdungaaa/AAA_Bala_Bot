@@ -12,6 +12,11 @@ import { synthesizeAnswer } from "./rag/synthesis.js";
 import { understand, defaultUnderstanding, isValidVNPhone, normalizeVNPhone } from "./rag/understand.js";
 import type { Understanding } from "./rag/understand.js";
 import { channelFromUserKey, formatLeadNotify } from "./leadHelpers.js";
+import { runGeneration } from "./contentEngine/generatePost.js";
+import { buildGeminiLlmClient } from "./contentEngine/llm.js";
+import { brandFromBot, ingredientsFromChunks } from "./contentEngine/brandFromBot.js";
+import { resolveLength } from "./contentEngine/length.js";
+import type { PostType } from "./contentEngine/types.js";
 import type { ConversationGoal, GoalState } from "./rag/synthesis.js";
 import {
   signOAuthState, verifyOAuthState, buildOAuthDialogUrl, verifyFacebookSignature,
@@ -75,6 +80,10 @@ import {
   dbGetUsageBulk,
   dbGetContentUsage,
   dbIncrementContentUsage,
+  dbSaveContentPost,
+  dbListContentPosts,
+  dbUpdateContentPost,
+  dbDeleteContentPost,
   dbGetProfilePlan,
   dbUpdateProfilePlan,
   dbGetFreeAllowlist,
@@ -334,7 +343,7 @@ async function assertBotAccess(req: express.Request, res: express.Response, botI
 async function assertResourceBotAccess(
   req: express.Request,
   res: express.Response,
-  table: "knowledge_chunks" | "knowledge_sources" | "chat_sessions" | "schedules",
+  table: "knowledge_chunks" | "knowledge_sources" | "chat_sessions" | "schedules" | "content_posts",
   id: string,
   memoryBotId?: string | null
 ): Promise<boolean> {
@@ -3609,6 +3618,83 @@ app.patch("/api/bots/:botId/leads/:leadId", async (req, res) => {
   const mem = leadsMem.find(l => l.botId === req.params.botId && l.id === req.params.leadId);
   if (mem) mem.status = status as Lead["status"];
   await dbUpdateBotLead(req.params.botId, req.params.leadId, { status: status as Lead["status"] });
+  res.json({ success: true });
+});
+
+// Sinh 1 bài viết từ Kho Kiến Thức của bot. Middleware token đã bảo vệ /api/bots/:botId/*.
+app.post("/api/bots/:botId/content/generate", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+
+  const gate = await checkContentGate(bot);
+  if (!gate.allowed) {
+    return res.status(429).json({ error: "Bạn đã hết lượt tạo bài của gói tháng này. Nâng gói để tạo thêm.", gate });
+  }
+
+  const ai = getAIClient();
+  if (!ai) return res.status(400).json({ error: "Chưa cấu hình GEMINI_API_KEY." });
+
+  const postType = String(req.body?.postType || "D1") as PostType;
+  const topic = String(req.body?.topic || "").trim();
+  if (!topic) return res.status(400).json({ error: "Thiếu chủ đề bài viết." });
+  const goal = req.body?.goal ? String(req.body.goal) : undefined;
+  const extra = req.body?.extraIngredients ? String(req.body.extraIngredients) : "";
+  const lengthPref = (req.body?.lengthPreference || "auto");
+
+  const chunks = await dbGetChunks(bot.id, knowledgeChunks.filter(c => c.botId === bot.id && c.isActive));
+  const knowledge = ingredientsFromChunks(chunks as any, 6);
+  const ingredients = [knowledge, extra].filter(Boolean).join("\n");
+
+  try {
+    const result = await runGeneration(
+      {
+        brand: brandFromBot(bot),
+        topic, postType, goal, ingredients,
+        lengthTarget: resolveLength(lengthPref),
+      },
+      { client: buildGeminiLlmClient(ai), economy: gate.limit <= CONTENT_LIMITS.free },
+    );
+    const post = {
+      id: "cpost-" + Math.random().toString(36).substr(2, 9),
+      botId: bot.id, userId: bot.userId, postType, topic,
+      content: result.content, score: result.quality.score, status: "draft",
+      createdAt: new Date().toISOString(),
+    };
+    await dbSaveContentPost(post);
+    await recordContentUse(bot);
+    res.json({ ...post, passed: result.quality.passed, failures: result.quality.failures });
+  } catch (err: any) {
+    console.error("[Content] generate lỗi:", err?.message || err);
+    res.status(500).json({ error: "Tạo bài thất bại, thử lại sau ít phút." });
+  }
+});
+
+app.get("/api/bots/:botId/content", async (req, res) => {
+  const posts = await dbListContentPosts(req.params.botId);
+  res.json(posts);
+});
+
+app.get("/api/bots/:botId/content/usage", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+  const gate = await checkContentGate(bot);
+  res.json({ count: gate.count, limit: gate.limit, verdict: gate.verdict });
+});
+
+app.put("/api/content/:id", async (req, res) => {
+  if (!(await assertResourceBotAccess(req, res, "content_posts", req.params.id))) return;
+  const updates: any = {};
+  if (typeof req.body?.content === "string") updates.content = req.body.content;
+  if (typeof req.body?.status === "string") updates.status = req.body.status;
+  await dbUpdateContentPost(req.params.id, updates);
+  res.json({ success: true });
+});
+
+app.delete("/api/content/:id", async (req, res) => {
+  if (!(await assertResourceBotAccess(req, res, "content_posts", req.params.id))) return;
+  await dbDeleteContentPost(req.params.id);
   res.json({ success: true });
 });
 
