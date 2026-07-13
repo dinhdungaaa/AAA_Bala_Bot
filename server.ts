@@ -19,7 +19,7 @@ import {
 } from "./facebookOauth.js";
 import {
   signGoogleState, verifyGoogleState, buildGoogleAuthUrl, verifyGoogleIdToken,
-  renderGoogleAuthResultHtml, type GoogleJwk,
+  renderGoogleAuthResultHtml, cleanGoogleClientId, type GoogleJwk,
 } from "./googleOauth.js";
 import { parseBridgePayload, buildBridgeResponse } from "./botcakeBridge.js";
 import { buildSendContentRequest } from "./botcakeAsync.js";
@@ -3845,11 +3845,29 @@ app.post("/api/facebook-oauth/select", express.urlencoded({ extended: false }), 
 
 // ===== Đăng nhập dashboard bằng Google (OAuth code flow ở server) =====
 function getGoogleCreds() {
-  const clientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
+  const clientId = cleanGoogleClientId(process.env.GOOGLE_CLIENT_ID || "");
   const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || "").trim();
   return { clientId, clientSecret, configured: !!(clientId && clientSecret) };
 }
 const GOOGLE_STATE_SECRET = (process.env.OAUTH_STATE_SECRET || CONFIG_TOKEN_SECRET).trim();
+
+// Host được phép làm public base cho OAuth (chống lạm dụng return-origin để lấy token).
+const GOOGLE_ALLOWED_HOSTS = new Set([
+  "antiantiai.xyz", "aaa-balabot.pages.dev", "localhost", "127.0.0.1",
+]);
+// Chuẩn hóa + kiểm allowlist publicBase (vd https://antiantiai.xyz/balabot). Trả base đã
+// bỏ dấu / cuối, hoặc null nếu không hợp lệ.
+function resolveGooglePublicBase(raw: string): string | null {
+  try {
+    const u = new URL(String(raw || ""));
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    if (!GOOGLE_ALLOWED_HOSTS.has(u.hostname)) return null;
+    const path = u.pathname.replace(/\/+$/, "");
+    return `${u.origin}${path}`;
+  } catch {
+    return null;
+  }
+}
 
 // Cache JWKS Google (~1h) để verify id_token mà không fetch mỗi lần đăng nhập.
 let googleCertsCache: { certs: GoogleJwk[]; exp: number } | null = null;
@@ -3949,6 +3967,9 @@ app.get("/api/auth/google/enabled", (_req, res) => {
 });
 
 // Bước 1: mở popup vào đây → chuyển tới màn consent Google.
+// ?return=<origin app + prefix> (vd https://antiantiai.xyz/balabot) do frontend truyền —
+// mang qua state để /callback dựng đúng redirect_uri + origin postMessage (không tin
+// header host vì proxy làm sai). Không hợp lệ → lùi về getPublicBaseUrl (dev/localhost).
 app.get("/api/auth/google/start", (req, res) => {
   const { clientId, configured } = getGoogleCreds();
   if (!configured) {
@@ -3957,29 +3978,32 @@ app.get("/api/auth/google/start", (req, res) => {
       message: "Server chưa bật đăng nhập Google (thiếu GOOGLE_CLIENT_ID/SECRET). Liên hệ quản trị viên BalaBot.",
     }));
   }
-  const redirectUri = `${getPublicBaseUrl(req)}/api/auth/google/callback`;
-  const state = signGoogleState(GOOGLE_STATE_SECRET);
+  const publicBase = resolveGooglePublicBase(String(req.query.return || "")) || getPublicBaseUrl(req);
+  const redirectUri = `${publicBase}/api/auth/google/callback`;
+  const state = signGoogleState(GOOGLE_STATE_SECRET, publicBase);
   return res.redirect(buildGoogleAuthUrl({ clientId, redirectUri, state }));
 });
 
 // Bước 2: Google redirect về đây với ?code&state → verify → mint session token.
 app.get("/api/auth/google/callback", async (req, res) => {
-  const host = (req.headers["x-forwarded-host"] || req.headers.host || "").toString();
-  const proto = (req.headers["x-forwarded-proto"] || "https").toString().split(",")[0];
-  const appOrigin = host ? `${proto}://${host}` : "*";
+  // publicBase từ state (đã ký) là nguồn đáng tin để dựng redirect_uri + origin postMessage.
+  const st = verifyGoogleState(String(req.query.state || ""), GOOGLE_STATE_SECRET);
+  const publicBase = (st?.pb && resolveGooglePublicBase(st.pb)) || getPublicBaseUrl(req);
+  let appOrigin = "*";
+  try { appOrigin = new URL(publicBase).origin; } catch { /* giữ * */ }
   const fail = (message: string, status = 400) =>
     res.status(status).send(renderGoogleAuthResultHtml({ success: false, message, targetOrigin: appOrigin }));
 
   const { clientId, clientSecret, configured } = getGoogleCreds();
   if (!configured) return fail("Server chưa bật đăng nhập Google.");
   if (req.query.error) return fail("Bạn đã hủy đăng nhập Google. Hãy thử lại nếu muốn tiếp tục.");
-  if (!verifyGoogleState(String(req.query.state || ""), GOOGLE_STATE_SECRET)) {
+  if (!st) {
     return fail("Phiên đăng nhập không hợp lệ hoặc đã quá 10 phút. Hãy đóng cửa sổ và bấm Đăng nhập bằng Google lại.");
   }
   const code = String(req.query.code || "");
   if (!code) return fail("Thiếu mã xác thực từ Google. Hãy thử lại.");
 
-  const redirectUri = `${getPublicBaseUrl(req)}/api/auth/google/callback`;
+  const redirectUri = `${publicBase}/api/auth/google/callback`;
   try {
     // 1. code → token (kèm id_token).
     const tokRes = await fetch("https://oauth2.googleapis.com/token", {

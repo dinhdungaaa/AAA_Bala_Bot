@@ -7,15 +7,18 @@ import crypto from "node:crypto";
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 
-export type GoogleStatePayload = { ts: number; nonce: string };
+// pb = public base URL của app (vd https://antiantiai.xyz/balabot) — mang qua vòng OAuth
+// để /callback dựng lại ĐÚNG redirect_uri + origin postMessage, không phụ thuộc header
+// (qua proxy Cloudflare, header host bị Railway ghi đè thành domain nội bộ).
+export type GoogleStatePayload = { ts: number; nonce: string; pb?: string };
 
 function hmacBase64Url(data: string, secret: string): string {
   return crypto.createHmac("sha256", secret).update(data).digest("base64url");
 }
 
 // state = base64url(JSON payload) + "." + HMAC — chống CSRF cho vòng OAuth đăng nhập.
-export function signGoogleState(secret: string, now = Date.now()): string {
-  const payload: GoogleStatePayload = { ts: now, nonce: crypto.randomBytes(8).toString("hex") };
+export function signGoogleState(secret: string, publicBase = "", now = Date.now()): string {
+  const payload: GoogleStatePayload = { ts: now, nonce: crypto.randomBytes(8).toString("hex"), pb: publicBase || undefined };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${body}.${hmacBase64Url(body, secret)}`;
 }
@@ -35,6 +38,16 @@ export function verifyGoogleState(state: string, secret: string, now = Date.now(
   } catch {
     return null;
   }
+}
+
+// Lọc GOOGLE_CLIENT_ID owner dán vào env: bỏ khoảng trắng, dấu ngoặc, và tiền tố
+// http(s):// dán nhầm (nguyên nhân lỗi invalid_client "OAuth client was not found").
+export function cleanGoogleClientId(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .replace(/^[<"']+|[>"'/]+$/g, "")
+    .replace(/^https?:\/\//i, "")
+    .trim();
 }
 
 export function buildGoogleAuthUrl(opts: { clientId: string; redirectUri: string; state: string }): string {

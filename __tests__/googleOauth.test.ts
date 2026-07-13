@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import crypto from "node:crypto";
 import {
   signGoogleState, verifyGoogleState, buildGoogleAuthUrl,
-  parseJwtPayload, verifyGoogleIdToken, type GoogleJwk,
+  parseJwtPayload, verifyGoogleIdToken, cleanGoogleClientId, type GoogleJwk,
 } from "../googleOauth.js";
 
 const SECRET = "test-secret";
@@ -21,12 +21,33 @@ describe("Google OAuth state", () => {
 
   it("từ chối quá 10 phút", () => {
     const past = Date.now() - 11 * 60 * 1000;
-    expect(verifyGoogleState(signGoogleState(SECRET, past), SECRET)).toBeNull();
+    expect(verifyGoogleState(signGoogleState(SECRET, "", past), SECRET)).toBeNull();
+  });
+
+  it("mang publicBase (pb) qua state", () => {
+    const st = signGoogleState(SECRET, "https://antiantiai.xyz/balabot");
+    expect(verifyGoogleState(st, SECRET)?.pb).toBe("https://antiantiai.xyz/balabot");
   });
 
   it("từ chối chuỗi rác", () => {
     expect(verifyGoogleState("nope", SECRET)).toBeNull();
     expect(verifyGoogleState("", SECRET)).toBeNull();
+  });
+});
+
+describe("cleanGoogleClientId", () => {
+  const id = "539083374856-abc.apps.googleusercontent.com";
+  it("giữ nguyên id hợp lệ", () => {
+    expect(cleanGoogleClientId(id)).toBe(id);
+  });
+  it("bỏ tiền tố https:// dán nhầm", () => {
+    expect(cleanGoogleClientId("https://" + id)).toBe(id);
+    expect(cleanGoogleClientId("http://" + id)).toBe(id);
+  });
+  it("bỏ khoảng trắng, ngoặc, dấu / cuối", () => {
+    expect(cleanGoogleClientId("  " + id + "  ")).toBe(id);
+    expect(cleanGoogleClientId("<" + id + ">")).toBe(id);
+    expect(cleanGoogleClientId('"' + id + '/"')).toBe(id);
   });
 });
 

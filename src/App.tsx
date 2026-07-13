@@ -1229,7 +1229,9 @@ export default function App() {
                     window.location.hostname === '127.0.0.1' ||
                     window.location.hostname.startsWith('192.168.');
     const prefix = (!isLocal && window.location.pathname.includes('/balabot')) ? '/balabot' : '';
-    const url = `${prefix}/api/auth/google/start`;
+    // return = origin app + prefix để backend dựng đúng redirect_uri qua proxy Cloudflare.
+    const ret = encodeURIComponent(`${window.location.origin}${prefix}`);
+    const url = `${prefix}/api/auth/google/start?return=${ret}`;
     const w = 480, h = 640;
     const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
     const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
