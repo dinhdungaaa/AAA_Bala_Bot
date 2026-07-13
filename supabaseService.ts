@@ -1791,14 +1791,15 @@ export async function dbDeleteContentPost(id: string): Promise<boolean> {
 }
 
 export async function dbGetContentUsage(ownerKey: string, ym: string): Promise<number> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient();
   if (!client) return 0;
-  const { data } = await client.from("content_usage").select("count").eq("owner_key", ownerKey).eq("ym", ym).maybeSingle();
+  const { data, error } = await client.from("content_usage").select("count").eq("owner_key", ownerKey).eq("ym", ym).maybeSingle();
+  if (error) console.warn("dbGetContentUsage:", error.message);
   return Number((data as any)?.count) || 0;
 }
 
 export async function dbIncrementContentUsage(ownerKey: string, ym: string): Promise<void> {
-  const client = getSupabaseClient();
+  const client = getRootSupabaseClient();
   if (!client) return;
   const cur = await dbGetContentUsage(ownerKey, ym);
   const { error } = await client.from("content_usage").upsert({ owner_key: ownerKey, ym, count: cur + 1 }, { onConflict: "owner_key,ym" });
