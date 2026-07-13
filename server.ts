@@ -3636,6 +3636,9 @@ app.post("/api/bots/:botId/content/generate", async (req, res) => {
   if (!ai) return res.status(400).json({ error: "Chưa cấu hình GEMINI_API_KEY." });
 
   const postType = String(req.body?.postType || "D1") as PostType;
+  if (!["D1", "D2", "D3", "D4", "D5", "D6", "D7"].includes(postType)) {
+    return res.status(400).json({ error: "Loại bài không hợp lệ." });
+  }
   const topic = String(req.body?.topic || "").trim();
   if (!topic) return res.status(400).json({ error: "Thiếu chủ đề bài viết." });
   const goal = req.body?.goal ? String(req.body.goal) : undefined;
@@ -3661,7 +3664,10 @@ app.post("/api/bots/:botId/content/generate", async (req, res) => {
       content: result.content, score: result.quality.score, status: "draft",
       createdAt: new Date().toISOString(),
     };
-    await dbSaveContentPost(post);
+    const saved = await dbSaveContentPost(post);
+    if (!saved) {
+      return res.status(500).json({ error: "Lưu bài thất bại, thử lại sau." });
+    }
     await recordContentUse(bot);
     res.json({ ...post, passed: result.quality.passed, failures: result.quality.failures });
   } catch (err: any) {

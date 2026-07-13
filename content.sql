@@ -20,3 +20,12 @@ create table if not exists public.content_usage (
   count int default 0,
   primary key (owner_key, ym)
 );
+
+-- Tăng quota content nguyên tử (atomic upsert-increment), tránh mất update khi generate đồng thời.
+create or replace function increment_content_usage(p_owner_key text, p_ym text)
+returns void language sql as $$
+  insert into content_usage (owner_key, ym, count)
+  values (p_owner_key, p_ym, 1)
+  on conflict (owner_key, ym)
+  do update set count = content_usage.count + 1;
+$$;

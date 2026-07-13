@@ -29,7 +29,7 @@ const POST_TYPE_GROUPS: { label: string; options: { id: PostType; name: string }
     label: 'Thương hiệu cá nhân',
     options: [
       { id: 'D1', name: 'Storytelling cá nhân' },
-      { id: 'D3', name: 'Hot take / opinion' },
+      { id: 'D3', name: 'Hot take / opinion (ngược dòng)' },
       { id: 'D7', name: 'Behind-the-scenes' },
     ],
   },
@@ -45,7 +45,7 @@ const POST_TYPE_GROUPS: { label: string; options: { id: PostType; name: string }
 ];
 
 const POST_TYPE_LABELS: Record<PostType, string> = {
-  D1: 'Storytelling cá nhân', D2: 'Chia sẻ insight / kiến thức', D3: 'Hot take / opinion',
+  D1: 'Storytelling cá nhân', D2: 'Chia sẻ insight / kiến thức', D3: 'Hot take / opinion (ngược dòng)',
   D4: 'How-to / tutorial', D5: 'Cornerstone (bài trụ)', D6: 'Engagement (tương tác)', D7: 'Behind-the-scenes',
 };
 
@@ -139,12 +139,18 @@ export function ContentPanel({ botId }: { botId: string | null | undefined }) {
     if (!result) return;
     setSavingId(result.id);
     try {
-      await fetch(`/api/content/${result.id}`, {
+      const res = await fetch(`/api/content/${result.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: result.content, status: 'saved' }),
       });
+      if (!res.ok) {
+        setError('Lưu bài thất bại, thử lại sau.');
+        return;
+      }
       loadPosts();
+    } catch {
+      setError('Không kết nối được máy chủ, thử lại sau ít phút.');
     } finally {
       setSavingId(null);
     }
@@ -152,10 +158,18 @@ export function ContentPanel({ botId }: { botId: string | null | undefined }) {
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('Xóa bài viết này?')) return;
-    await fetch(`/api/content/${id}`, { method: 'DELETE' });
-    if (result?.id === id) setResult(null);
-    loadPosts();
-    loadUsage();
+    try {
+      const res = await fetch(`/api/content/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        setError('Xóa bài thất bại, thử lại sau.');
+        return;
+      }
+      if (result?.id === id) setResult(null);
+      loadPosts();
+      loadUsage();
+    } catch {
+      setError('Không kết nối được máy chủ, thử lại sau ít phút.');
+    }
   };
 
   if (!botId) {

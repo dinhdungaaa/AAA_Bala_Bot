@@ -1801,7 +1801,12 @@ export async function dbGetContentUsage(ownerKey: string, ym: string): Promise<n
 export async function dbIncrementContentUsage(ownerKey: string, ym: string): Promise<void> {
   const client = getRootSupabaseClient();
   if (!client) return;
-  const cur = await dbGetContentUsage(ownerKey, ym);
-  const { error } = await client.from("content_usage").upsert({ owner_key: ownerKey, ym, count: cur + 1 }, { onConflict: "owner_key,ym" });
-  if (error) console.warn("dbIncrementContentUsage:", error.message);
+  const { error } = await client.rpc("increment_content_usage", { p_owner_key: ownerKey, p_ym: ym });
+  if (error) {
+    console.warn("dbIncrementContentUsage rpc error, falling back:", error.message);
+    // Fallback pre-migration (hàm SQL chưa được tạo): đọc-rồi-ghi, không nguyên tử.
+    const cur = await dbGetContentUsage(ownerKey, ym);
+    const { error: upsertError } = await client.from("content_usage").upsert({ owner_key: ownerKey, ym, count: cur + 1 }, { onConflict: "owner_key,ym" });
+    if (upsertError) console.warn("dbIncrementContentUsage fallback:", upsertError.message);
+  }
 }
