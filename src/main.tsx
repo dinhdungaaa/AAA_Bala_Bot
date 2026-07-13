@@ -27,11 +27,11 @@ window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<
   }
 
   if (pathname.startsWith('/api')) {
-    const isLocal = window.location.hostname === 'localhost' || 
-                    window.location.hostname === '127.0.0.1' || 
+    const isLocal = window.location.hostname === 'localhost' ||
+                    window.location.hostname === '127.0.0.1' ||
                     window.location.hostname.startsWith('192.168.');
     const isProd = !isLocal;
-    
+
     if (isProd && window.location.pathname.includes('/balabot')) {
       const newUrl = `/balabot${pathname}${search}`;
       if (typeof input === 'string') {
@@ -40,6 +40,21 @@ window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<
         input = new URL(newUrl, window.location.origin);
       } else {
         input = new Request(newUrl, input as Request);
+      }
+    }
+
+    // Gắn session token (server tự ký lúc đăng nhập) để backend xác thực danh tính —
+    // thay cho việc tin header userId/email do client gửi (giả mạo được). Không đè nếu
+    // caller đã tự đặt Authorization.
+    const token = localStorage.getItem('sbAuthToken');
+    if (token) {
+      const authHeaders = new Headers(
+        (init && init.headers) ||
+        (typeof input === 'object' && input && 'headers' in input ? (input as Request).headers : undefined)
+      );
+      if (!authHeaders.has('Authorization')) {
+        authHeaders.set('Authorization', `Bearer ${token}`);
+        init = { ...(init || {}), headers: authHeaders };
       }
     }
   }

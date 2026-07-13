@@ -813,6 +813,15 @@ export default function App() {
   // Rehydrate Supabase Auth Session & Restore User Config
   useEffect(() => {
     const savedUser = localStorage.getItem("sbUser");
+    const savedToken = localStorage.getItem("sbAuthToken");
+    // Phiên cũ (đăng nhập trước khi có session token): không có token → backend coi là
+    // ẩn danh, mọi thao tác quản lý sẽ 401/403. Dọn phiên để buộc đăng nhập lại 1 lần,
+    // lấy token mới. Tránh trải nghiệm "đăng nhập rồi mà không thấy bot".
+    if (savedUser && !savedToken) {
+      localStorage.removeItem("sbUser");
+      localStorage.removeItem("sbConfigToken");
+      return;
+    }
     if (savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
@@ -1154,6 +1163,9 @@ export default function App() {
       if (res.ok && data.success) {
         setSbUser(data.user);
         localStorage.setItem("sbUser", JSON.stringify(data.user));
+        // Session token server tự ký — bằng chứng danh tính cho mọi request sau này
+        // (fetch interceptor tự gắn Authorization: Bearer). Thiếu nó = coi như ẩn danh.
+        if (data.sessionToken) localStorage.setItem("sbAuthToken", data.sessionToken);
         // Token khôi phục cấu hình Supabase riêng (bắt buộc khi gọi /config/retrieve)
         if (data.configToken) localStorage.setItem("sbConfigToken", data.configToken);
         if (data.user.email === ADMIN_EMAIL) {
@@ -1252,6 +1264,7 @@ export default function App() {
     localStorage.removeItem("sbUrl");
     localStorage.removeItem("sbKey");
     localStorage.removeItem("sbConfigToken");
+    localStorage.removeItem("sbAuthToken");
     alert('Đăng xuất tài khoản Supabase Auth thành công.');
   };
 

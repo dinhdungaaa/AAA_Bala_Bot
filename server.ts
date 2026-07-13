@@ -198,7 +198,73 @@ function makeConfigToken(email: string): string {
   return crypto.createHmac("sha256", CONFIG_TOKEN_SECRET).update(email.trim().toLowerCase()).digest("hex");
 }
 
+// ===== Session token do SERVER ký (chống giả mạo danh tính qua header) =====
+// Trước đây danh tính chỉ dựa header x-balabot-user-id/email do frontend gửi — ai
+// cũng đặt được → giả admin/chủ bot. Nay khi đăng nhập thành công (đã xác thực mật
+// khẩu qua Supabase), server phát 1 token HMAC gắn {userId,email,exp}. Client KHÔNG
+// ký được (không có secret), nên token là bằng chứng danh tính đáng tin duy nhất.
+// Dùng HMAC tự ký (không phải JWT Supabase) vì frontend không giữ phiên Supabase để
+// tự refresh — JWT Supabase hết hạn ~1h sẽ đá người dùng ra; token này hạn 30 ngày.
+const SESSION_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function b64urlEncode(s: string): string {
+  return Buffer.from(s, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64urlDecode(s: string): string {
+  return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+}
+function makeSessionToken(userId: string, email: string): string {
+  const payload = b64urlEncode(JSON.stringify({
+    uid: String(userId || ""),
+    em: String(email || "").trim().toLowerCase(),
+    exp: Date.now() + SESSION_TOKEN_TTL_MS,
+  }));
+  const sig = crypto.createHmac("sha256", CONFIG_TOKEN_SECRET).update(payload).digest("hex");
+  return `${payload}.${sig}`;
+}
+function verifySessionToken(token: string): { userId: string; email: string } | null {
+  if (!token || typeof token !== "string" || token.indexOf(".") < 0) return null;
+  const dot = token.indexOf(".");
+  const payload = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  if (!payload || !sig) return null;
+  const expected = crypto.createHmac("sha256", CONFIG_TOKEN_SECRET).update(payload).digest("hex");
+  if (sig.length !== expected.length) return null;
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+    const data = JSON.parse(b64urlDecode(payload));
+    if (!data || typeof data.exp !== "number" || Date.now() > data.exp) return null;
+    return { userId: String(data.uid || ""), email: String(data.em || "").toLowerCase() };
+  } catch {
+    return null;
+  }
+}
+function getRequestAuthToken(req: express.Request): string {
+  const auth = (req.headers["authorization"] || "").toString();
+  if (auth.startsWith("Bearer ")) return auth.slice(7).trim();
+  return (req.headers["x-balabot-auth"] || "").toString().trim();
+}
+// Danh tính ĐÁNG TIN (đã verify token). Cache theo request để khỏi verify nhiều lần.
+function getTrustedIdentity(req: express.Request): { userId: string; email: string } | null {
+  const cached = (req as any)._balabotAuth;
+  if (cached !== undefined) return cached;
+  const tok = getRequestAuthToken(req);
+  const id = tok ? verifySessionToken(tok) : null;
+  (req as any)._balabotAuth = id;
+  return id;
+}
+function getTrustedEmail(req: express.Request): string {
+  return getTrustedIdentity(req)?.email || "";
+}
+function getTrustedUserId(req: express.Request): string {
+  return getTrustedIdentity(req)?.userId || "";
+}
+
+// Email hiển thị/không nhạy cảm: ưu tiên token, lùi về header (dùng cho gợi ý cấu hình,
+// pre-auth như chính lúc đăng nhập). CÁC CỔNG BẢO MẬT phải dùng getTrustedEmail.
 function getRequestUserEmail(req: express.Request) {
+  const trusted = getTrustedEmail(req);
+  if (trusted) return trusted;
   return (
     req.headers["x-balabot-user-email"] ||
     req.body?.adminEmail ||
@@ -208,29 +274,32 @@ function getRequestUserEmail(req: express.Request) {
 }
 
 function requireOwnerAdmin(req: express.Request, res: express.Response) {
-  if (getRequestUserEmail(req) === ADMIN_EMAIL) return true;
+  // Admin CHỈ nhận danh tính từ session token — trước đây chỉ so header email nên
+  // ai đặt x-balabot-user-email = owner cũng thành admin.
+  if (getTrustedEmail(req) === ADMIN_EMAIL) return true;
   res.status(403).json({ error: "Chỉ tài khoản owner ox102.crypto@gmail.com được truy cập admin CRM." });
   return false;
 }
 
-// Yêu cầu user đã đăng nhập (bất kỳ ai có email hợp lệ). Trả về email, hoặc null nếu chưa đăng nhập.
+// Yêu cầu user đã đăng nhập — CHỈ chấp nhận danh tính từ session token (không tin
+// header). Trả về email, hoặc null (đã gửi 401) nếu chưa đăng nhập/thiếu token.
 function requireSignedInUser(req: express.Request, res: express.Response): string | null {
-  const email = getRequestUserEmail(req);
+  const email = getTrustedEmail(req);
   if (!email) {
-    res.status(401).json({ error: "Cần đăng nhập để dùng tính năng Zalo." });
+    res.status(401).json({ error: "Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại." });
     return null;
   }
   return email;
 }
 
-// Danh tính chủ bot theo header dashboard (x-balabot-user-id) — cùng nguồn với
-// middleware khóa /api/bots/:id bên dưới.
+// Danh tính chủ bot — CHỈ lấy từ session token đã verify (không tin header
+// x-balabot-user-id nữa, vì client giả được). Dùng cho mọi so khớp quyền sở hữu.
 function getRequestUserId(req: express.Request): string {
-  return (req.headers["x-balabot-user-id"] || req.query.userId || "").toString().trim();
+  return getTrustedUserId(req);
 }
 
 function isRequestAdmin(req: express.Request): boolean {
-  return getRequestUserEmail(req) === ADMIN_EMAIL;
+  return getTrustedEmail(req) === ADMIN_EMAIL;
 }
 
 // Bot có chủ (userId) thì chỉ chủ đó hoặc admin được dùng; bot cũ chưa gắn chủ thì
@@ -282,7 +351,10 @@ function getRequestConfig(req: express.Request): { url: string; key: string } | 
   const key = (req.headers["x-balabot-supabase-key"] || "").toString().trim();
   if (url && key) return { url, key };
 
-  const email = (req.headers["x-balabot-user-email"] || "").toString().trim().toLowerCase();
+  // Chọn BYO Supabase theo email CHỈ khi email đã được token xác thực — nếu tin header
+  // thô, kẻ giả email nạn nhân sẽ khiến request chạy trên DB của nạn nhân (rò dữ liệu ở
+  // các route không gắn botId). Lúc đăng nhập (chưa có token) đi qua getAuthBodySupabaseConfig.
+  const email = getTrustedEmail(req);
   if (email) {
     const userConfig = byoUserConfigs[email];
     if (userConfig?.url && userConfig?.key) return userConfig;
@@ -341,8 +413,8 @@ app.use(async (req, res, next) => {
     // Bot không tồn tại → để handler tự 404; bot cũ chưa gắn chủ → không khóa được.
     if (!bot || !bot.userId) return next();
 
-    const requesterId = (req.headers["x-balabot-user-id"] || req.query.userId || "").toString().trim();
-    if (requesterId === bot.userId || getRequestUserEmail(req) === ADMIN_EMAIL) return next();
+    // Danh tính từ session token đã verify (không tin header x-balabot-user-id nữa).
+    if (getTrustedUserId(req) === bot.userId || isRequestAdmin(req)) return next();
     return res.status(403).json({ error: "Bạn không có quyền truy cập bot này. Vui lòng tải lại trang (Ctrl+Shift+R) rồi đăng nhập lại." });
   } catch (e: any) {
     // Fail-open: lỗi DB không được đánh sập toàn bộ API bot.
@@ -767,9 +839,9 @@ app.get("/api/supabase/config", async (req, res) => {
   const config = getSupabaseConfig();
   const status = await testConnection();
   // SECURITY: never expose the raw Supabase key (service_role) to anonymous/
-  // non-owner callers. Only the owner (authenticated via x-balabot-user-email)
-  // gets the raw key to pre-fill the admin panel; everyone else gets a masked view.
-  const isOwner = getRequestUserEmail(req) === ADMIN_EMAIL;
+  // non-owner callers. Chỉ owner ĐÃ VERIFY TOKEN mới lấy key thô để prefill panel;
+  // trước đây so header email nên kẻ giả header lấy được service_role key.
+  const isOwner = getTrustedEmail(req) === ADMIN_EMAIL;
   const safeConfig = isOwner
     ? config
     : { url: config.url, key: "", keyMasked: config.keyMasked, isConfigured: config.isConfigured };
@@ -790,7 +862,7 @@ app.post("/api/supabase/config", async (req, res) => {
     if (!email) {
       // Đổi DB mặc định của CẢ server — chỉ owner (hoặc bootstrap) được phép. Nếu để
       // mở, một request ẩn danh có thể chuyển hướng dữ liệu mặc định của mọi khách sang DB lạ.
-      if (!bootstrapAllowed && getRequestUserEmail(req) !== ADMIN_EMAIL) {
+      if (!bootstrapAllowed && getTrustedEmail(req) !== ADMIN_EMAIL) {
         return res.status(403).json({ success: false, error: "Cần đăng nhập để lưu cấu hình Supabase theo tài khoản." });
       }
       updateDynamicConfig(url, key);
@@ -849,10 +921,11 @@ app.get("/api/supabase/config/retrieve", async (req, res) => {
 app.post("/api/supabase/sync", async (req, res) => {
   // Chỉ đồng bộ dữ liệu THUỘC user đang gọi — mảng in-memory chứa dữ liệu của
   // mọi tenant, đổ nguyên xi vào Supabase của một khách là rò dữ liệu chéo.
-  const userId = (req.body?.userId || "").toString().trim();
-  const isOwner = getRequestUserEmail(req) === ADMIN_EMAIL;
+  const isOwner = getTrustedEmail(req) === ADMIN_EMAIL;
+  // Không tin userId body cho user thường — lấy từ token để không đồng bộ hộ người khác.
+  const userId = isOwner ? (req.body?.userId || "").toString().trim() : getTrustedUserId(req);
   if (!isOwner && !userId) {
-    return res.status(400).json({ success: false, message: "Thiếu userId — vui lòng đăng nhập lại rồi bấm đồng bộ.", counts: {} });
+    return res.status(401).json({ success: false, message: "Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại rồi bấm đồng bộ.", counts: {} });
   }
   const syncBots = userId ? bots.filter(b => b.userId === userId) : bots; // owner không truyền userId = đồng bộ tất cả
   const botIds = new Set(syncBots.map(b => b.id));
@@ -928,7 +1001,7 @@ app.post("/api/supabase/auth/signup", async (req, res) => {
       }
     }
 
-    res.status(201).json({ ...result, configToken: makeConfigToken(email) });
+    res.status(201).json({ ...result, configToken: makeConfigToken(email), sessionToken: makeSessionToken(userId, email) });
   } else {
     res.status(400).json(result);
   }
@@ -979,7 +1052,7 @@ app.post("/api/supabase/auth/signin", async (req, res) => {
       }
     }
 
-    res.json({ ...result, configToken: makeConfigToken(email) });
+    res.json({ ...result, configToken: makeConfigToken(email), sessionToken: makeSessionToken(userId, email) });
   } else {
     res.status(400).json(result);
   }
@@ -1125,19 +1198,21 @@ Nội dung chính của tài liệu ${baseName}:
 
 // Bots API
 app.get("/api/bots", async (req, res) => {
-  const userId = req.query.userId as string;
   const allBots = await dbGetBots(bots);
-  
-  if (userId) {
-    // If a user is logged in, hide system demo prefilled bots (with no userId or system bot IDs)
-    // and show only bots they have registered/created.
-    const userBots = allBots.filter(b => b.userId === userId);
-    return res.json(userBots);
+
+  // Danh tính từ session token là nguồn đáng tin. Trước đây lọc theo ?userId= thô nên
+  // ai biết userId nạn nhân là liệt kê được bot của họ (kèm token kênh). Admin được
+  // xem bot của user khác qua ?userId=; user thường chỉ thấy bot của chính mình.
+  const trustedId = getTrustedUserId(req);
+  const isAdmin = isRequestAdmin(req);
+  const targetId = isAdmin ? ((req.query.userId as string) || trustedId) : trustedId;
+
+  if (!targetId) {
+    // Không có token hợp lệ → không lộ bot của bất kỳ ai.
+    return res.json([]);
   }
-  
-  // Never expose every customer's bots to anonymous/identity-less requests.
-  // Admin can still retrieve all bots by sending the admin userId/email above.
-  res.json([]);
+  const userBots = allBots.filter(b => b.userId === targetId);
+  res.json(userBots);
 });
 
 app.get("/api/bots/:id", async (req, res) => {
@@ -1459,13 +1534,13 @@ app.post("/api/payments/orders", async (req, res) => {
   const ip = cfIp || realIp || forwardedIp || req.socket.remoteAddress || "?";
   if (!paymentAllow(ip)) return res.status(429).json({ error: "Anh/chị thao tác hơi nhanh, chờ chút rồi thử lại nhé." });
 
-  const { tier, months, userId, email, amountOverride } = req.body || {};
+  const { tier, months, email, amountOverride } = req.body || {};
   if (tier !== "starter" && tier !== "pro") return res.status(400).json({ error: "Gói không hợp lệ." });
   if (months !== 1 && months !== 12) return res.status(400).json({ error: "Chu kỳ không hợp lệ." });
-  const uid = String(userId || "").trim();
-  if (!uid) return res.status(400).json({ error: "Vui lòng đăng nhập để nâng gói." });
-  const headerUid = (req.headers["x-balabot-user-id"] || "").toString().trim();
-  if (headerUid && headerUid !== uid) return res.status(403).json({ error: "Thông tin tài khoản không khớp — vui lòng tải lại trang và đăng nhập lại." });
+  // Đơn gắn với chủ tài khoản LẤY TỪ token (không tin userId body/header) để không ai
+  // tạo/đổi gói hộ người khác.
+  const uid = getTrustedUserId(req);
+  if (!uid) return res.status(401).json({ error: "Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại để nâng gói." });
 
   const env = SEPAY_ENV();
   if (!env.bankAccount || !env.bankCode) {
@@ -1643,6 +1718,13 @@ app.post("/api/admin/free-allowlist/bulk", async (req, res) => {
 
 app.post("/api/bots", async (req, res) => {
   const botData = req.body;
+  // Chủ bot LẤY TỪ token (không tin userId client gửi) để quyền sở hữu luôn khớp danh
+  // tính thật. Admin được tạo hộ cho user khác qua body.userId.
+  const trustedId = getTrustedUserId(req);
+  if (!trustedId && !isRequestAdmin(req)) {
+    return res.status(401).json({ error: "Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại." });
+  }
+  botData.userId = isRequestAdmin(req) ? (botData.userId || trustedId) : trustedId;
   if (!botData.userId) {
     return res.status(400).json({ error: "Missing userId. Bot must belong to the signed-in user." });
   }
