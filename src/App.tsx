@@ -142,6 +142,7 @@ export default function App() {
     recent: Array<{ id: string; email: string | null; tier: string; months: number; amount: number; paidAt: string }>;
   }>(null);
   const [sbAuthMode, setSbAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [googleEnabled, setGoogleEnabled] = useState(false);
   const [sbAuthLoading, setSbAuthLoading] = useState(false);
   const [sbAuthError, setSbAuthError] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -695,6 +696,32 @@ export default function App() {
     return () => window.removeEventListener('message', onFbOauthMessage);
   }, [selectedBotId]);
 
+  // Nhận kết quả đăng nhập Google từ popup OAuth → áp phiên như đăng nhập thường.
+  useEffect(() => {
+    const onGoogleAuthMessage = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return; // chỉ nhận từ chính origin app
+      const data = e.data;
+      if (!data || data.type !== 'balabot-google-auth') return;
+      if (data.success && data.sessionToken && data.user) {
+        applyAuthSuccess(data);
+        setShowAuthModal(false);
+        setSbAuthError('');
+      } else {
+        setSbAuthError(data.message || 'Đăng nhập Google thất bại. Vui lòng thử lại.');
+      }
+    };
+    window.addEventListener('message', onGoogleAuthMessage);
+    return () => window.removeEventListener('message', onGoogleAuthMessage);
+  }, []);
+
+  // Chỉ hiện nút Google khi server đã cấu hình GOOGLE_CLIENT_ID/SECRET.
+  useEffect(() => {
+    fetch('/api/auth/google/enabled')
+      .then(r => r.json())
+      .then(d => setGoogleEnabled(!!d.enabled))
+      .catch(() => setGoogleEnabled(false));
+  }, []);
+
   // Nạp mức dùng tháng này của user đăng nhập (thẻ usage + nâng gói).
   useEffect(() => {
     if (!sbUser?.id) { setUsage(null); return; }
@@ -1130,6 +1157,109 @@ export default function App() {
       alert('Có lỗi xảy ra: ' + err.message);
     }
   };
+
+  // Áp phiên đăng nhập thành công (dùng chung cho form email/mật khẩu VÀ Google popup).
+  // data: { user:{id,email}, sessionToken, configToken }.
+  const applyAuthSuccess = (data: any) => {
+    setSbUser(data.user);
+    localStorage.setItem("sbUser", JSON.stringify(data.user));
+    if (data.sessionToken) localStorage.setItem("sbAuthToken", data.sessionToken);
+    if (data.configToken) localStorage.setItem("sbConfigToken", data.configToken);
+    if (data.user.email === ADMIN_EMAIL) {
+      setActiveTab('admin');
+    } else {
+      setActiveTab('dashboard');
+    }
+
+    if (data.user.email) {
+      const savedUrl = localStorage.getItem("sbUrl");
+      const savedKey = localStorage.getItem("sbKey");
+
+      const onSigninConfigRestored = (url: string, key: string, status: any) => {
+        setSbUrl(url);
+        setSbKey(key);
+        setSbStatus(status);
+        localStorage.setItem("sbUrl", url);
+        localStorage.setItem("sbKey", key);
+        fetchBots(data.user.id);
+      };
+
+      const activateSigninConfig = (url: string, key: string) => {
+        fetch('/api/supabase/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, key, email: data.user.email })
+        })
+        .then(r => r.json())
+        .then(actData => { if (actData.success) onSigninConfigRestored(url, key, actData.status); });
+      };
+
+      fetch(`/api/supabase/config/retrieve?email=${encodeURIComponent(data.user.email)}&token=${encodeURIComponent(data.configToken || '')}`)
+        .then(r => r.json())
+        .then(configData => {
+          if (configData.success && configData.url && configData.key) {
+            activateSigninConfig(configData.url, configData.key);
+          } else if (savedUrl && savedKey) {
+            activateSigninConfig(savedUrl, savedKey);
+          } else {
+            fetch('/api/supabase/config')
+              .then(r => r.json())
+              .then(serverCfg => {
+                if (serverCfg.config?.isConfigured && serverCfg.status?.connected) {
+                  setSbUrl(serverCfg.config.url);
+                  setSbKey(serverCfg.config.key);
+                  setSbStatus(serverCfg.status);
+                  fetchBots(data.user.id);
+                }
+              });
+          }
+        })
+        .catch(err => {
+          console.error("Error retrieving user config upon signin", err);
+          if (savedUrl && savedKey) activateSigninConfig(savedUrl, savedKey);
+          else fetchBots(data.user.id);
+        });
+    }
+  };
+
+  // Mở popup đăng nhập Google. Kết quả trả qua postMessage (listener bên dưới).
+  const handleGoogleLogin = () => {
+    setSbAuthError('');
+    const isLocal = window.location.hostname === 'localhost' ||
+                    window.location.hostname === '127.0.0.1' ||
+                    window.location.hostname.startsWith('192.168.');
+    const prefix = (!isLocal && window.location.pathname.includes('/balabot')) ? '/balabot' : '';
+    const url = `${prefix}/api/auth/google/start`;
+    const w = 480, h = 640;
+    const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
+    const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
+    window.open(url, 'balabot-google-login', `width=${w},height=${h},left=${left},top=${top}`);
+  };
+
+  // Nút "Đăng nhập bằng Google" + phân cách — dùng chung cho các form đăng nhập.
+  // Ẩn khi server chưa bật (chưa cấu hình GOOGLE_CLIENT_ID/SECRET) để tránh nút hỏng.
+  const renderGoogleButton = () => !googleEnabled ? null : (
+    <>
+      <div className="flex items-center gap-3 my-3">
+        <div className="flex-1 h-px bg-slate-300/40" />
+        <span className="text-[10px] text-slate-400 uppercase tracking-wider">hoặc</span>
+        <div className="flex-1 h-px bg-slate-300/40" />
+      </div>
+      <button
+        type="button"
+        onClick={handleGoogleLogin}
+        className="w-full py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl border border-slate-300 flex items-center justify-center gap-2 cursor-pointer transition-all shadow-sm"
+      >
+        <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
+          <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/>
+          <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/>
+          <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.166-4.087 5.571.001-.001.002-.001.003-.002l6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/>
+        </svg>
+        Đăng nhập bằng Google
+      </button>
+    </>
+  );
 
   const handleSbAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2098,6 +2228,8 @@ export default function App() {
                     </button>
                   </form>
                 )}
+
+                {renderGoogleButton()}
 
                 <div className="mt-5 text-[10px] text-slate-500 text-center flex items-center justify-center gap-1.5 bg-slate-950/30 p-2.5 rounded-lg border border-slate-800/50">
                   <Database className="w-3.5 h-3.5 text-emerald-500" />
@@ -4990,6 +5122,7 @@ export default function App() {
                             )}
                           </button>
                         </form>
+                        {renderGoogleButton()}
                       </div>
                     </div>
                   </div>
@@ -7638,6 +7771,7 @@ WHERE email = 'customer-email@example.com';`}
                 Nhập email chính chủ để đồng bộ hóa và quản trị hệ thống bot tri thức của riêng bạn.
               </div>
             </form>
+            {renderGoogleButton()}
           </div>
         </div>
       )}

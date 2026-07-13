@@ -17,6 +17,10 @@ import {
   signOAuthState, verifyOAuthState, buildOAuthDialogUrl, verifyFacebookSignature,
   groupMessagingEventsByPage, randomToken, renderOAuthResultHtml, renderPageSelectionHtml,
 } from "./facebookOauth.js";
+import {
+  signGoogleState, verifyGoogleState, buildGoogleAuthUrl, verifyGoogleIdToken,
+  renderGoogleAuthResultHtml, type GoogleJwk,
+} from "./googleOauth.js";
 import { parseBridgePayload, buildBridgeResponse } from "./botcakeBridge.js";
 import { buildSendContentRequest } from "./botcakeAsync.js";
 import { TOP_K, RETRIEVE_FLOOR } from "./rag/constants.js";
@@ -3839,6 +3843,185 @@ app.post("/api/facebook-oauth/select", express.urlencoded({ extended: false }), 
   }
 });
 
+// ===== Đăng nhập dashboard bằng Google (OAuth code flow ở server) =====
+function getGoogleCreds() {
+  const clientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
+  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || "").trim();
+  return { clientId, clientSecret, configured: !!(clientId && clientSecret) };
+}
+const GOOGLE_STATE_SECRET = (process.env.OAUTH_STATE_SECRET || CONFIG_TOKEN_SECRET).trim();
+
+// Cache JWKS Google (~1h) để verify id_token mà không fetch mỗi lần đăng nhập.
+let googleCertsCache: { certs: GoogleJwk[]; exp: number } | null = null;
+async function fetchGoogleCerts(): Promise<GoogleJwk[]> {
+  if (googleCertsCache && Date.now() < googleCertsCache.exp) return googleCertsCache.certs;
+  const res = await fetch("https://www.googleapis.com/oauth2/v3/certs");
+  const data: any = await res.json();
+  const certs: GoogleJwk[] = Array.isArray(data?.keys) ? data.keys : [];
+  googleCertsCache = { certs, exp: Date.now() + 60 * 60 * 1000 };
+  return certs;
+}
+
+// Bổ sung user vào các danh sách phiên (workspace/CRM) — dùng chung cho Google login,
+// giống nhánh trong signin. Không đụng gói/tier của khách đã có.
+function ensureUserSessionRecords(userId: string, email: string) {
+  const freshEmail = email.toLowerCase();
+  const isOwner = freshEmail === ADMIN_EMAIL;
+  if (!workspaceUsers.some(u => u.email.toLowerCase() === freshEmail)) {
+    workspaceUsers.push({
+      id: userId,
+      email,
+      fullName: email.split("@")[0],
+      avatarUrl: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150`,
+      role: (isOwner ? "owner" : "viewer") as "owner" | "admin" | "editor" | "viewer",
+      workspace: isOwner ? "AAA Workspace" : `${email.split("@")[0]}'s Workspace`,
+    });
+  }
+  const existing = saasCustomers.find(c => c.email.toLowerCase() === freshEmail);
+  if (!existing) {
+    saasCustomers.push(normalizeCustomerRecord({
+      id: userId, name: email.split("@")[0], email,
+      phone: "Chưa cập nhật",
+      tier: isOwner ? "enterprise" : "free",
+      messageLimit: isOwner ? 250000 : 1000,
+      joinedDate: new Date().toLocaleDateString("vi-VN"),
+      passwordSet: false, lastLoginAt: new Date().toISOString(),
+    }));
+    saveSaasCustomers();
+  } else {
+    existing.lastLoginAt = new Date().toISOString();
+    saveSaasCustomers();
+  }
+}
+
+// Hợp nhất danh tính theo email: user Supabase đã có → dùng lại id (cùng bot với tài
+// khoản mật khẩu); chưa có → tạo mới (email_confirm) + upsert profiles. Không có Supabase
+// (dev) → id suy diễn từ email để phiên vẫn chạy.
+async function findOrCreateGoogleUser(email: string, name: string): Promise<string | null> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return `google-${crypto.createHash("sha256").update(email).digest("hex").slice(0, 24)}`;
+  }
+  const lc = email.toLowerCase();
+  try {
+    for (let page = 1; page <= 5; page++) {
+      const { data } = await (client as any).auth.admin.listUsers({ page, perPage: 200 });
+      const users = data?.users || [];
+      const hit = users.find((u: any) => (u.email || "").toLowerCase() === lc);
+      if (hit?.id) return hit.id;
+      if (users.length < 200) break;
+    }
+  } catch (e: any) {
+    console.warn("[Google OAuth] listUsers lỗi:", e?.message || e);
+  }
+  try {
+    const isOwner = lc === ADMIN_EMAIL;
+    const { data, error } = await client.auth.admin.createUser({
+      email: lc, email_confirm: true,
+      user_metadata: { full_name: name || lc.split("@")[0] },
+    });
+    if (!error && data.user?.id) {
+      try {
+        await client.from("profiles").insert({
+          id: data.user.id, email: lc, full_name: name || lc.split("@")[0],
+          phone: "Chưa cập nhật", tier: isOwner ? "enterprise" : "free",
+          message_limit: isOwner ? 250000 : 1000, created_at: new Date().toISOString(),
+        });
+      } catch { /* bảng profiles có thể chưa tạo → bỏ qua */ }
+      return data.user.id;
+    }
+    // Có thể vừa bị tạo song song (email đã tồn tại) → tra lại lần nữa.
+    if (error) {
+      const { data: retry } = await (client as any).auth.admin.listUsers({ page: 1, perPage: 200 });
+      const hit = (retry?.users || []).find((u: any) => (u.email || "").toLowerCase() === lc);
+      if (hit?.id) return hit.id;
+      console.warn("[Google OAuth] createUser lỗi:", error.message);
+    }
+  } catch (e: any) {
+    console.warn("[Google OAuth] createUser exception:", e?.message || e);
+  }
+  return null;
+}
+
+// Cờ để frontend ẩn/hiện nút Google (tránh hiện nút hỏng khi owner chưa cấu hình env).
+app.get("/api/auth/google/enabled", (_req, res) => {
+  res.json({ enabled: getGoogleCreds().configured });
+});
+
+// Bước 1: mở popup vào đây → chuyển tới màn consent Google.
+app.get("/api/auth/google/start", (req, res) => {
+  const { clientId, configured } = getGoogleCreds();
+  if (!configured) {
+    return res.status(400).send(renderGoogleAuthResultHtml({
+      success: false, targetOrigin: "*",
+      message: "Server chưa bật đăng nhập Google (thiếu GOOGLE_CLIENT_ID/SECRET). Liên hệ quản trị viên BalaBot.",
+    }));
+  }
+  const redirectUri = `${getPublicBaseUrl(req)}/api/auth/google/callback`;
+  const state = signGoogleState(GOOGLE_STATE_SECRET);
+  return res.redirect(buildGoogleAuthUrl({ clientId, redirectUri, state }));
+});
+
+// Bước 2: Google redirect về đây với ?code&state → verify → mint session token.
+app.get("/api/auth/google/callback", async (req, res) => {
+  const host = (req.headers["x-forwarded-host"] || req.headers.host || "").toString();
+  const proto = (req.headers["x-forwarded-proto"] || "https").toString().split(",")[0];
+  const appOrigin = host ? `${proto}://${host}` : "*";
+  const fail = (message: string, status = 400) =>
+    res.status(status).send(renderGoogleAuthResultHtml({ success: false, message, targetOrigin: appOrigin }));
+
+  const { clientId, clientSecret, configured } = getGoogleCreds();
+  if (!configured) return fail("Server chưa bật đăng nhập Google.");
+  if (req.query.error) return fail("Bạn đã hủy đăng nhập Google. Hãy thử lại nếu muốn tiếp tục.");
+  if (!verifyGoogleState(String(req.query.state || ""), GOOGLE_STATE_SECRET)) {
+    return fail("Phiên đăng nhập không hợp lệ hoặc đã quá 10 phút. Hãy đóng cửa sổ và bấm Đăng nhập bằng Google lại.");
+  }
+  const code = String(req.query.code || "");
+  if (!code) return fail("Thiếu mã xác thực từ Google. Hãy thử lại.");
+
+  const redirectUri = `${getPublicBaseUrl(req)}/api/auth/google/callback`;
+  try {
+    // 1. code → token (kèm id_token).
+    const tokRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code, client_id: clientId, client_secret: clientSecret,
+        redirect_uri: redirectUri, grant_type: "authorization_code",
+      }).toString(),
+    });
+    const tok: any = await tokRes.json();
+    if (!tokRes.ok || !tok?.id_token) {
+      console.warn("[Google OAuth] Đổi code thất bại:", tok?.error_description || tok?.error || tokRes.status);
+      return fail("Không đổi được mã xác thực với Google. Hãy đóng cửa sổ và thử lại.");
+    }
+
+    // 2. Verify id_token bằng JWKS Google.
+    const certs = await fetchGoogleCerts();
+    const claims = verifyGoogleIdToken(tok.id_token, { clientId, certs });
+    if (!claims) return fail("Không xác thực được tài khoản Google (chữ ký/email chưa xác minh). Thử lại nhé.");
+
+    // 3. Hợp nhất danh tính theo email → userId.
+    const userId = await findOrCreateGoogleUser(claims.email, claims.name);
+    if (!userId) return fail("Không tạo được phiên đăng nhập. Vui lòng thử lại sau ít phút.");
+
+    ensureUserSessionRecords(userId, claims.email);
+
+    // 4. Phát session token + trả về dashboard qua postMessage.
+    const sessionToken = makeSessionToken(userId, claims.email);
+    const configToken = makeConfigToken(claims.email);
+    return res.status(200).send(renderGoogleAuthResultHtml({
+      success: true,
+      targetOrigin: appOrigin,
+      message: `Xin chào ${claims.name || claims.email}! Đang đưa bạn vào bảng điều khiển…`,
+      data: { sessionToken, configToken, user: { id: userId, email: claims.email } },
+    }));
+  } catch (err: any) {
+    console.error("[Google OAuth] Lỗi callback:", err?.message || err);
+    return fail("Có lỗi khi đăng nhập Google. Hãy đóng cửa sổ và thử lại.", 500);
+  }
+});
+
 // Webhook CHUNG cho app Meta của BalaBot (Meta chỉ cho 1 callback URL/app).
 // Route theo entry[].id (Page ID) → bot có facebookPageId tương ứng.
 app.get("/api/facebook-webhook", (req, res) => {
@@ -3955,6 +4138,11 @@ app.post("/api/facebook-webhook/:botId", async (req, res) => {
 // /balabot/api/* về Railway) forward được; đồng thời không bị catch-all SPA nuốt.
 app.get("/api/huong-dan-botcake", (_req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "guide-botcake.html"));
+});
+
+// Hướng dẫn quản trị bật đăng nhập Google (tạo OAuth client + điền env).
+app.get("/api/huong-dan-google-login", (_req, res) => {
+  res.sendFile(path.join(process.cwd(), "public", "guide-google-login.html"));
 });
 
 // Health check cho uptime pinger (giu Render thuc khi chay listener Zalo).

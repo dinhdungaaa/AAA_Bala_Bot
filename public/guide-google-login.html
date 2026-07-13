@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bật đăng nhập Google cho BalaBot — hướng dẫn quản trị</title>
+<style>
+  :root {
+    --ground: #f5f8f5; --surface: #ffffff; --surface-sunk: #eef3ee;
+    --ink: #16241d; --ink-soft: #4a5a51; --ink-faint: #7a8a80; --line: #dde6de;
+    --brand: #12a150; --brand-deep: #0c7d3d; --brand-wash: #e7f5ec;
+    --g: #2563eb; --g-wash: #e6edfd; --code-bg: #14241d; --code-ink: #d7efe0;
+    --radius: 14px; --shadow: 0 1px 2px rgba(20,36,29,.05), 0 8px 24px -12px rgba(20,36,29,.18);
+    --maxw: 680px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0e1512; --surface: #151e1a; --surface-sunk: #101815;
+      --ink: #e8f0ea; --ink-soft: #a6b6ac; --ink-faint: #74857a; --line: #26332c;
+      --brand: #34c874; --brand-deep: #2bb267; --brand-wash: #12281c;
+      --g: #6d9bff; --g-wash: #16233f; --code-bg: #0a110d; --code-ink: #cfe9d9;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.6);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 40px 20px 80px; }
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--brand-deep); }
+  @media (prefers-color-scheme: dark) { .eyebrow { color: var(--brand); } }
+  h1 { font-size: clamp(1.7rem, 5vw, 2.3rem); line-height: 1.15; margin: 10px 0 12px; letter-spacing: -.02em; text-wrap: balance; }
+  .lede { font-size: 1.05rem; color: var(--ink-soft); margin: 0 0 22px; max-width: 56ch; }
+  .callout { padding: 14px 16px; background: var(--g-wash); border: 1px solid var(--line); border-radius: var(--radius); font-size: .92rem; color: var(--ink-soft); }
+  .callout b { color: var(--ink); }
+  .steps { display: flex; flex-direction: column; gap: 16px; margin-top: 22px; }
+  .step { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 22px 22px 64px; }
+  .step .num { position: absolute; left: 18px; top: 20px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; font-weight: 800; font-size: .95rem; color: #fff; background: var(--g); }
+  .step h2 { font-size: 1.12rem; margin: 0 0 8px; letter-spacing: -.01em; }
+  .step p { margin: 0 0 4px; color: var(--ink-soft); font-size: .96rem; }
+  .step ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-soft); font-size: .95rem; }
+  .step li { margin: 4px 0; }
+  .step li strong, .step p strong { color: var(--ink); font-weight: 650; }
+  kbd { font: inherit; font-size: .86em; font-weight: 600; background: var(--surface-sunk); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; color: var(--ink); white-space: nowrap; }
+  .code { position: relative; margin-top: 12px; background: var(--code-bg); border-radius: 10px; overflow: hidden; }
+  .code-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 8px 14px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .code-bar span { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: rgba(215,239,224,.6); }
+  .code pre { margin: 0; padding: 14px; overflow-x: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .85rem; line-height: 1.7; color: var(--code-ink); }
+  .copy { font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06); color: #eafaf0; padding: 5px 12px; border-radius: 7px; }
+  .copy:hover { background: rgba(255,255,255,.14); }
+  .copy.done { color: #7ff0ae; }
+  .note { margin-top: 12px; font-size: .88rem; color: var(--ink-faint); border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
+  footer { margin-top: 34px; text-align: center; color: var(--ink-faint); font-size: .84rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">BalaBot · Quản trị</div>
+    <h1>Bật đăng nhập bằng Google</h1>
+    <p class="lede">Dành cho <b>quản trị viên</b>. Làm một lần (~10 phút): tạo OAuth client ở Google, điền 2 biến môi trường trên Railway. Xong là nút "Đăng nhập bằng Google" hoạt động cho mọi người.</p>
+    <div class="callout">Bạn cần: quyền vào <b>Google Cloud Console</b> (tài khoản Google bất kỳ) và quyền sửa <b>biến môi trường trên Railway</b> của BalaBot.</div>
+  </header>
+
+  <div class="steps">
+    <section class="step">
+      <div class="num">1</div>
+      <h2>Tạo dự án Google Cloud (nếu chưa có)</h2>
+      <ul>
+        <li>Mở <kbd>console.cloud.google.com</kbd> → đăng nhập.</li>
+        <li>Góc trên, bấm chọn dự án → <strong>New Project</strong> → đặt tên (vd "BalaBot") → Create.</li>
+      </ul>
+    </section>
+
+    <section class="step">
+      <div class="num">2</div>
+      <h2>Cấu hình màn hình xin quyền (OAuth consent screen)</h2>
+      <ul>
+        <li>Menu trái → <kbd>APIs &amp; Services</kbd> → <kbd>OAuth consent screen</kbd>.</li>
+        <li>Chọn <strong>External</strong> → Create. Điền: tên ứng dụng (vd "BalaBot"), email hỗ trợ, email liên hệ nhà phát triển.</li>
+        <li>Ở bước Scopes: thêm <kbd>.../auth/userinfo.email</kbd>, <kbd>.../auth/userinfo.profile</kbd>, <kbd>openid</kbd> (hoặc để mặc định — 3 scope này thường có sẵn).</li>
+        <li>Bước Test users: nếu để app ở chế độ "Testing", <strong>thêm email những người được phép đăng nhập</strong>. Muốn ai cũng đăng nhập được thì bấm <strong>Publish app</strong> (đưa về Production).</li>
+      </ul>
+      <p class="note">App ở "Testing" chỉ cho các email đã thêm vào Test users đăng nhập. Publish để mở cho mọi người (Google có thể yêu cầu xác minh nếu nhiều người dùng, nhưng đăng nhập vẫn chạy).</p>
+    </section>
+
+    <section class="step">
+      <div class="num">3</div>
+      <h2>Tạo OAuth Client ID</h2>
+      <ul>
+        <li><kbd>APIs &amp; Services</kbd> → <kbd>Credentials</kbd> → <strong>Create Credentials</strong> → <strong>OAuth client ID</strong>.</li>
+        <li>Application type: <strong>Web application</strong>.</li>
+        <li>Mục <strong>Authorized redirect URIs</strong> → Add URI, dán chính xác:</li>
+      </ul>
+      <div class="code">
+        <div class="code-bar"><span>Redirect URI (production)</span><button class="copy" type="button" data-copy="https://antiantiai.xyz/balabot/api/auth/google/callback">Copy</button></div>
+<pre>https://antiantiai.xyz/balabot/api/auth/google/callback</pre>
+      </div>
+      <p class="note">Nếu có chạy máy cục bộ để test, thêm cả <kbd>http://localhost:3000/api/auth/google/callback</kbd> (đổi 3000 theo cổng thật).</p>
+      <ul>
+        <li>Bấm <strong>Create</strong> → Google hiện <strong>Client ID</strong> và <strong>Client secret</strong>. Copy cả hai, giữ bí mật.</li>
+      </ul>
+    </section>
+
+    <section class="step">
+      <div class="num">4</div>
+      <h2>Điền biến môi trường trên Railway</h2>
+      <ul>
+        <li>Mở dự án BalaBot trên <kbd>railway.app</kbd> → tab <kbd>Variables</kbd>.</li>
+        <li>Thêm 2 biến rồi dán giá trị từ bước 3:</li>
+      </ul>
+      <div class="code">
+        <div class="code-bar"><span>Railway Variables</span><button class="copy" type="button" data-copy="GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=">Copy</button></div>
+<pre>GOOGLE_CLIENT_ID=&lt;client id từ Google&gt;
+GOOGLE_CLIENT_SECRET=&lt;client secret từ Google&gt;</pre>
+      </div>
+      <p class="note">Railway sẽ tự deploy lại sau khi lưu biến. Đợi ~1–2 phút cho dịch vụ khởi động lại.</p>
+    </section>
+
+    <section class="step">
+      <div class="num">5</div>
+      <h2>Kiểm tra</h2>
+      <ul>
+        <li>Mở lại trang đăng nhập BalaBot (Ctrl+Shift+R) → bấm <strong>Đăng nhập bằng Google</strong>.</li>
+        <li>Cửa sổ Google hiện ra → chọn tài khoản → tự đóng và vào bảng điều khiển là <strong>thành công 🎉</strong>.</li>
+      </ul>
+      <p class="note">Nếu báo "redirect_uri_mismatch": URI trong bước 3 chưa khớp tuyệt đối (kể cả dấu <kbd>/</kbd> cuối). Copy lại đúng URI ở bước 3. Nếu báo "access blocked": app đang Testing mà email chưa nằm trong Test users — thêm email hoặc Publish app.</p>
+    </section>
+  </div>
+
+  <footer>Cần hỗ trợ? Liên hệ đội BalaBot.</footer>
+</div>
+<script>
+  document.querySelectorAll(".copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      navigator.clipboard.writeText(btn.getAttribute("data-copy")).then(function () {
+        var old = btn.textContent; btn.textContent = "Đã copy ✓"; btn.classList.add("done");
+        setTimeout(function () { btn.textContent = old; btn.classList.remove("done"); }, 1800);
+      });
+    });
+  });
+</script>
+</body>
+</html>
