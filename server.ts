@@ -84,6 +84,8 @@ import {
   dbListContentPosts,
   dbUpdateContentPost,
   dbDeleteContentPost,
+  dbGetContentVoice,
+  dbSaveContentVoice,
   dbGetProfilePlan,
   dbUpdateProfilePlan,
   dbGetFreeAllowlist,
@@ -3649,6 +3651,10 @@ app.post("/api/bots/:botId/content/generate", async (req, res) => {
   const knowledge = ingredientsFromChunks(chunks as any, 6);
   const ingredients = [knowledge, extra].filter(Boolean).join("\n");
 
+  // Giọng viết riêng (tài liệu tham chiếu văn phong) → writingStyle để AI bắt chước.
+  // Cắt bớt để prompt không quá dài.
+  const voice = (await dbGetContentVoice(bot.id)).slice(0, 6000);
+
   // "auto" = ĐÚNG độ dài công thức của dạng bài (D5 bài trụ 1200-2000, D1 500-800...);
   // chỉ ghi đè khi user CHỌN rõ ngắn/vừa/dài. Trước đây auto = medium 150-300 → mọi
   // dạng bị cắt về 150-300 từ, phá công thức.
@@ -3659,6 +3665,7 @@ app.post("/api/bots/:botId/content/generate", async (req, res) => {
       {
         brand: brandFromBot(bot),
         topic, postType, goal, ingredients,
+        writingStyle: voice || undefined,
         lengthTarget,
       },
       { client: buildGeminiLlmClient(ai), economy: gate.limit <= CONTENT_LIMITS.free },
@@ -3684,6 +3691,19 @@ app.post("/api/bots/:botId/content/generate", async (req, res) => {
 app.get("/api/bots/:botId/content", async (req, res) => {
   const posts = await dbListContentPosts(req.params.botId);
   res.json(posts);
+});
+
+// Giọng viết riêng của bot (tài liệu tham chiếu văn phong). Middleware token đã bảo vệ.
+app.get("/api/bots/:botId/content/voice", async (req, res) => {
+  const voice = await dbGetContentVoice(req.params.botId);
+  res.json({ voice });
+});
+
+app.put("/api/bots/:botId/content/voice", async (req, res) => {
+  const voice = String(req.body?.voice || "").slice(0, 12000);
+  const ok = await dbSaveContentVoice(req.params.botId, voice);
+  if (!ok) return res.status(500).json({ error: "Lưu giọng viết thất bại, thử lại sau." });
+  res.json({ success: true });
 });
 
 app.get("/api/bots/:botId/content/usage", async (req, res) => {

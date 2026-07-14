@@ -1766,6 +1766,24 @@ export async function dbSaveContentPost(post: ContentPost): Promise<boolean> {
   return true;
 }
 
+// Giọng viết riêng theo bot (tài liệu tham chiếu văn phong). Dữ liệu của tenant → client scoped.
+export async function dbGetContentVoice(botId: string): Promise<string> {
+  const client = getSupabaseClient();
+  if (!client) return "";
+  const { data, error } = await client.from("content_voice").select("voice").eq("botId", botId).maybeSingle();
+  if (error) { console.warn("dbGetContentVoice:", error.message); return ""; }
+  return String((data as any)?.voice || "");
+}
+
+export async function dbSaveContentVoice(botId: string, voice: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("content_voice").upsert(
+    { botId, voice, updatedAt: new Date().toISOString() }, { onConflict: "botId" });
+  if (error) { console.warn("dbSaveContentVoice:", error.message); return false; }
+  return true;
+}
+
 export async function dbListContentPosts(botId: string): Promise<ContentPost[]> {
   const client = getSupabaseClient();
   if (!client) return [];

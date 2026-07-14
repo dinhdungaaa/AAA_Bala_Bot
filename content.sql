@@ -29,3 +29,10 @@ returns void language sql as $$
   on conflict (owner_key, ym)
   do update set count = content_usage.count + 1;
 $$;
+
+-- Giọng viết riêng / tài liệu tham chiếu văn phong theo từng bot (để AI bắt chước giọng).
+create table if not exists public.content_voice (
+  "botId" text primary key,
+  voice text,
+  "updatedAt" timestamptz default now()
+);
