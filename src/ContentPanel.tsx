@@ -188,7 +188,11 @@ export function ContentPanel({ botId }: { botId: string | null | undefined }) {
           <div className="flex items-center gap-2 text-sm text-slate-700">
             <Sparkles className="w-4 h-4 text-emerald-500" />
             {usage ? (
-              <span>Đã dùng <span className="font-bold">{usage.count}/{usage.limit}</span> bài tháng này</span>
+              usage.limit >= 100000 ? (
+                <span>Đã tạo <span className="font-bold">{usage.count}</span> bài tháng này · <span className="font-bold text-emerald-600">Không giới hạn</span></span>
+              ) : (
+                <span>Đã dùng <span className="font-bold">{usage.count}/{usage.limit}</span> bài tháng này</span>
+              )
             ) : (
               <span className="text-slate-400">Đang tải hạn mức...</span>
             )}

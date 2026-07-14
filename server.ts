@@ -3627,7 +3627,7 @@ app.post("/api/bots/:botId/content/generate", async (req, res) => {
   const bot = allBots.find(b => b.id === req.params.botId);
   if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
 
-  const gate = await checkContentGate(bot);
+  const gate = await checkContentGate(bot, getTrustedEmail(req));
   if (!gate.allowed) {
     return res.status(429).json({ error: "Bạn đã hết lượt tạo bài của gói tháng này. Nâng gói để tạo thêm.", gate });
   }
@@ -3685,7 +3685,7 @@ app.get("/api/bots/:botId/content/usage", async (req, res) => {
   const allBots = await dbGetBots(bots);
   const bot = allBots.find(b => b.id === req.params.botId);
   if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
-  const gate = await checkContentGate(bot);
+  const gate = await checkContentGate(bot, getTrustedEmail(req));
   res.json({ count: gate.count, limit: gate.limit, verdict: gate.verdict });
 });
 
@@ -5063,10 +5063,12 @@ async function recordUsageForBot(bot: BotConfig): Promise<void> {
 }
 
 // Kiểm tra hạn mức Content Studio TRƯỚC khi tạo bài. Fail-open: lỗi DB -> count=0 -> cho qua.
-async function checkContentGate(bot: BotConfig): Promise<{ allowed: boolean; verdict: "ok" | "warn" | "blocked"; count: number; limit: number }> {
+// emailHint: email đã verify từ token của người đăng nhập — cần để resolveOwnerPlan nhận
+// ra admin/gói theo email (chỉ có userId thì admin bị coi nhầm là Free = 5 bài).
+async function checkContentGate(bot: BotConfig, emailHint?: string): Promise<{ allowed: boolean; verdict: "ok" | "warn" | "blocked"; count: number; limit: number }> {
   const ownerKey = bot.userId || "";
   if (!ownerKey) return { allowed: true, verdict: "ok", count: 0, limit: 0 };
-  const { tier } = await resolveOwnerPlan(ownerKey);
+  const { tier } = await resolveOwnerPlan(ownerKey, emailHint);
   if (tier === "none") return { allowed: false, verdict: "blocked", count: 0, limit: 0 };
   const limit = CONTENT_LIMITS[tier as keyof typeof CONTENT_LIMITS] ?? CONTENT_LIMITS.free;
   const count = await dbGetContentUsage(ownerKey, currentYearMonth());
