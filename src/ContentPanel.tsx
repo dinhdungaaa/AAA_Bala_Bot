@@ -86,33 +86,41 @@ export function ContentPanel({ botId }: { botId: string | null | undefined }) {
     } catch { /* im lặng */ }
   }, [botId]);
 
-  const handleVoiceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
-    for (const f of files) {
-      try {
-        const text = await f.text();
-        setVoice(prev => (prev ? prev + '\n\n' : '') + `--- ${f.name} ---\n` + text);
-      } catch { setError('Không đọc được tệp ' + f.name); }
-    }
-    e.target.value = '';
-    setVoiceSaved(false);
-  };
-
-  const handleSaveVoice = async () => {
-    if (!botId) return;
+  // Lưu bền giọng viết (persist theo bot). Nhận thẳng text để lưu đúng nội dung mới
+  // (tránh lệ thuộc state cập nhật bất đồng bộ khi tự lưu sau upload).
+  const persistVoice = useCallback(async (text: string): Promise<boolean> => {
+    if (!botId) return false;
     setVoiceSaving(true);
     setError('');
     try {
       const res = await fetch(`/api/bots/${botId}/content/voice`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voice }),
+        body: JSON.stringify({ voice: text }),
       });
       if (!res.ok) throw new Error();
       setVoiceSaved(true);
       setTimeout(() => setVoiceSaved(false), 2500);
-    } catch { setError('Lưu giọng viết thất bại, thử lại.'); }
+      return true;
+    } catch { setError('Lưu giọng viết thất bại, thử lại.'); return false; }
     finally { setVoiceSaving(false); }
+  }, [botId]);
+
+  const handleVoiceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = '';
+    let next = voice;
+    for (const f of files) {
+      try {
+        const text = await f.text();
+        next = (next ? next + '\n\n' : '') + `--- ${f.name} ---\n` + text;
+      } catch { setError('Không đọc được tệp ' + f.name); }
+    }
+    setVoice(next);
+    // Upload là LƯU TRỮ LUÔN — tự persist ngay để bot học, không cần bấm Lưu riêng.
+    if (next !== voice) await persistVoice(next);
   };
+
+  const handleSaveVoice = () => { void persistVoice(voice); };
 
   const loadUsage = useCallback(async () => {
     if (!botId) return;
@@ -342,7 +350,7 @@ export function ContentPanel({ botId }: { botId: string | null | undefined }) {
             {voiceOpen && (
               <div className="px-3 pb-3 space-y-2">
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Dán vài bài viết bạn thích / tài liệu văn phong, hoặc tải lên tệp <span className="font-mono">.txt / .md</span>. AI sẽ bắt chước giọng này khi viết. Lưu 1 lần, dùng cho mọi bài của bot.
+                  Dán bài viết mẫu / tài liệu văn phong, hoặc tải lên tệp <span className="font-mono">.txt / .md</span> — <span className="font-semibold text-slate-600">tải lên là tự lưu trữ luôn</span>. AI dùng tài liệu này để bắt chước giọng cho mọi bài của bot. Sửa tay thì bấm "Lưu giọng viết".
                 </p>
                 <textarea
                   rows={5}
