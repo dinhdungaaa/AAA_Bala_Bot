@@ -24,36 +24,40 @@ interface UsageInfo {
   verdict: Verdict;
 }
 
-const POST_TYPE_GROUPS: { label: string; options: { id: PostType; name: string }[] }[] = [
-  {
-    label: 'Thương hiệu cá nhân',
-    options: [
-      { id: 'D1', name: 'Storytelling cá nhân' },
-      { id: 'D3', name: 'Hot take / opinion (ngược dòng)' },
-      { id: 'D7', name: 'Behind-the-scenes' },
-    ],
-  },
-  {
-    label: 'Quảng bá / kiến thức',
-    options: [
-      { id: 'D2', name: 'Chia sẻ insight / kiến thức' },
-      { id: 'D4', name: 'How-to / tutorial' },
-      { id: 'D5', name: 'Cornerstone (bài trụ)' },
-      { id: 'D6', name: 'Engagement (tương tác)' },
-    ],
-  },
-];
-
-const POST_TYPE_LABELS: Record<PostType, string> = {
-  D1: 'Storytelling cá nhân', D2: 'Chia sẻ insight / kiến thức', D3: 'Hot take / opinion (ngược dòng)',
-  D4: 'How-to / tutorial', D5: 'Cornerstone (bài trụ)', D6: 'Engagement (tương tác)', D7: 'Behind-the-scenes',
+// 7 công thức viết bài (khớp engine post-formulas D1–D7): độ dài + tóm tắt cấu trúc
+// để người dùng chọn đúng dạng. words = đúng độ dài công thức engine sinh ra.
+type PostTypeInfo = { name: string; group: string; words: string; formula: string };
+const POST_TYPES: Record<PostType, PostTypeInfo> = {
+  D1: { name: 'Storytelling cá nhân', group: 'Thương hiệu cá nhân', words: '500–800 từ',
+        formula: 'Hook khoảnh khắc cụ thể → Bối cảnh → Xung đột → Bước ngoặt → Bài học → CTA mời chia sẻ' },
+  D3: { name: 'Hot take / opinion (ngược dòng)', group: 'Thương hiệu cá nhân', words: '350–600 từ',
+        formula: 'Hook ngược dòng → Lập luận 2–3 lý do → Bằng chứng cá nhân → Kết + câu hỏi mở' },
+  D7: { name: 'Behind-the-scenes', group: 'Thương hiệu cá nhân', words: '350–600 từ',
+        formula: 'Hé lộ hậu trường/quá trình thật → thử–sai → con người thật → CTA gần gũi' },
+  D2: { name: 'Chia sẻ insight / kiến thức', group: 'Quảng bá / kiến thức', words: '450–750 từ',
+        formula: 'Hook sự thật bất ngờ → Vì sao quan trọng → Framework 3–5 điểm → Ví dụ thật → CTA save/share' },
+  D4: { name: 'How-to / tutorial', group: 'Quảng bá / kiến thức', words: '550–900 từ',
+        formula: 'Hook lợi ích → Các bước rõ ràng → Ví dụ/áp dụng → CTA thực hành' },
+  D5: { name: 'Cornerstone (bài trụ)', group: 'Quảng bá / kiến thức', words: '1200–2000 từ',
+        formula: 'Bài dài trọn vẹn: bối cảnh → khung phân tích sâu → nhiều ví dụ → tổng kết + CTA mạnh' },
+  D6: { name: 'Engagement (tương tác)', group: 'Quảng bá / kiến thức', words: '50–150 từ',
+        formula: 'Cực ngắn: 1 câu hỏi/đề nghị kích tương tác → CTA comment' },
 };
+const POST_TYPE_ORDER: PostType[] = ['D1', 'D3', 'D7', 'D2', 'D4', 'D5', 'D6'];
+const POST_TYPE_GROUPS = ['Thương hiệu cá nhân', 'Quảng bá / kiến thức'].map(label => ({
+  label,
+  options: POST_TYPE_ORDER.filter(id => POST_TYPES[id].group === label),
+}));
+
+const POST_TYPE_LABELS: Record<PostType, string> = Object.fromEntries(
+  (Object.keys(POST_TYPES) as PostType[]).map(id => [id, POST_TYPES[id].name]),
+) as Record<PostType, string>;
 
 const LENGTH_OPTIONS: { value: string; label: string }[] = [
-  { value: 'auto', label: 'Tự động' },
-  { value: 'short', label: 'Ngắn' },
-  { value: 'medium', label: 'Vừa' },
-  { value: 'long', label: 'Dài' },
+  { value: 'auto', label: 'Theo công thức (khuyến nghị)' },
+  { value: 'short', label: 'Ngắn (60–130 từ)' },
+  { value: 'medium', label: 'Vừa (150–300 từ)' },
+  { value: 'long', label: 'Dài (400–700 từ)' },
 ];
 
 export function ContentPanel({ botId }: { botId: string | null | undefined }) {
@@ -221,12 +225,15 @@ export function ContentPanel({ botId }: { botId: string | null | undefined }) {
               >
                 {POST_TYPE_GROUPS.map(group => (
                   <optgroup key={group.label} label={group.label}>
-                    {group.options.map(opt => (
-                      <option key={opt.id} value={opt.id}>{opt.id} — {opt.name}</option>
+                    {group.options.map(id => (
+                      <option key={id} value={id}>{id} — {POST_TYPES[id].name} · {POST_TYPES[id].words}</option>
                     ))}
                   </optgroup>
                 ))}
               </select>
+              <p className="text-[11px] text-slate-500 leading-relaxed pt-0.5">
+                <span className="font-semibold text-slate-600">Công thức:</span> {POST_TYPES[postType].formula}
+              </p>
             </div>
 
             <div className="space-y-1.5">

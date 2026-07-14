@@ -3649,12 +3649,17 @@ app.post("/api/bots/:botId/content/generate", async (req, res) => {
   const knowledge = ingredientsFromChunks(chunks as any, 6);
   const ingredients = [knowledge, extra].filter(Boolean).join("\n");
 
+  // "auto" = ĐÚNG độ dài công thức của dạng bài (D5 bài trụ 1200-2000, D1 500-800...);
+  // chỉ ghi đè khi user CHỌN rõ ngắn/vừa/dài. Trước đây auto = medium 150-300 → mọi
+  // dạng bị cắt về 150-300 từ, phá công thức.
+  const lengthTarget = lengthPref === "auto" ? undefined : resolveLength(lengthPref);
+
   try {
     const result = await runGeneration(
       {
         brand: brandFromBot(bot),
         topic, postType, goal, ingredients,
-        lengthTarget: resolveLength(lengthPref),
+        lengthTarget,
       },
       { client: buildGeminiLlmClient(ai), economy: gate.limit <= CONTENT_LIMITS.free },
     );
