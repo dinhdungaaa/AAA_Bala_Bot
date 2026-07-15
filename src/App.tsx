@@ -4632,6 +4632,12 @@ export default function App() {
               enabled: boolean;
               connectTab: string;
             };
+            // Bấm "Tải cấu hình" ở tab Facebook để XEM Bridge URL cũng tự sinh botcakeBridgeKey
+            // (chỉ để hiển thị, không có nghĩa đã dán vào Botcake thật). Vì vậy KHÔNG dùng
+            // botcakeBridgeKey làm dấu hiệu "đã kết nối" — chỉ tính đã kết nối khi Page ID +
+            // Access Token đã được lưu (hành động chủ động dán/lưu cấu hình gửi lại thật sự).
+            const botcakeReallyConfigured = !!(activeBot.botcakePageId && activeBot.botcakeAccessToken);
+            const botcakeHasStrayKey = !!activeBot.botcakeBridgeKey && !botcakeReallyConfigured;
             const rows: ChannelRow[] = [
               {
                 key: 'telegram',
@@ -4652,8 +4658,8 @@ export default function App() {
               {
                 key: 'botcake',
                 name: 'Facebook qua Botcake',
-                detail: '',
-                connected: !!activeBot.botcakeBridgeKey || !!(activeBot.botcakePageId && activeBot.botcakeAccessToken),
+                detail: botcakeHasStrayKey ? 'Đã có Bridge URL nhưng chưa dán Page ID + Access Token ở tab Facebook — chưa thật sự chạy.' : '',
+                connected: botcakeReallyConfigured,
                 enabled: activeBot.botcakeEnabled !== false,
                 connectTab: 'facebook',
               },
