@@ -840,15 +840,42 @@ app.put("/api/admin/customers/:id", async (req, res) => {
   res.json({ ...customer, passwordSync, passwordError });
 });
 
-app.delete("/api/admin/customers/:id", (req, res) => {
+app.delete("/api/admin/customers/:id", async (req, res) => {
   if (!requireOwnerAdmin(req, res)) return;
   const { id } = req.params;
   if (id === "u-1" || saasCustomers.some(c => c.id === id && c.email === ADMIN_EMAIL)) {
     return res.status(400).json({ error: "Không thể xóa tài khoản owner." });
   }
+
+  // Email của khách (nếu biết) để dọn theo email ở những nơi khóa theo email.
+  const emailHint = (saasCustomers.find(c => c.id === id)?.email || "").toLowerCase();
+  if (emailHint === ADMIN_EMAIL) {
+    return res.status(400).json({ error: "Không thể xóa tài khoản owner." });
+  }
+
+  // Xóa cục bộ (danh sách phiên + workspace).
   saasCustomers = saasCustomers.filter(c => c.id !== id);
+  workspaceUsers = workspaceUsers.filter(u => u.id !== id && (u.email || "").toLowerCase() !== emailHint);
   saveSaasCustomers();
-  res.json({ success: true, message: `Đã xóa khách hàng ${id} thành công!` });
+
+  // QUAN TRỌNG: danh sách khách được HYDRATE từ Supabase Auth (listUsers) nên nếu
+  // không xóa auth user thì khách sẽ HIỆN LẠI sau khi tải lại. Xóa luôn auth user +
+  // profile để xóa thật sự bền.
+  let authDeleted = false;
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { error } = await client.auth.admin.deleteUser(id);
+      if (!error) authDeleted = true;
+      else console.warn("deleteUser auth failed:", error.message);
+    } catch (err: any) {
+      console.warn("deleteUser auth threw:", err?.message || String(err));
+    }
+    try { await client.from("profiles").delete().eq("id", id); } catch { /* profiles có thể chưa có */ }
+    if (emailHint) { try { await client.from("profiles").delete().eq("email", emailHint); } catch { /* ignore */ } }
+  }
+
+  res.json({ success: true, authDeleted, message: `Đã xóa khách hàng ${id} thành công!` });
 });
 
 // ================= SUPABASE ENDPOINTS =================
