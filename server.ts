@@ -1425,6 +1425,8 @@ async function findWidgetBot(botId: string, key: string): Promise<BotConfig | nu
   const allBots = await dbGetBots(bots);
   const bot = allBots.find(b => b.id === botId);
   if (!bot || !isValidWidgetKey(bot.widgetKey || undefined, key)) return null;
+  // Kênh đang tạm tắt (mục "Kênh kết nối") — bot lặng thinh, key vẫn giữ nguyên.
+  if (bot.widgetEnabled === false) return null;
   return bot;
 }
 
@@ -2653,6 +2655,9 @@ app.post("/api/telegram-webhook/:botId", async (req, res) => {
   // Acknowledge receipt to Telegram API immediately so they don't timeout or retry
   res.status(200).send("OK");
 
+  // Kênh đang tạm tắt (mục "Kênh kết nối") — bot lặng thinh, token vẫn giữ nguyên.
+  if (bot.telegramEnabled === false) return;
+
   try {
     // Lệnh /id: trả chat id để chủ shop dán vào ô "Chat ID Telegram nhận thông báo lead".
     // Đặt TRƯỚC bộ lọc lệnh chung bên dưới (bộ lọc đó chỉ cho qua "/start").
@@ -3349,6 +3354,8 @@ app.post("/api/bridge/botcake/:botId", async (req, res) => {
     // Lỗi auth vẫn trả 200 để Botcake hiển thị thông báo cho người cấu hình (Botcake chỉ show body của response 200).
     return res.status(200).json(buildBridgeResponse("Bridge key không hợp lệ. Vui lòng copy lại Bridge URL mới nhất từ dashboard BalaBot."));
   }
+  // Kênh đang tạm tắt (mục "Kênh kết nối") — bot lặng thinh, bridge key vẫn giữ nguyên.
+  if (bot.botcakeEnabled === false) return res.json({ messages: [] });
 
   const payload = parseBridgePayload(req.body);
   if (!payload.text) {
@@ -3598,6 +3605,8 @@ app.post("/api/bridge/botcake-async/:botId", async (req, res) => {
     console.warn("[Botcake Async] Key không hợp lệ hoặc bot không tồn tại:", req.params.botId);
     return ack();
   }
+  // Kênh đang tạm tắt (mục "Kênh kết nối") — bot lặng thinh, bridge key vẫn giữ nguyên.
+  if (bot.botcakeEnabled === false) return ack();
   const payload = parseBridgePayload(req.body);
   if (!payload.text || !payload.psid) {
     console.warn("[Botcake Async] Thiếu text/psid. keys:", JSON.stringify(Object.keys(req.body || {})));
@@ -3780,8 +3789,14 @@ app.post("/api/bots/:botId/widget-config", async (req, res) => {
 
   const { enable, disable, widgetColor, widgetTitle, widgetGreeting } = req.body || {};
   const updates: Partial<BotConfig> = {};
-  if (enable && !bot.widgetKey) updates.widgetKey = "wk_" + randomToken(12); // 24 hex
-  if (disable) updates.widgetKey = null;
+  // "Tắt" KHÔNG xóa widgetKey nữa (trước đây null hóa key → bật lại sinh key mới,
+  // làm hỏng mã nhúng đã dán trên site khách). Tắt/bật giờ chỉ đổi cờ widgetEnabled,
+  // key giữ nguyên suốt vòng đời — bật lại chạy ngay, không cần dán lại mã nhúng.
+  if (enable) {
+    if (!bot.widgetKey) updates.widgetKey = "wk_" + randomToken(12); // 24 hex, lần đầu kết nối
+    updates.widgetEnabled = true;
+  }
+  if (disable) updates.widgetEnabled = false;
   if (typeof widgetColor === "string") updates.widgetColor = /^#[0-9a-fA-F]{6}$/.test(widgetColor) ? widgetColor : "";
   if (typeof widgetTitle === "string") updates.widgetTitle = widgetTitle.trim().slice(0, 60);
   if (typeof widgetGreeting === "string") updates.widgetGreeting = widgetGreeting.trim().slice(0, 300);
@@ -3792,10 +3807,42 @@ app.post("/api/bots/:botId/widget-config", async (req, res) => {
   const merged = { ...bot, ...updates };
   res.json({ success: true, bot: {
     widgetKey: merged.widgetKey || null,
+    widgetEnabled: merged.widgetEnabled !== false,
     widgetColor: merged.widgetColor || "",
     widgetTitle: merged.widgetTitle || "",
     widgetGreeting: merged.widgetGreeting || "",
   }});
+});
+
+// ===== Mục "Kênh kết nối" — bật/tắt tạm thời từng kênh, không đụng token/liên kết =====
+const CHANNEL_ENABLE_FIELDS: Record<string, "telegramEnabled" | "facebookEnabled" | "botcakeEnabled" | "widgetEnabled"> = {
+  telegram: "telegramEnabled",
+  facebook: "facebookEnabled",
+  botcake: "botcakeEnabled",
+  widget: "widgetEnabled",
+};
+
+app.put("/api/bots/:botId/channels/:channel", async (req, res) => {
+  const { botId, channel } = req.params;
+  const field = CHANNEL_ENABLE_FIELDS[channel];
+  if (!field) return res.status(400).json({ error: "Kênh không hợp lệ." });
+
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === botId);
+  if (!bot) return res.status(404).json({ error: "Bot không tồn tại." });
+
+  const enabled = req.body?.enabled !== false;
+  const updates: Partial<BotConfig> = { [field]: enabled } as any;
+  // Bật kênh Website lần đầu (chưa từng kết nối) thì tự sinh key luôn, giống nút
+  // "Bật widget & tạo mã nhúng" ở tab Website — tránh bật cờ mà không có gì để chạy.
+  if (channel === "widget" && enabled && !bot.widgetKey) {
+    updates.widgetKey = "wk_" + randomToken(12);
+  }
+
+  const idx = bots.findIndex(b => b.id === bot.id);
+  if (idx !== -1) bots[idx] = { ...bots[idx], ...updates };
+  await dbUpdateBot(bot.id, updates);
+  res.json({ success: true, channel, enabled, widgetKey: channel === "widget" ? (updates.widgetKey || bot.widgetKey || null) : undefined });
 });
 
 // Đổi khóa: mã nhúng cũ trên site shop chết ngay (thu hồi khi bị nhúng trộm).
@@ -4293,6 +4340,8 @@ app.post("/api/facebook-webhook/:botId", async (req, res) => {
       console.warn(`[Facebook Webhook] Received event for unknown bot ID: ${botId}`);
       return;
     }
+    // Kênh đang tạm tắt (mục "Kênh kết nối") — bot lặng thinh, token vẫn giữ nguyên.
+    if (bot.facebookEnabled === false) return;
 
     const messagingEvents = (body.entry || []).flatMap((entry: any) => entry.messaging || []);
     for (const event of messagingEvents) {

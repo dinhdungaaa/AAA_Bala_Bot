@@ -366,7 +366,7 @@ export default function App() {
   const [isSimulatingFacebook, setIsSimulatingFacebook] = useState(false);
 
   // Widget website states (đặt cạnh các state kênh khác)
-  const [widgetCfg, setWidgetCfg] = useState<{ widgetKey: string | null; widgetColor: string; widgetTitle: string; widgetGreeting: string } | null>(null);
+  const [widgetCfg, setWidgetCfg] = useState<{ widgetKey: string | null; widgetEnabled: boolean; widgetColor: string; widgetTitle: string; widgetGreeting: string } | null>(null);
   const [widgetSaving, setWidgetSaving] = useState(false);
   const [widgetRegenerating, setWidgetRegenerating] = useState(false);
   const [widgetCopied, setWidgetCopied] = useState(false);
@@ -958,9 +958,9 @@ export default function App() {
     }
   }, [activeTab, sbUser]);
 
-  // Load Zalo status and groups when Zalo tab opens; clear poll when leaving
+  // Load Zalo status and groups when Zalo tab hoặc tab Kênh kết nối (tóm tắt số nhóm) mở; clear poll when leaving
   useEffect(() => {
-    if (activeTab === 'zalo' && sbUser?.email) {
+    if ((activeTab === 'zalo' || activeTab === 'channels') && sbUser?.email) {
       loadZalo();
     } else if (activeTab !== 'zalo' && zaloPollerRef.current) {
       clearInterval(zaloPollerRef.current);
@@ -974,6 +974,7 @@ export default function App() {
     const bot = bots.find(b => b.id === selectedBotId);
     setWidgetCfg({
       widgetKey: bot?.widgetKey || null,
+      widgetEnabled: bot?.widgetEnabled !== false,
       widgetColor: bot?.widgetColor || '',
       widgetTitle: bot?.widgetTitle || '',
       widgetGreeting: bot?.widgetGreeting || '',
@@ -1016,6 +1017,26 @@ export default function App() {
       alert('Lỗi đổi khóa widget: ' + err.message);
     } finally {
       setWidgetRegenerating(false);
+    }
+  };
+
+  const [channelToggling, setChannelToggling] = useState<string | null>(null);
+  const toggleChannel = async (channel: 'telegram' | 'facebook' | 'botcake' | 'widget', enabled: boolean) => {
+    if (!selectedBotId) return;
+    setChannelToggling(channel);
+    try {
+      const res = await fetch(`/api/bots/${selectedBotId}/channels/${channel}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getScopedApiHeaders() },
+        body: JSON.stringify({ enabled }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.success) throw new Error(d.error || 'Thao tác thất bại');
+      await fetchBots(sbUser?.id);
+    } catch (err: any) {
+      alert('Lỗi bật/tắt kênh: ' + err.message);
+    } finally {
+      setChannelToggling(null);
     }
   };
 
@@ -2503,6 +2524,14 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => { setActiveTab('channels'); setIsMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'channels' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <Power className="w-4 h-4" />
+            Kênh kết nối
+          </button>
+
+          <button
             onClick={() => { setActiveTab('content'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'content' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
@@ -2682,6 +2711,7 @@ export default function App() {
                   {activeTab === 'facebook' && 'Liên kết Facebook Messenger'}
                   {activeTab === 'zalo' && 'Zalo Group Bot'}
                   {activeTab === 'website' && 'Kết nối Website'}
+                  {activeTab === 'channels' && 'Kênh kết nối'}
                   {activeTab === 'content' && 'Tạo bài viết'}
                   {activeTab === 'conversations' && 'Lịch sử Hội thoại Real-time'}
                   {activeTab === 'analytics' && 'Báo cáo Đo Lường Hiệu Suất'}
@@ -4468,6 +4498,19 @@ export default function App() {
                   </button>
                 ) : (
                   <>
+                    {widgetCfg.widgetEnabled === false && (
+                      <div className="flex items-center justify-between gap-3 flex-wrap bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                        <span className="text-xs font-semibold text-amber-700">⏸ Widget đang tạm tắt — khách sẽ không thấy bong bóng chat. Mã nhúng không đổi, bật lại là chạy ngay.</span>
+                        <button
+                          type="button"
+                          onClick={() => saveWidgetConfig({ enable: true })}
+                          disabled={widgetSaving}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs shrink-0"
+                        >
+                          Bật lại
+                        </button>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Màu chủ đạo</label>
@@ -4548,14 +4591,16 @@ export default function App() {
                       >
                         {widgetRegenerating ? 'Đang đổi khóa...' : '🔄 Đổi khóa'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => { if (window.confirm('Widget sẽ ngừng hoạt động trên website, khách sẽ không thấy bong bóng chat nữa. Tiếp tục?')) saveWidgetConfig({ disable: true }); }}
-                        disabled={widgetSaving}
-                        className="text-xs font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50"
-                      >
-                        Tắt widget
-                      </button>
+                      {widgetCfg.widgetEnabled !== false && (
+                        <button
+                          type="button"
+                          onClick={() => { if (window.confirm('Widget sẽ tạm ngừng, khách sẽ không thấy bong bóng chat nữa. Mã nhúng vẫn giữ nguyên, bật lại là chạy ngay không cần dán lại. Tiếp tục?')) saveWidgetConfig({ disable: true }); }}
+                          disabled={widgetSaving}
+                          className="text-xs font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50"
+                        >
+                          Tạm tắt widget
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
@@ -4574,6 +4619,129 @@ export default function App() {
                 </div>
               </div>
             </div>
+            );
+          })()}
+
+          {/* Kênh kết nối — tổng quan bật/tắt mọi nơi bot đang chạy, không cần vào từng tab */}
+          {activeTab === 'channels' && activeBot && bots.length > 0 && (() => {
+            type ChannelRow = {
+              key: 'telegram' | 'facebook' | 'botcake' | 'widget';
+              name: string;
+              detail: string;
+              connected: boolean;
+              enabled: boolean;
+              connectTab: string;
+            };
+            const rows: ChannelRow[] = [
+              {
+                key: 'telegram',
+                name: 'Telegram',
+                detail: activeBot.telegramBotUsername ? `@${activeBot.telegramBotUsername}` : '',
+                connected: !!activeBot.telegramToken,
+                enabled: activeBot.telegramEnabled !== false,
+                connectTab: 'telegram',
+              },
+              {
+                key: 'facebook',
+                name: 'Facebook Messenger (trực tiếp)',
+                detail: activeBot.facebookPageName || '',
+                connected: activeBot.facebookStatus === 'connected',
+                enabled: activeBot.facebookEnabled !== false,
+                connectTab: 'facebook',
+              },
+              {
+                key: 'botcake',
+                name: 'Facebook qua Botcake',
+                detail: '',
+                connected: !!activeBot.botcakeBridgeKey || !!(activeBot.botcakePageId && activeBot.botcakeAccessToken),
+                enabled: activeBot.botcakeEnabled !== false,
+                connectTab: 'facebook',
+              },
+              {
+                key: 'widget',
+                name: 'Website widget',
+                detail: '',
+                connected: !!activeBot.widgetKey,
+                enabled: activeBot.widgetEnabled !== false,
+                connectTab: 'website',
+              },
+            ];
+            const botZaloBindings = (zaloGroups.bindings || []).filter((b: any) => b.bot_id === activeBot.id);
+            const zaloEnabledCount = botZaloBindings.filter((b: any) => b.enabled !== false).length;
+
+            return (
+              <div className="max-w-3xl space-y-6">
+                <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 md:p-8 space-y-1">
+                  <h2 className="text-lg font-bold text-slate-800">Kênh kết nối của "{activeBot.name}"</h2>
+                  <p className="text-xs text-slate-500">Bật/tắt bot ở từng nơi mà không mất kết nối — tắt xong bật lại là chạy ngay, không cần dán lại token hay quét QR.</p>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 shadow-xs divide-y divide-slate-100">
+                  {rows.map(row => (
+                    <div key={row.key} className="flex items-center justify-between gap-4 px-5 py-4">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-slate-800">{row.name}</span>
+                          {row.connected ? (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${row.enabled ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
+                              {row.enabled ? 'Đang bật' : 'Đang tắt'}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-50 text-slate-400 border border-slate-200">Chưa kết nối</span>
+                          )}
+                        </div>
+                        {row.detail && <p className="text-xs text-slate-500 mt-0.5 truncate">{row.detail}</p>}
+                      </div>
+
+                      {row.connected ? (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={row.enabled}
+                          disabled={channelToggling === row.key}
+                          onClick={() => toggleChannel(row.key, !row.enabled)}
+                          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${row.enabled ? 'bg-emerald-600' : 'bg-slate-300'}`}
+                          title={row.enabled ? 'Bấm để tạm tắt' : 'Bấm để bật lại'}
+                        >
+                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${row.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab(row.connectTab)}
+                          className="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs"
+                        >
+                          Kết nối
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Zalo: nhiều nhóm/1 bot, mỗi nhóm đã có công tắc riêng trong tab Zalo — chỉ tóm tắt ở đây */}
+                  <div className="flex items-center justify-between gap-4 px-5 py-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-bold text-slate-800">Zalo (nhóm chat)</span>
+                        {botZaloBindings.length > 0 ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            {zaloEnabledCount}/{botZaloBindings.length} nhóm đang bật
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-50 text-slate-400 border border-slate-200">Chưa kết nối</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">Mỗi nhóm Zalo có công tắc bật/tắt riêng — quản lý chi tiết ở tab Zalo.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('zalo')}
+                      className="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs"
+                    >
+                      {botZaloBindings.length > 0 ? 'Quản lý nhóm' : 'Kết nối'}
+                    </button>
+                  </div>
+                </div>
+              </div>
             );
           })()}
 

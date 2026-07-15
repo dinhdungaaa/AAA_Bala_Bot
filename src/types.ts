@@ -40,11 +40,18 @@ export interface BotConfig {
   // Trợ lý bán hàng: mục tiêu hội thoại + chat id Telegram nhận thông báo lead.
   conversationGoal?: 'lead' | 'order' | 'consult';
   notifyTelegramChatId?: string;
-  // Widget chat nhúng website của chủ shop. widgetKey rỗng/null = tính năng tắt.
+  // Widget chat nhúng website của chủ shop. widgetKey rỗng/null = chưa từng kết nối.
   widgetKey?: string | null;
   widgetColor?: string;
   widgetTitle?: string;
   widgetGreeting?: string;
+  // Bật/tắt tạm thời từng kênh (mặc định true nếu chưa set) — KHÁC với đã kết nối
+  // hay chưa. Tắt = bot lặng thinh ở kênh đó, token/liên kết vẫn giữ nguyên, bật
+  // lại chạy ngay không cần kết nối lại. Dùng cho mục "Kênh kết nối" tổng quan.
+  telegramEnabled?: boolean;
+  facebookEnabled?: boolean;
+  botcakeEnabled?: boolean;
+  widgetEnabled?: boolean;
 }
 
 export interface KnowledgeSource {
