@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { PenSquare, Copy, Trash2, Save, RefreshCw, Sparkles, AlertCircle } from 'lucide-react';
+import { PenSquare, Copy, Trash2, Save, RefreshCw, Sparkles, AlertCircle, Mic, Upload } from 'lucide-react';
 
 // ---- Kiểu dữ liệu nhẹ, khớp response Task 8 (server.ts /api/bots/:botId/content*) ----
 type PostType = 'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7';
@@ -74,9 +74,9 @@ export function ContentPanel({ botId }: { botId: string | null | undefined }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [voice, setVoice] = useState('');
-  const [voiceOpen, setVoiceOpen] = useState(false);
   const [voiceSaving, setVoiceSaving] = useState(false);
   const [voiceSaved, setVoiceSaved] = useState(false);
+  const [tab, setTab] = useState<'compose' | 'voice'>('compose');
 
   const loadVoice = useCallback(async () => {
     if (!botId) return;
@@ -235,7 +235,89 @@ export function ContentPanel({ botId }: { botId: string | null | undefined }) {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div className="space-y-6">
+      {/* Thanh tab con: Tạo bài viết | Giọng viết riêng */}
+      <div className="flex gap-1 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setTab('compose')}
+          className={`px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 -mb-px transition-colors ${tab === 'compose' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          <PenSquare className="w-4 h-4" /> Tạo bài viết
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('voice')}
+          className={`px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 -mb-px transition-colors ${tab === 'voice' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          <Mic className="w-4 h-4" /> Giọng viết riêng
+          {voice.trim() && <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5">đã có</span>}
+        </button>
+      </div>
+
+      {tab === 'voice' ? (
+        /* ===== TAB GIỌNG VIẾT RIÊNG — nơi user nạp insight/văn phong cho bot ===== */
+        <div className="max-w-3xl space-y-6">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 md:p-8 space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0">
+                <Mic className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-800">Giọng viết riêng của bot</h2>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Nạp <span className="font-semibold text-slate-600">insight, văn phong, bài viết mẫu</span> của bạn vào đây. AI sẽ bắt chước giọng này cho <span className="font-semibold text-slate-600">mọi bài</span> của bot. Lưu theo từng bot và tự động áp dụng khi tạo bài.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[11px] text-slate-500 leading-relaxed space-y-1">
+              <p className="font-bold text-slate-600 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-emerald-500" /> Nên bỏ vào đây:</p>
+              <p>• 1–3 bài viết mẫu bạn tâm đắc (giọng, cách xưng hô, cách mở bài).</p>
+              <p>• Insight riêng: quan điểm, câu chuyện thật, từ ngữ đặc trưng, điều muốn/không muốn nói.</p>
+              <p>• Tải tệp <span className="font-mono">.txt / .md</span> — <span className="font-semibold text-slate-600">tải lên là tự lưu trữ luôn</span>, không cần bấm Lưu.</p>
+            </div>
+
+            <textarea
+              rows={14}
+              value={voice}
+              onChange={(e) => { setVoice(e.target.value); setVoiceSaved(false); }}
+              placeholder={"Dán bài viết mẫu / insight / văn phong của bạn vào đây...\n\nVD:\n- Mình luôn mở bài bằng một câu hỏi thẳng.\n- Xưng \"mình\", gọi khách là \"bạn\", tránh sáo rỗng.\n- Câu ngắn, có ví dụ thật, không dùng từ hoa mỹ."}
+              className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-y leading-relaxed"
+            />
+
+            {error && (
+              <div className="flex items-start gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs cursor-pointer flex items-center gap-2">
+                <Upload className="w-3.5 h-3.5" /> Tải tệp .txt/.md
+                <input type="file" accept=".txt,.md,text/plain,text/markdown" multiple onChange={handleVoiceUpload} className="hidden" />
+              </label>
+              <button
+                type="button"
+                onClick={handleSaveVoice}
+                disabled={voiceSaving}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center gap-2"
+              >
+                <Save className="w-3.5 h-3.5" /> {voiceSaving ? 'Đang lưu...' : voiceSaved ? 'Đã lưu ✓' : 'Lưu giọng viết'}
+              </button>
+              {voice.trim() && (
+                <button type="button" onClick={() => { setVoice(''); setVoiceSaved(false); }} className="text-[11px] font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1">
+                  <Trash2 className="w-3.5 h-3.5" /> Xóa hết
+                </button>
+              )}
+              <span className="text-[10px] text-slate-400 ml-auto">{voice.length.toLocaleString('vi-VN')} ký tự</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+      /* ===== TAB TẠO BÀI VIẾT ===== */
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <div className="lg:col-span-2 space-y-6">
         {/* Thẻ quota */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 flex items-center justify-between gap-4">
@@ -333,53 +415,16 @@ export function ContentPanel({ botId }: { botId: string | null | undefined }) {
             </div>
           </div>
 
-          {/* Giọng viết riêng — tài liệu tham chiếu văn phong (lưu theo bot, dùng cho mọi bài) */}
-          <div className="border border-slate-200 rounded-lg">
-            <button
-              type="button"
-              onClick={() => setVoiceOpen(o => !o)}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left"
-            >
-              <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
-                Giọng viết riêng (tùy chọn)
-                {voice.trim() && <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5 normal-case">đã có</span>}
-              </span>
-              <span className="text-slate-400 text-xs">{voiceOpen ? '▲' : '▼'}</span>
+          {/* Nhắc: giọng viết riêng nằm ở tab bên cạnh */}
+          {voice.trim() ? (
+            <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 flex items-center gap-1.5">
+              <Mic className="w-3.5 h-3.5" /> Bot đang dùng <span className="font-semibold">Giọng viết riêng</span> bạn đã nạp. Sửa ở tab "Giọng viết riêng".
+            </p>
+          ) : (
+            <button type="button" onClick={() => setTab('voice')} className="text-[11px] text-slate-500 hover:text-emerald-700 flex items-center gap-1.5">
+              <Mic className="w-3.5 h-3.5" /> Mẹo: nạp <span className="font-semibold">giọng viết riêng</span> ở tab bên cạnh để bài bám đúng văn phong của bạn.
             </button>
-            {voiceOpen && (
-              <div className="px-3 pb-3 space-y-2">
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Dán bài viết mẫu / tài liệu văn phong, hoặc tải lên tệp <span className="font-mono">.txt / .md</span> — <span className="font-semibold text-slate-600">tải lên là tự lưu trữ luôn</span>. AI dùng tài liệu này để bắt chước giọng cho mọi bài của bot. Sửa tay thì bấm "Lưu giọng viết".
-                </p>
-                <textarea
-                  rows={5}
-                  value={voice}
-                  onChange={(e) => { setVoice(e.target.value); setVoiceSaved(false); }}
-                  placeholder="Dán 1-3 bài viết mẫu mang giọng văn của bạn vào đây..."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-y"
-                />
-                <div className="flex items-center gap-2 flex-wrap">
-                  <label className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs cursor-pointer">
-                    Tải tệp .txt/.md
-                    <input type="file" accept=".txt,.md,text/plain,text/markdown" multiple onChange={handleVoiceUpload} className="hidden" />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleSaveVoice}
-                    disabled={voiceSaving}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs"
-                  >
-                    {voiceSaving ? 'Đang lưu...' : voiceSaved ? 'Đã lưu ✓' : 'Lưu giọng viết'}
-                  </button>
-                  {voice.trim() && (
-                    <button type="button" onClick={() => { setVoice(''); setVoiceSaved(false); }} className="text-[11px] font-bold text-rose-600 hover:text-rose-700">Xóa</button>
-                  )}
-                  <span className="text-[10px] text-slate-400">{voice.length.toLocaleString('vi-VN')} ký tự</span>
-                </div>
-              </div>
-            )}
-          </div>
+          )}
 
           {error && (
             <div className="flex items-start gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
@@ -479,6 +524,8 @@ export function ContentPanel({ botId }: { botId: string | null | undefined }) {
           ))}
         </div>
       </div>
+      </div>
+      )}
     </div>
   );
 }
