@@ -539,6 +539,43 @@ DROP POLICY IF EXISTS "Allow public update tg_groups" ON telegram_groups;
 CREATE POLICY "Allow public read tg_groups" ON telegram_groups FOR SELECT USING (true);
 CREATE POLICY "Allow public insert tg_groups" ON telegram_groups FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update tg_groups" ON telegram_groups FOR UPDATE USING (true);
+
+-- =========================================================================
+-- 13. HUẤN LUYỆN PHẢN HỒI BOT (ví dụ mẫu Q&A + quy tắc chung)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS bot_training_examples (
+  id TEXT PRIMARY KEY,
+  "botId" TEXT NOT NULL,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS bot_training_examples_bot_idx ON bot_training_examples ("botId");
+
+ALTER TABLE bot_training_examples ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read bot_training_examples" ON bot_training_examples;
+DROP POLICY IF EXISTS "Allow public insert bot_training_examples" ON bot_training_examples;
+DROP POLICY IF EXISTS "Allow public update bot_training_examples" ON bot_training_examples;
+CREATE POLICY "Allow public read bot_training_examples" ON bot_training_examples FOR SELECT USING (true);
+CREATE POLICY "Allow public insert bot_training_examples" ON bot_training_examples FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update bot_training_examples" ON bot_training_examples FOR UPDATE USING (true);
+
+CREATE TABLE IF NOT EXISTS bot_training_rules (
+  id TEXT PRIMARY KEY,
+  "botId" TEXT NOT NULL,
+  rule TEXT NOT NULL,
+  "isActive" BOOLEAN NOT NULL DEFAULT TRUE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS bot_training_rules_bot_idx ON bot_training_rules ("botId");
+
+ALTER TABLE bot_training_rules ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read bot_training_rules" ON bot_training_rules;
+DROP POLICY IF EXISTS "Allow public insert bot_training_rules" ON bot_training_rules;
+DROP POLICY IF EXISTS "Allow public update bot_training_rules" ON bot_training_rules;
+CREATE POLICY "Allow public read bot_training_rules" ON bot_training_rules FOR SELECT USING (true);
+CREATE POLICY "Allow public insert bot_training_rules" ON bot_training_rules FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update bot_training_rules" ON bot_training_rules FOR UPDATE USING (true);
 `;
 }
 
