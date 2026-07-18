@@ -539,6 +539,43 @@ DROP POLICY IF EXISTS "Allow public update tg_groups" ON telegram_groups;
 CREATE POLICY "Allow public read tg_groups" ON telegram_groups FOR SELECT USING (true);
 CREATE POLICY "Allow public insert tg_groups" ON telegram_groups FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update tg_groups" ON telegram_groups FOR UPDATE USING (true);
+
+-- =========================================================================
+-- 13. HUẤN LUYỆN PHẢN HỒI BOT (ví dụ mẫu Q&A + quy tắc chung)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS bot_training_examples (
+  id TEXT PRIMARY KEY,
+  "botId" TEXT NOT NULL,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS bot_training_examples_bot_idx ON bot_training_examples ("botId");
+
+ALTER TABLE bot_training_examples ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read bot_training_examples" ON bot_training_examples;
+DROP POLICY IF EXISTS "Allow public insert bot_training_examples" ON bot_training_examples;
+DROP POLICY IF EXISTS "Allow public update bot_training_examples" ON bot_training_examples;
+CREATE POLICY "Allow public read bot_training_examples" ON bot_training_examples FOR SELECT USING (true);
+CREATE POLICY "Allow public insert bot_training_examples" ON bot_training_examples FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update bot_training_examples" ON bot_training_examples FOR UPDATE USING (true);
+
+CREATE TABLE IF NOT EXISTS bot_training_rules (
+  id TEXT PRIMARY KEY,
+  "botId" TEXT NOT NULL,
+  rule TEXT NOT NULL,
+  "isActive" BOOLEAN NOT NULL DEFAULT TRUE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS bot_training_rules_bot_idx ON bot_training_rules ("botId");
+
+ALTER TABLE bot_training_rules ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read bot_training_rules" ON bot_training_rules;
+DROP POLICY IF EXISTS "Allow public insert bot_training_rules" ON bot_training_rules;
+DROP POLICY IF EXISTS "Allow public update bot_training_rules" ON bot_training_rules;
+CREATE POLICY "Allow public read bot_training_rules" ON bot_training_rules FOR SELECT USING (true);
+CREATE POLICY "Allow public insert bot_training_rules" ON bot_training_rules FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update bot_training_rules" ON bot_training_rules FOR UPDATE USING (true);
 `;
 }
 
@@ -1827,4 +1864,95 @@ export async function dbIncrementContentUsage(ownerKey: string, ym: string): Pro
     const { error: upsertError } = await client.from("content_usage").upsert({ owner_key: ownerKey, ym, count: cur + 1 }, { onConflict: "owner_key,ym" });
     if (upsertError) console.warn("dbIncrementContentUsage fallback:", upsertError.message);
   }
+}
+
+// ===== Huấn luyện phản hồi bot: ví dụ mẫu Q&A (few-shot) + quy tắc chung =====
+export interface TrainingExample {
+  id: string;
+  botId: string;
+  question: string;
+  answer: string;
+  createdAt?: string;
+}
+
+export interface TrainingRule {
+  id: string;
+  botId: string;
+  rule: string;
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export async function dbListTrainingExamples(botId: string): Promise<TrainingExample[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+  const { data, error } = await client.from("bot_training_examples").select("*").eq("botId", botId).order("createdAt", { ascending: false });
+  if (error) { console.warn("dbListTrainingExamples:", error.message); return []; }
+  return (data as TrainingExample[]) || [];
+}
+
+export async function dbCountTrainingExamples(botId: string): Promise<number> {
+  const client = getSupabaseClient();
+  if (!client) return 0;
+  const { count, error } = await client.from("bot_training_examples").select("id", { count: "exact", head: true }).eq("botId", botId);
+  if (error) { console.warn("dbCountTrainingExamples:", error.message); return 0; }
+  return count || 0;
+}
+
+export async function dbSaveTrainingExample(example: TrainingExample): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("bot_training_examples").insert(example);
+  if (error) { console.warn("dbSaveTrainingExample:", error.message); return false; }
+  return true;
+}
+
+export async function dbDeleteTrainingExample(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("bot_training_examples").delete().eq("id", id);
+  if (error) { console.warn("dbDeleteTrainingExample:", error.message); return false; }
+  return true;
+}
+
+export async function dbListTrainingRules(botId: string, activeOnly = false): Promise<TrainingRule[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+  let query = client.from("bot_training_rules").select("*").eq("botId", botId);
+  if (activeOnly) query = query.eq("isActive", true);
+  const { data, error } = await query.order("createdAt", { ascending: false });
+  if (error) { console.warn("dbListTrainingRules:", error.message); return []; }
+  return (data as TrainingRule[]) || [];
+}
+
+export async function dbCountTrainingRules(botId: string): Promise<number> {
+  const client = getSupabaseClient();
+  if (!client) return 0;
+  const { count, error } = await client.from("bot_training_rules").select("id", { count: "exact", head: true }).eq("botId", botId);
+  if (error) { console.warn("dbCountTrainingRules:", error.message); return 0; }
+  return count || 0;
+}
+
+export async function dbSaveTrainingRule(rule: TrainingRule): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("bot_training_rules").insert(rule);
+  if (error) { console.warn("dbSaveTrainingRule:", error.message); return false; }
+  return true;
+}
+
+export async function dbUpdateTrainingRule(id: string, isActive: boolean): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("bot_training_rules").update({ isActive }).eq("id", id);
+  if (error) { console.warn("dbUpdateTrainingRule:", error.message); return false; }
+  return true;
+}
+
+export async function dbDeleteTrainingRule(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("bot_training_rules").delete().eq("id", id);
+  if (error) { console.warn("dbDeleteTrainingRule:", error.message); return false; }
+  return true;
 }

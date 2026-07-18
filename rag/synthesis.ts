@@ -29,6 +29,10 @@ export type SynthesisOpts = {
   buyingSignal?: BuyingSignal;
   goal?: ConversationGoal;
   goalState?: GoalState;
+  // Huấn luyện phản hồi do owner tự nạp riêng cho bot: quy tắc chung + ví dụ mẫu Q&A.
+  // Áp dụng cho CẢ HAI answerStyle, khác FEW_SHOTS hardcode chỉ áp dụng mode sales.
+  trainingRules?: string[];
+  trainingExamples?: { question: string; answer: string }[];
 };
 
 // Quy tắc giọng theo kiểu bot. Mode "reference" (tra cứu kiến thức) tách 2 nhánh:
@@ -145,6 +149,21 @@ function buildHistoryBlock(history?: HistoryTurn[]): string | null {
   ].join("\n");
 }
 
+function buildRulesBlock(rules?: string[]): string | null {
+  const list = (rules || []).map(r => r.trim()).filter(Boolean);
+  if (!list.length) return null;
+  return ["QUY TẮC RIÊNG CỦA SHOP (tuân thủ tuyệt đối):", ...list.map(r => `- ${r}`)].join("\n");
+}
+
+function buildExamplesBlock(examples?: { question: string; answer: string }[]): string | null {
+  const list = (examples || []).filter(e => (e.question || "").trim() && (e.answer || "").trim());
+  if (!list.length) return null;
+  return [
+    "VÍ DỤ MẪU DO SHOP CUNG CẤP (ưu tiên theo phong cách/nội dung này khi có xung đột với ví dụ mặc định):",
+    ...list.map(e => `Khách: "${e.question.trim()}" → "${e.answer.trim()}"`),
+  ].join("\n");
+}
+
 export function buildGroundedPrompt(
   bot: BotConfig,
   passages: Passage[],
@@ -205,10 +224,15 @@ export function buildGroundedPrompt(
           "hoặc nói em chưa có thông tin và mời để lại liên hệ.",
       ];
 
+  const rulesBlock = buildRulesBlock(opts.trainingRules);
+  const examplesBlock = buildExamplesBlock(opts.trainingExamples);
+
   return [
     `Bạn là trợ lý của "${bot.name}" (lĩnh vực ${field}).`,
     styleBlock,
     ...(customerLine ? [customerLine] : []),
+    ...(rulesBlock ? ["", rulesBlock] : []),
+    ...(examplesBlock ? ["", examplesBlock] : []),
     "",
     "QUY TẮC BẮT BUỘC:",
     "1. HIỂU đúng trọng tâm câu hỏi của khách và trả lời THẲNG vào đó, không lan man.",

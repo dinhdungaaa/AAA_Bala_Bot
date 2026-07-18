@@ -3,12 +3,13 @@ import {
   LayoutDashboard, Bot, GraduationCap, Database, Play, Send, Sliders,
   History, BarChart3, Settings, CreditCard, Plus, Trash2, CheckCircle2,
   AlertCircle, Upload, MessageSquare, ArrowRight, ThumbsUp, ThumbsDown, RefreshCw, Key, Link2, HelpCircle, Check, Search, FileText, ChevronRight, User2, MessageCircle, Info, Sparkles, Shield,
-  Menu, X, Clock, Calendar, Zap, Power, Eye, Globe, PenSquare
+  Menu, X, Clock, Calendar, Zap, Power, Eye, Globe, PenSquare, Wand2
 } from 'lucide-react';
 import { BotConfig, KnowledgeSource, FAQItem, ChatSession, Message, AnalyticsSummary, SaasCustomer, ScheduleItem, ReminderLog } from './types';
 import { PLAN_LIMITS } from '../billing';
 import SiteAssistant from './SiteAssistant';
 import { ContentPanel } from './ContentPanel';
+import { TrainingPanel } from './TrainingPanel';
 
 const ADMIN_EMAIL = 'ox102.crypto@gmail.com';
 
@@ -87,7 +88,7 @@ const renderFormattedText = (text: string, isUser: boolean = false) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'telegram' | 'facebook' | 'zalo' | 'website' | 'content' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin' | 'leads'>(() => isAdminRoute() ? 'admin' : 'dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'train' | 'kb' | 'playground' | 'training' | 'telegram' | 'facebook' | 'zalo' | 'website' | 'content' | 'conversations' | 'analytics' | 'supabase' | 'billing' | 'schedules' | 'train-schedules' | 'admin' | 'leads'>(() => isAdminRoute() ? 'admin' : 'dashboard');
   const [telegramPanel, setTelegramPanel] = useState<'connection' | 'schedules' | 'train-schedules'>('connection');
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
@@ -2490,6 +2491,14 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => { setActiveTab('training'); setIsMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'training' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <Wand2 className="w-4 h-4" />
+            Huấn luyện phản hồi
+          </button>
+
+          <button
             onClick={() => { setActiveTab('telegram'); setTelegramPanel('connection'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150 ${activeTab === 'telegram' ? 'bg-emerald-500/10 text-emerald-400 border-l-4 border-emerald-500 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
@@ -2707,6 +2716,7 @@ export default function App() {
                   {activeTab === 'train' && 'Nạp Đào Tạo Tri Thức Đột Phá'}
                   {activeTab === 'kb' && 'Quản lý Dữ liệu Kho Tri Thức'}
                   {activeTab === 'playground' && 'Playground Chat Thử Nghiệm'}
+                  {activeTab === 'training' && 'Huấn luyện phản hồi bot'}
                   {activeTab === 'telegram' && 'Liên kết Kế Nối Telegram Bot'}
                   {activeTab === 'facebook' && 'Liên kết Facebook Messenger'}
                   {activeTab === 'zalo' && 'Zalo Group Bot'}
@@ -4753,6 +4763,10 @@ export default function App() {
 
           {activeTab === 'content' && (
             <ContentPanel botId={selectedBotId} />
+          )}
+
+          {activeTab === 'training' && (
+            <TrainingPanel botId={selectedBotId} />
           )}
 
           {/* TAB 7: HISTORIC CONVERSATIONS & OPERATOR TAKEOVER */}

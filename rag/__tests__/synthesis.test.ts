@@ -89,4 +89,40 @@ describe("buildGroundedPrompt", () => {
     expect(withEmpty).toBe(base);
     expect(base).not.toContain("HỘI THOẠI GẦN ĐÂY");
   });
+
+  it("co trainingRules -> chen block quy tac rieng cua shop", () => {
+    const p = buildGroundedPrompt(bot, passages, {
+      answerStyle: "sales",
+      trainingRules: ["Luôn hỏi số điện thoại trước khi báo giá", "Không dùng từ 'rẻ'"],
+    });
+    expect(p).toContain("QUY TẮC RIÊNG CỦA SHOP");
+    expect(p).toContain("Luôn hỏi số điện thoại trước khi báo giá");
+    expect(p).toContain("Không dùng từ 'rẻ'");
+  });
+
+  it("co trainingExamples -> chen vi du mau cua shop", () => {
+    const p = buildGroundedPrompt(bot, passages, {
+      answerStyle: "sales",
+      trainingExamples: [{ question: "Có ship COD không?", answer: "Dạ có ạ, COD toàn quốc." }],
+    });
+    expect(p).toContain("VÍ DỤ MẪU DO SHOP CUNG CẤP");
+    expect(p).toContain("Có ship COD không?");
+    expect(p).toContain("Dạ có ạ, COD toàn quốc.");
+  });
+
+  it("trainingRules/trainingExamples ap dung ca mode reference", () => {
+    const p = buildGroundedPrompt(bot, passages, {
+      answerStyle: "reference",
+      trainingRules: ["Luôn trả lời bằng tiếng Việt có dấu"],
+      trainingExamples: [{ question: "Giá bao nhiêu?", answer: "Dạ giá niêm yết trong tài liệu ạ." }],
+    });
+    expect(p).toContain("QUY TẮC RIÊNG CỦA SHOP");
+    expect(p).toContain("VÍ DỤ MẪU DO SHOP CUNG CẤP");
+  });
+
+  it("khong co trainingRules/trainingExamples -> khong chen block", () => {
+    const p = buildGroundedPrompt(bot, passages, { answerStyle: "sales" });
+    expect(p).not.toContain("QUY TẮC RIÊNG CỦA SHOP");
+    expect(p).not.toContain("VÍ DỤ MẪU DO SHOP CUNG CẤP");
+  });
 });
