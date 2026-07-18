@@ -5413,11 +5413,11 @@ async function generateRAGAnswer(
     };
   }
 
-  // 1. Get knowledge chunks for this bot
-  const botChunks = await dbGetChunks(bot.id, knowledgeChunks.filter(c => c.botId === bot.id && c.isActive));
-
-  // Huấn luyện phản hồi: ví dụ mẫu Q&A + quy tắc chung (chỉ rule đang bật) do owner tự nạp cho bot này.
-  const [trainingExamples, trainingRules] = await Promise.all([
+  // 1. Get knowledge chunks for this bot + huấn luyện phản hồi (ví dụ mẫu Q&A + quy tắc chung
+  // đang bật) — chạy song song để không cộng thêm round-trip tuần tự vào đường trả lời (kênh
+  // bridge như Botcake có ngân sách phản hồi ~5s).
+  const [botChunks, trainingExamples, trainingRules] = await Promise.all([
+    dbGetChunks(bot.id, knowledgeChunks.filter(c => c.botId === bot.id && c.isActive)),
     dbListTrainingExamples(bot.id),
     dbListTrainingRules(bot.id, true),
   ]);
