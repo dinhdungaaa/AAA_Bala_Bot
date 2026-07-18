@@ -104,10 +104,19 @@ import {
   dbClaimPaymentOrder,
   dbRevertPaymentOrderClaim,
   dbExpirePaymentOrderIfPending,
-  dbGetPaidPaymentOrders
+  dbGetPaidPaymentOrders,
+  dbListTrainingExamples,
+  dbCountTrainingExamples,
+  dbSaveTrainingExample,
+  dbDeleteTrainingExample,
+  dbListTrainingRules,
+  dbCountTrainingRules,
+  dbSaveTrainingRule,
+  dbUpdateTrainingRule,
+  dbDeleteTrainingRule,
 } from "./supabaseService.js";
-import type { PaymentOrder } from "./supabaseService.js";
-import { currentYearMonth, usageVerdict, PLAN_LIMITS, CONTENT_LIMITS } from "./billing.js";
+import type { PaymentOrder, TrainingExample, TrainingRule } from "./supabaseService.js";
+import { currentYearMonth, usageVerdict, PLAN_LIMITS, CONTENT_LIMITS, TRAINING_LIMITS } from "./billing.js";
 import { computeOrderAmount, generateOrderCode, extractOrderCode, buildSepayQrUrl, verifySepayApiKey, resolveNewExpiry, parseSepayWebhook, computeRevenueSummary } from "./payments/sepay.js";
 import { resolveLimitForOwner } from "./billingResolve.js";
 
@@ -345,7 +354,7 @@ async function assertBotAccess(req: express.Request, res: express.Response, botI
 async function assertResourceBotAccess(
   req: express.Request,
   res: express.Response,
-  table: "knowledge_chunks" | "knowledge_sources" | "chat_sessions" | "schedules" | "content_posts",
+  table: "knowledge_chunks" | "knowledge_sources" | "chat_sessions" | "schedules" | "content_posts" | "bot_training_examples" | "bot_training_rules",
   id: string,
   memoryBotId?: string | null
 ): Promise<boolean> {
@@ -3750,6 +3759,96 @@ app.get("/api/bots/:botId/content/usage", async (req, res) => {
   res.json({ count: gate.count, limit: gate.limit, verdict: gate.verdict });
 });
 
+// ===== Huấn luyện phản hồi bot: ví dụ mẫu Q&A + quy tắc chung =====
+app.get("/api/bots/:botId/training/examples", async (req, res) => {
+  const examples = await dbListTrainingExamples(req.params.botId);
+  res.json(examples);
+});
+
+app.post("/api/bots/:botId/training/examples", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+
+  const question = String(req.body?.question || "").trim().slice(0, 2000);
+  const answer = String(req.body?.answer || "").trim().slice(0, 4000);
+  if (!question || !answer) return res.status(400).json({ error: "Cần nhập cả câu hỏi và câu trả lời." });
+
+  const gate = await checkTrainingLimit(bot, "examples", getTrustedEmail(req));
+  if (!gate.allowed) {
+    return res.status(429).json({ error: "Bạn đã đạt giới hạn số ví dụ mẫu của gói. Nâng gói để thêm nhiều hơn.", gate });
+  }
+
+  const example: TrainingExample = {
+    id: "texample-" + Math.random().toString(36).substr(2, 9),
+    botId: bot.id, question, answer, createdAt: new Date().toISOString(),
+  };
+  const ok = await dbSaveTrainingExample(example);
+  if (!ok) return res.status(500).json({ error: "Lưu ví dụ mẫu thất bại, thử lại sau." });
+  res.json(example);
+});
+
+app.delete("/api/training/examples/:id", async (req, res) => {
+  if (!(await assertResourceBotAccess(req, res, "bot_training_examples", req.params.id))) return;
+  await dbDeleteTrainingExample(req.params.id);
+  res.json({ success: true });
+});
+
+app.get("/api/bots/:botId/training/rules", async (req, res) => {
+  const rules = await dbListTrainingRules(req.params.botId);
+  res.json(rules);
+});
+
+app.post("/api/bots/:botId/training/rules", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+
+  const rule = String(req.body?.rule || "").trim().slice(0, 500);
+  if (!rule) return res.status(400).json({ error: "Cần nhập nội dung quy tắc." });
+
+  const gate = await checkTrainingLimit(bot, "rules", getTrustedEmail(req));
+  if (!gate.allowed) {
+    return res.status(429).json({ error: "Bạn đã đạt giới hạn số quy tắc của gói. Nâng gói để thêm nhiều hơn.", gate });
+  }
+
+  const trainingRule: TrainingRule = {
+    id: "trule-" + Math.random().toString(36).substr(2, 9),
+    botId: bot.id, rule, isActive: true, createdAt: new Date().toISOString(),
+  };
+  const ok = await dbSaveTrainingRule(trainingRule);
+  if (!ok) return res.status(500).json({ error: "Lưu quy tắc thất bại, thử lại sau." });
+  res.json(trainingRule);
+});
+
+app.patch("/api/training/rules/:id", async (req, res) => {
+  if (!(await assertResourceBotAccess(req, res, "bot_training_rules", req.params.id))) return;
+  const isActive = req.body?.isActive !== false;
+  const ok = await dbUpdateTrainingRule(req.params.id, isActive);
+  if (!ok) return res.status(500).json({ error: "Cập nhật quy tắc thất bại, thử lại sau." });
+  res.json({ success: true });
+});
+
+app.delete("/api/training/rules/:id", async (req, res) => {
+  if (!(await assertResourceBotAccess(req, res, "bot_training_rules", req.params.id))) return;
+  await dbDeleteTrainingRule(req.params.id);
+  res.json({ success: true });
+});
+
+app.get("/api/bots/:botId/training/usage", async (req, res) => {
+  const allBots = await dbGetBots(bots);
+  const bot = allBots.find(b => b.id === req.params.botId);
+  if (!bot) return res.status(404).json({ error: "Không tìm thấy bot." });
+  const [examplesGate, rulesGate] = await Promise.all([
+    checkTrainingLimit(bot, "examples", getTrustedEmail(req)),
+    checkTrainingLimit(bot, "rules", getTrustedEmail(req)),
+  ]);
+  res.json({
+    examples: { count: examplesGate.count, limit: examplesGate.limit, verdict: examplesGate.verdict },
+    rules: { count: rulesGate.count, limit: rulesGate.limit, verdict: rulesGate.verdict },
+  });
+});
+
 app.put("/api/content/:id", async (req, res) => {
   if (!(await assertResourceBotAccess(req, res, "content_posts", req.params.id))) return;
   const updates: any = {};
@@ -5173,6 +5272,25 @@ async function checkContentGate(bot: BotConfig, emailHint?: string): Promise<{ a
   if (tier === "none") return { allowed: false, verdict: "blocked", count: 0, limit: 0 };
   const limit = CONTENT_LIMITS[tier as keyof typeof CONTENT_LIMITS] ?? CONTENT_LIMITS.free;
   const count = await dbGetContentUsage(ownerKey, currentYearMonth());
+  const verdict = usageVerdict(count, limit);
+  return { allowed: verdict !== "blocked", verdict, count, limit };
+}
+
+// Kiểm tra hạn mức Huấn luyện phản hồi (ví dụ mẫu HOẶC quy tắc) TRƯỚC khi thêm mới.
+// Khác checkContentGate: không theo tháng — đây là tổng số đang lưu, không reset chu kỳ.
+async function checkTrainingLimit(
+  bot: BotConfig,
+  kind: "examples" | "rules",
+  emailHint?: string
+): Promise<{ allowed: boolean; verdict: "ok" | "warn" | "blocked"; count: number; limit: number }> {
+  const ownerKey = bot.userId || "";
+  if (!ownerKey) return { allowed: true, verdict: "ok", count: 0, limit: 0 };
+  const { tier } = await resolveOwnerPlan(ownerKey, emailHint);
+  if (tier === "none") return { allowed: false, verdict: "blocked", count: 0, limit: 0 };
+  const limit = TRAINING_LIMITS[tier as keyof typeof TRAINING_LIMITS]?.[kind] ?? TRAINING_LIMITS.free[kind];
+  const count = kind === "examples"
+    ? await dbCountTrainingExamples(bot.id)
+    : await dbCountTrainingRules(bot.id);
   const verdict = usageVerdict(count, limit);
   return { allowed: verdict !== "blocked", verdict, count, limit };
 }
