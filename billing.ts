@@ -16,6 +16,16 @@ export const CONTENT_LIMITS: Record<"free" | "starter" | "pro" | "business" | "e
   free: 5, starter: 30, pro: 150, business: 600, enterprise: 999999,
 };
 
+// Hạn mức Huấn luyện phản hồi (ví dụ mẫu Q&A + quy tắc chung) mỗi bot theo gói.
+// Đây là hạn mức TỔNG SỐ ĐANG LƯU (không phải theo tháng như CONTENT_LIMITS) — không reset chu kỳ.
+export const TRAINING_LIMITS: Record<"free" | "starter" | "pro" | "business" | "enterprise", { examples: number; rules: number }> = {
+  free:       { examples: 5,   rules: 5 },
+  starter:    { examples: 20,  rules: 15 },
+  pro:        { examples: 50,  rules: 30 },
+  business:   { examples: 150, rules: 50 },
+  enterprise: { examples: 999999, rules: 999999 },
+};
+
 // "YYYY-MM" theo giờ Việt Nam (UTC+7) để chu kỳ reset khớp tháng địa phương.
 export function currentYearMonth(d: Date = new Date()): string {
   const vn = new Date(d.getTime() + 7 * 3600 * 1000);
