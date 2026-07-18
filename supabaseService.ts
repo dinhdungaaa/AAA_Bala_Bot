@@ -1828,3 +1828,94 @@ export async function dbIncrementContentUsage(ownerKey: string, ym: string): Pro
     if (upsertError) console.warn("dbIncrementContentUsage fallback:", upsertError.message);
   }
 }
+
+// ===== Huấn luyện phản hồi bot: ví dụ mẫu Q&A (few-shot) + quy tắc chung =====
+export interface TrainingExample {
+  id: string;
+  botId: string;
+  question: string;
+  answer: string;
+  createdAt?: string;
+}
+
+export interface TrainingRule {
+  id: string;
+  botId: string;
+  rule: string;
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export async function dbListTrainingExamples(botId: string): Promise<TrainingExample[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+  const { data, error } = await client.from("bot_training_examples").select("*").eq("botId", botId).order("createdAt", { ascending: false });
+  if (error) { console.warn("dbListTrainingExamples:", error.message); return []; }
+  return (data as TrainingExample[]) || [];
+}
+
+export async function dbCountTrainingExamples(botId: string): Promise<number> {
+  const client = getSupabaseClient();
+  if (!client) return 0;
+  const { count, error } = await client.from("bot_training_examples").select("id", { count: "exact", head: true }).eq("botId", botId);
+  if (error) { console.warn("dbCountTrainingExamples:", error.message); return 0; }
+  return count || 0;
+}
+
+export async function dbSaveTrainingExample(example: TrainingExample): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("bot_training_examples").insert(example);
+  if (error) { console.warn("dbSaveTrainingExample:", error.message); return false; }
+  return true;
+}
+
+export async function dbDeleteTrainingExample(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("bot_training_examples").delete().eq("id", id);
+  if (error) { console.warn("dbDeleteTrainingExample:", error.message); return false; }
+  return true;
+}
+
+export async function dbListTrainingRules(botId: string, activeOnly = false): Promise<TrainingRule[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+  let query = client.from("bot_training_rules").select("*").eq("botId", botId);
+  if (activeOnly) query = query.eq("isActive", true);
+  const { data, error } = await query.order("createdAt", { ascending: false });
+  if (error) { console.warn("dbListTrainingRules:", error.message); return []; }
+  return (data as TrainingRule[]) || [];
+}
+
+export async function dbCountTrainingRules(botId: string): Promise<number> {
+  const client = getSupabaseClient();
+  if (!client) return 0;
+  const { count, error } = await client.from("bot_training_rules").select("id", { count: "exact", head: true }).eq("botId", botId);
+  if (error) { console.warn("dbCountTrainingRules:", error.message); return 0; }
+  return count || 0;
+}
+
+export async function dbSaveTrainingRule(rule: TrainingRule): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("bot_training_rules").insert(rule);
+  if (error) { console.warn("dbSaveTrainingRule:", error.message); return false; }
+  return true;
+}
+
+export async function dbUpdateTrainingRule(id: string, isActive: boolean): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("bot_training_rules").update({ isActive }).eq("id", id);
+  if (error) { console.warn("dbUpdateTrainingRule:", error.message); return false; }
+  return true;
+}
+
+export async function dbDeleteTrainingRule(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from("bot_training_rules").delete().eq("id", id);
+  if (error) { console.warn("dbDeleteTrainingRule:", error.message); return false; }
+  return true;
+}
