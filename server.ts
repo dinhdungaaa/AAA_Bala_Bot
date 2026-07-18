@@ -5416,6 +5416,12 @@ async function generateRAGAnswer(
   // 1. Get knowledge chunks for this bot
   const botChunks = await dbGetChunks(bot.id, knowledgeChunks.filter(c => c.botId === bot.id && c.isActive));
 
+  // Huấn luyện phản hồi: ví dụ mẫu Q&A + quy tắc chung (chỉ rule đang bật) do owner tự nạp cho bot này.
+  const [trainingExamples, trainingRules] = await Promise.all([
+    dbListTrainingExamples(bot.id),
+    dbListTrainingRules(bot.id, true),
+  ]);
+
   // 2. Semantic retrieval
   const ai = getAIClient();
   const answerStyle: "sales" | "reference" = bot.answerStyle === "reference" ? "reference" : "sales";
@@ -5452,6 +5458,8 @@ async function generateRAGAnswer(
   const synthCtx = {
     customer: customerCtx, history, allowProductIntro, expand, fast,
     intent: und.intent, buyingSignal: und.buyingSignal, goal, goalState,
+    trainingExamples: trainingExamples.map(e => ({ question: e.question, answer: e.answer })),
+    trainingRules: trainingRules.map(r => r.rule),
   };
 
   let topChunks: Array<{ chunk: KnowledgeChunk; score: number }> = [];
